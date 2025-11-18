@@ -1,8 +1,16 @@
 # 🔍 Teste de Diagnóstico - Sports Platform
 
-## Nova Versão com Logging Detalhado
+## ✅ CORREÇÃO APLICADA: Vendor Folder Missing
 
-Gerei uma nova versão do instalador com sistema de logging completo para diagnosticar o erro "Laravel exited with code 255".
+**Problema encontrado e corrigido:**
+A pasta `vendor/` (dependências do Laravel) não estava sendo incluída no instalador, causando o erro "vendor/autoload.php missing".
+
+**Solução aplicada:**
+- Desabilitado ASAR (compactação) para permitir incluir todos os arquivos do vendor/
+- Instalador agora inclui TODAS as dependências do Laravel
+- Sistema de logging detalhado para diagnóstico futuro
+
+## Nova Versão com Correção + Logging Detalhado
 
 ## 📦 Instalador
 
@@ -10,6 +18,8 @@ O novo instalador está em:
 ```
 C:\Users\arthu\sports-platform\electron-app\dist\Sports Platform Setup 1.0.0.exe
 ```
+
+**Tamanho:** 123 MB (inclui PHP, Laravel com vendor/, e frontend completo)
 
 ## 🧪 Como Testar
 
