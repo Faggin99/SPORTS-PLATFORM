@@ -21,12 +21,7 @@
     "directories": {
       "output": "dist"
     },
-    "asar": true,
-    "asarUnpack": [
-      "php-portable/**/*",
-      "backend/**/*",
-      "frontend/**/*"
-    ],
+    "asar": false,
     "files": [
       "main.js",
       "setup-php.js",
@@ -35,7 +30,6 @@
       "frontend/dist/**/*",
       "backend/**/*",
       "!backend/node_modules",
-      "!backend/vendor",
       "!backend/storage/logs",
       "!backend/storage/framework/sessions/*",
       "!backend/storage/framework/views/*",

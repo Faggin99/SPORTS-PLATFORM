@@ -10,7 +10,7 @@ let frontendProcess
 function initializeDatabase() {
   const dbPath = path.join(app.getPath('userData'), 'database.sqlite')
   const backendPath = app.isPackaged
-    ? path.join(process.resourcesPath, 'app.asar.unpacked', 'backend')
+    ? path.join(process.resourcesPath, 'app', 'backend')
     : path.join(__dirname, '..', 'backend')
 
   console.log('Database path:', dbPath)
@@ -39,7 +39,7 @@ function initializeDatabase() {
 function getPHPPath() {
   if (app.isPackaged) {
     // Production: use bundled PHP
-    return path.join(process.resourcesPath, 'app.asar.unpacked', 'php-portable', 'php.exe')
+    return path.join(process.resourcesPath, 'app', 'php-portable', 'php.exe')
   } else {
     // Development: use system PHP
     return 'php'
@@ -49,7 +49,7 @@ function getPHPPath() {
 function startBackend() {
   return new Promise((resolve, reject) => {
     const sourceBackendPath = app.isPackaged
-      ? path.join(process.resourcesPath, 'app.asar.unpacked', 'backend')
+      ? path.join(process.resourcesPath, 'app', 'backend')
       : path.join(__dirname, '..', 'backend')
 
     const userDataPath = app.getPath('userData')
@@ -330,7 +330,7 @@ function createWindow() {
   } else {
     // Production mode: wait for backend to be ready, then load frontend
     const frontendPath = app.isPackaged
-      ? path.join(process.resourcesPath, 'app.asar.unpacked', 'frontend', 'dist', 'index.html')
+      ? path.join(process.resourcesPath, 'app', 'frontend', 'dist', 'index.html')
       : path.join(__dirname, '..', 'frontend', 'dist', 'index.html')
 
     console.log('Loading frontend from:', frontendPath)
