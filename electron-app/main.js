@@ -58,8 +58,46 @@ function startBackend() {
     // Copy backend to writable location on first run
     if (!fs.existsSync(backendPath)) {
       console.log('First run: copying backend to user data folder...')
-      fs.cpSync(sourceBackendPath, backendPath, { recursive: true })
-      console.log('Backend copied successfully')
+      console.log('Source:', sourceBackendPath)
+      console.log('Destination:', backendPath)
+
+      // Copy backend excluding vendor first (faster)
+      fs.cpSync(sourceBackendPath, backendPath, {
+        recursive: true,
+        filter: (src) => !src.includes('vendor')
+      })
+      console.log('Backend copied (without vendor)')
+
+      // Copy vendor separately with progress
+      const sourceVendor = path.join(sourceBackendPath, 'vendor')
+      const destVendor = path.join(backendPath, 'vendor')
+
+      if (fs.existsSync(sourceVendor)) {
+        console.log('Copying vendor folder...')
+        console.log('From:', sourceVendor)
+        console.log('To:', destVendor)
+        fs.cpSync(sourceVendor, destVendor, { recursive: true })
+        console.log('Vendor copied successfully')
+      } else {
+        console.error('WARNING: Source vendor folder not found at:', sourceVendor)
+      }
+
+      console.log('Backend setup complete')
+    } else {
+      console.log('Backend already exists at:', backendPath)
+
+      // Verify vendor exists, if not, copy it
+      const destVendor = path.join(backendPath, 'vendor')
+      if (!fs.existsSync(destVendor)) {
+        console.log('Vendor missing, copying now...')
+        const sourceVendor = path.join(sourceBackendPath, 'vendor')
+        if (fs.existsSync(sourceVendor)) {
+          fs.cpSync(sourceVendor, destVendor, { recursive: true })
+          console.log('Vendor copied successfully')
+        } else {
+          console.error('ERROR: Source vendor not found at:', sourceVendor)
+        }
+      }
     }
 
     const dbPath = initializeDatabase()
