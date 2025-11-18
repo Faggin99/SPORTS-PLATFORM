@@ -35,7 +35,14 @@
       "Bash(git remote set-url:*)",
       "Bash(git tag:*)",
       "Bash(npm init:*)",
-      "Bash(timeout 10 bash:*)"
+      "Bash(timeout 10 bash:*)",
+      "Bash(composer install:*)",
+      "Bash(npm run setup-php:*)",
+      "Bash(cat:*)",
+      "Bash(npm run build:win:*)",
+      "Bash(if [ -d \"backend/vendor\" ])",
+      "Bash(then echo \"Vendor exists\")",
+      "Bash(else echo \"Vendor NOT found - need to install\")"
     ],
     "deny": [],
     "ask": []

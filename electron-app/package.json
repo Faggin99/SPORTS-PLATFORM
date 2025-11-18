@@ -21,25 +21,32 @@
     "directories": {
       "output": "dist"
     },
+    "asar": true,
+    "asarUnpack": [
+      "php-portable/**/*",
+      "backend/**/*",
+      "frontend/**/*"
+    ],
     "files": [
       "main.js",
       "setup-php.js",
       "assets/**/*",
       "php-portable/**/*",
-      "../frontend/dist/**/*",
-      "../backend/**/*",
-      "!../backend/node_modules",
-      "!../backend/vendor",
-      "!../backend/storage/logs",
-      "!../backend/storage/framework/sessions/*",
-      "!../backend/storage/framework/views/*",
-      "!../backend/tests",
-      "!../backend/.env",
-      "../backend/.env.electron"
+      "frontend/dist/**/*",
+      "backend/**/*",
+      "!backend/node_modules",
+      "!backend/vendor",
+      "!backend/storage/logs",
+      "!backend/storage/framework/sessions/*",
+      "!backend/storage/framework/views/*",
+      "!backend/tests",
+      "!backend/.env",
+      "backend/.env.electron"
     ],
     "win": {
       "target": ["nsis"],
-      "icon": "assets/icon.ico"
+      "icon": "assets/icon.ico",
+      "signAndEditExecutable": false
     },
     "mac": {
       "target": ["dmg"],
@@ -61,8 +68,10 @@
   "dependencies": {
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
-    "electron": "^39.2.1",
-    "electron-builder": "^26.0.12",
     "wait-on": "^9.0.3"
+  },
+  "devDependencies": {
+    "electron": "^39.2.1",
+    "electron-builder": "^26.0.12"
   }
 }

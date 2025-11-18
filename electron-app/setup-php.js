@@ -1,4 +1,5 @@
 const https = require('https');
+const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
@@ -6,26 +7,72 @@ const { promisify } = require('util');
 
 const execAsync = promisify(exec);
 
-const PHP_VERSION = '8.2';
-const PHP_URL = `https://windows.php.net/downloads/releases/php-${PHP_VERSION}-nts-Win32-vs16-x64.zip`;
+const PHP_VERSION = '8.2.13';
+const PHP_URL = `https://windows.php.net/downloads/releases/archives/php-${PHP_VERSION}-nts-Win32-vs16-x64.zip`;
 const PHP_DIR = path.join(__dirname, 'php-portable');
 
 async function downloadFile(url, dest) {
   return new Promise((resolve, reject) => {
+    console.log('Downloading from:', url);
+
+    const protocol = url.startsWith('https') ? https : http;
     const file = fs.createWriteStream(dest);
-    https.get(url, (response) => {
+
+    const options = {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sports-Platform-Setup/1.0'
+      }
+    };
+
+    const request = protocol.get(url, options, (response) => {
+      // Handle redirects
       if (response.statusCode === 302 || response.statusCode === 301) {
-        // Follow redirect
+        file.close();
+        fs.unlinkSync(dest);
+        console.log('Following redirect to:', response.headers.location);
         return downloadFile(response.headers.location, dest).then(resolve).catch(reject);
       }
+
+      if (response.statusCode !== 200) {
+        file.close();
+        fs.unlinkSync(dest);
+        return reject(new Error(`Failed to download: HTTP ${response.statusCode}`));
+      }
+
+      const totalSize = parseInt(response.headers['content-length'], 10);
+      let downloaded = 0;
+
+      response.on('data', (chunk) => {
+        downloaded += chunk.length;
+        const percent = ((downloaded / totalSize) * 100).toFixed(1);
+        process.stdout.write(`\rDownloading... ${percent}%`);
+      });
+
       response.pipe(file);
+
       file.on('finish', () => {
         file.close();
+        console.log('\nDownload complete!');
         resolve();
       });
-    }).on('error', (err) => {
+
+      file.on('error', (err) => {
+        fs.unlink(dest, () => {});
+        reject(err);
+      });
+    });
+
+    request.on('error', (err) => {
+      file.close();
       fs.unlink(dest, () => {});
       reject(err);
+    });
+
+    request.setTimeout(30000, () => {
+      request.abort();
+      file.close();
+      fs.unlink(dest, () => {});
+      reject(new Error('Download timeout'));
     });
   });
 }

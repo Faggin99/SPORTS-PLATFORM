@@ -1,4 +1,6 @@
-"node_modules/" 
-"vendor/" 
-".env" 
-".DS_Store" 
+node_modules/
+vendor/
+.env
+.DS_Store
+electron-app/dist/
+electron-app/php-portable/ 

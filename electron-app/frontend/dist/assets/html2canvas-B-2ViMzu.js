@@ -1,0 +1,1 @@
+import{t as e}from"./index-BVLB7ofa.js";export default e();
