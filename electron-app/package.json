@@ -29,6 +29,7 @@
       "php-portable/**/*",
       "frontend/dist/**/*",
       "backend/**/*",
+      "backend/vendor/**/*",
       "!backend/node_modules",
       "!backend/storage/logs",
       "!backend/storage/framework/sessions/*",
@@ -36,6 +37,13 @@
       "!backend/tests",
       "!backend/.env",
       "backend/.env.electron"
+    ],
+    "extraFiles": [
+      {
+        "from": "backend/vendor",
+        "to": "resources/app/backend/vendor",
+        "filter": ["**/*"]
+      }
     ],
     "win": {
       "target": ["nsis"],
