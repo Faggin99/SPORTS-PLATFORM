@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "Bash(php artisan:*)",
+      "Bash(timeout 30 php artisan:*)",
+      "Bash(docker-compose up:*)",
+      "Bash(dir:*)",
+      "Bash(tree:*)",
+      "Bash(php -v:*)",
+      "Bash(composer --version:*)",
+      "Bash(curl:*)",
+      "Bash(php:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(npm install:*)",
+      "Bash(npm run dev:*)",
+      "Bash(timeout 5 bash -c 'while true; do curl -s http://localhost:5173 > /dev/null && echo \"\"Frontend is running!\"\" && break; sleep 1; done')",
+      "Bash(del:*)",
+      "Bash(node:*)",
+      "Bash(python -m json.tool:*)",
+      "Bash(ls -la \"c:\\Users\\arthu\\sports-platform\\frontend\\src\\pages\"\" && ls -la \"c:Usersarthusports-platformfrontendsrccomponentstraining\"\")",
+      "Bash(if [ -d \"training-files\" ])",
+      "Bash(then rm -rf training-files)",
+      "Bash(else echo \"Folder does not exist\")",
+      "Bash(fi)",
+      "Bash(npm run build:*)",
+      "Bash(git init:*)",
+      "Bash(git add:*)",
+      "Bash(rm:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

@@ -1,0 +1,85 @@
+/**
+ * Lucide Icons Fix
+ *
+ * Fixes for Lucide React icons disappearing or not rendering properly
+ * Especially when switching between light/dark themes
+ */
+
+/* Ensure all lucide icons have proper dimensions and visibility */
+svg[class*='lucide'],
+svg.lucide {
+  min-width: 1em;
+  min-height: 1em;
+  width: 1em;
+  height: 1em;
+  flex-shrink: 0;
+  display: inline-block;
+  vertical-align: middle;
+  overflow: visible;
+  transition: none !important; /* Prevent transition issues on theme change */
+}
+
+/* Fix for icons in buttons */
+button svg[class*='lucide'],
+button svg.lucide {
+  display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+/* Fix for icons in flex containers */
+.flex svg[class*='lucide'],
+.flex svg.lucide,
+[style*='display: flex'] svg[class*='lucide'],
+[style*='display: flex'] svg.lucide,
+[style*='display:flex'] svg[class*='lucide'],
+[style*='display:flex'] svg.lucide {
+  flex-shrink: 0;
+}
+
+/* Ensure stroke is visible in both themes */
+svg[class*='lucide'] path,
+svg[class*='lucide'] circle,
+svg[class*='lucide'] line,
+svg[class*='lucide'] polyline,
+svg[class*='lucide'] polygon,
+svg[class*='lucide'] rect,
+svg.lucide path,
+svg.lucide circle,
+svg.lucide line,
+svg.lucide polyline,
+svg.lucide polygon,
+svg.lucide rect {
+  stroke: currentColor !important;
+  fill: none;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Icons that need fill instead of stroke */
+svg[class*='lucide'] path[fill],
+svg.lucide path[fill] {
+  fill: currentColor !important;
+  stroke: none;
+}
+
+/* Theme-specific fixes */
+[data-theme='light'] svg[class*='lucide'],
+[data-theme='light'] svg.lucide {
+  color: inherit;
+  opacity: 1;
+}
+
+[data-theme='dark'] svg[class*='lucide'],
+[data-theme='dark'] svg.lucide {
+  color: inherit;
+  opacity: 1;
+}
+
+/* Force re-render on theme change */
+[data-theme] svg[class*='lucide'] *,
+[data-theme] svg.lucide * {
+  transition: none !important;
+}

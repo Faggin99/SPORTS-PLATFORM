@@ -1,0 +1,142 @@
+/* Responsive Styles for All Pages */
+
+/* Base styles */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+}
+
+/* Container max-width */
+.container {
+  max-width: 100%;
+  padding: 0 1rem;
+}
+
+/* Mobile First - Base styles (320px+) */
+@media (max-width: 640px) {
+  /* Training Page Grid */
+  .training-calendar {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 0.5rem !important;
+  }
+
+  .day-column {
+    gap: 0.3rem !important;
+  }
+
+  .day-header {
+    padding: 0.4rem !important;
+    font-size: 0.7rem !important;
+  }
+
+  .training-block {
+    padding: 0.4rem !important;
+    min-height: 50px !important;
+    font-size: 0.65rem !important;
+  }
+
+  .week-title {
+    font-size: 1rem !important;
+  }
+
+  /* Modal adjustments */
+  .modal-content {
+    padding: 0.75rem !important;
+  }
+
+  .modal-tabs {
+    font-size: 0.75rem !important;
+    padding: 0.4rem 0.6rem !important;
+  }
+
+  /* Hide certain elements on mobile */
+  .hide-mobile {
+    display: none !important;
+  }
+}
+
+/* Tablet (641px - 1024px) */
+@media (min-width: 641px) and (max-width: 1024px) {
+  .training-calendar {
+    grid-template-columns: repeat(4, 1fr) !important;
+    gap: 0.6rem !important;
+  }
+
+  .day-header {
+    font-size: 0.75rem !important;
+  }
+
+  .training-block {
+    min-height: 55px !important;
+  }
+}
+
+/* Desktop (1025px - 1440px) */
+@media (min-width: 1025px) and (max-width: 1440px) {
+  .training-calendar {
+    grid-template-columns: repeat(7, 1fr) !important;
+    gap: 0.75rem !important;
+  }
+}
+
+/* Large Desktop / TV (1441px+) */
+@media (min-width: 1441px) {
+  .container {
+    max-width: 1920px;
+    margin: 0 auto;
+  }
+
+  .training-calendar {
+    grid-template-columns: repeat(7, 1fr) !important;
+    gap: 1rem !important;
+  }
+
+  .day-header {
+    font-size: 1rem !important;
+    padding: 0.75rem !important;
+  }
+
+  .training-block {
+    padding: 0.75rem !important;
+    min-height: 80px !important;
+    font-size: 0.875rem !important;
+  }
+
+  .week-title {
+    font-size: 1.5rem !important;
+  }
+}
+
+/* Landscape orientation adjustments */
+@media (max-height: 600px) and (orientation: landscape) {
+  .training-calendar {
+    grid-template-columns: repeat(7, 1fr) !important;
+    gap: 0.5rem !important;
+  }
+
+  .training-block {
+    min-height: 40px !important;
+    padding: 0.3rem !important;
+  }
+
+  .day-header {
+    padding: 0.3rem !important;
+  }
+}
+
+/* Print styles */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  body {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+}
