@@ -5,6 +5,8 @@
   "main": "main.js",
   "scripts": {
     "start": "cross-env NODE_ENV=development electron .",
+    "setup-php": "node setup-php.js",
+    "prebuild": "node setup-php.js",
     "build": "electron-builder",
     "build:win": "electron-builder --win",
     "build:mac": "electron-builder --mac",
@@ -21,13 +23,19 @@
     },
     "files": [
       "main.js",
+      "setup-php.js",
       "assets/**/*",
+      "php-portable/**/*",
       "../frontend/dist/**/*",
       "../backend/**/*",
       "!../backend/node_modules",
       "!../backend/vendor",
       "!../backend/storage/logs",
-      "!../backend/tests"
+      "!../backend/storage/framework/sessions/*",
+      "!../backend/storage/framework/views/*",
+      "!../backend/tests",
+      "!../backend/.env",
+      "../backend/.env.electron"
     ],
     "win": {
       "target": ["nsis"],
