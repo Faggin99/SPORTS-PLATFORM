@@ -1,0 +1,60 @@
+{
+  "name": "sports-platform-desktop",
+  "version": "1.0.0",
+  "description": "Sports Platform - Training Management Desktop App",
+  "main": "main.js",
+  "scripts": {
+    "start": "cross-env NODE_ENV=development electron .",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac",
+    "build:linux": "electron-builder --linux"
+  },
+  "keywords": ["sports", "training", "management", "desktop"],
+  "author": "Sports Platform Team",
+  "license": "MIT",
+  "build": {
+    "appId": "com.sportsplatform.training",
+    "productName": "Sports Platform",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "assets/**/*",
+      "../frontend/dist/**/*",
+      "../backend/**/*",
+      "!../backend/node_modules",
+      "!../backend/vendor",
+      "!../backend/storage/logs",
+      "!../backend/tests"
+    ],
+    "win": {
+      "target": ["nsis"],
+      "icon": "assets/icon.ico"
+    },
+    "mac": {
+      "target": ["dmg"],
+      "icon": "assets/icon.icns",
+      "category": "public.app-category.productivity"
+    },
+    "linux": {
+      "target": ["AppImage"],
+      "icon": "assets/icon.png",
+      "category": "Office"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  },
+  "dependencies": {
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^39.2.1",
+    "electron-builder": "^26.0.12",
+    "wait-on": "^9.0.3"
+  }
+}
