@@ -174,7 +174,8 @@ LOG_LEVEL=debug
     console.log('Created .env file at:', backendEnvPath)
 
     // Configure PHP extension directory with error logging
-    const phpIniPath = path.join(userDataPath, 'php.ini')
+    const phpDir = path.dirname(phpPath)
+    const phpIniPath = path.join(phpDir, 'php.ini')
     const phpErrorLogPath = path.join(userDataPath, 'logs', 'php-error.log')
 
     // Ensure logs directory exists
@@ -183,7 +184,7 @@ LOG_LEVEL=debug
       fs.mkdirSync(logsDir, { recursive: true })
     }
 
-    const phpDir = path.dirname(phpPath)
+    // Create php.ini in PHP directory (not AppData) so it's auto-loaded
     const phpIniContent = `extension_dir="${path.join(phpDir, 'ext')}"
 extension=fileinfo
 extension=mbstring
@@ -249,7 +250,7 @@ Checking prerequisites...
 
     laravelLogStream.write('\nStarting Laravel server...\n\n')
 
-    laravelProcess = spawn(phpPath, ['-c', phpIniPath, 'artisan', 'serve', '--port=8000', '--host=127.0.0.1'], {
+    laravelProcess = spawn(phpPath, ['artisan', 'serve', '--port=8000', '--host=127.0.0.1'], {
       cwd: backendPath,
       shell: false,
       env: {
