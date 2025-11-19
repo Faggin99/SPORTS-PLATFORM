@@ -7,8 +7,8 @@ const { promisify } = require('util');
 
 const execAsync = promisify(exec);
 
-const PHP_VERSION = '8.2.13';
-const PHP_URL = `https://windows.php.net/downloads/releases/archives/php-${PHP_VERSION}-nts-Win32-vs16-x64.zip`;
+const PHP_VERSION = '8.3.27';
+const PHP_URL = `https://windows.php.net/downloads/releases/php-${PHP_VERSION}-nts-Win32-vs16-x64.zip`;
 const PHP_DIR = path.join(__dirname, 'php-portable');
 
 async function downloadFile(url, dest) {

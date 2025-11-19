@@ -42,7 +42,8 @@
       "Bash(npm run build:win:*)",
       "Bash(if [ -d \"backend/vendor\" ])",
       "Bash(then echo \"Vendor exists\")",
-      "Bash(else echo \"Vendor NOT found - need to install\")"
+      "Bash(else echo \"Vendor NOT found - need to install\")",
+      "Bash(= 8.3.0\".  \nYou are running 8.2.13.\n\nSOLUÇÃO:\n- Atualizado PHP de 8.2.13 para 8.3.27 (última versão estável)\n- Laravel 11 requer PHP >= 8.3.0\n- Download URL: php-8.3.27-nts-Win32-vs16-x64.zip\n\nAGORA O VENDOR VAI FUNCIONAR!\n\nO erro \"vendor/autoload.php missing\" era na verdade PHP \nrejeitando o autoload por incompatibilidade de versão.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")"
     ],
     "deny": [],
     "ask": []
