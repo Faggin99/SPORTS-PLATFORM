@@ -23,11 +23,13 @@ function initializeDatabase() {
     // Run migrations
     const phpPath = getPHPPath()
     const artisanPath = path.join(backendPath, 'artisan')
+    const userDataPath = app.getPath('userData')
 
     spawn(phpPath, [artisanPath, 'migrate', '--force', '--seed'], {
       cwd: backendPath,
       env: {
         ...process.env,
+        PHPRC: userDataPath,
         DB_DATABASE: dbPath
       }
     })
@@ -175,7 +177,7 @@ LOG_LEVEL=debug
 
     // Configure PHP extension directory with error logging
     const phpDir = path.dirname(phpPath)
-    const phpIniPath = path.join(phpDir, 'php.ini')
+    const phpIniPath = path.join(userDataPath, 'php.ini')
     const phpErrorLogPath = path.join(userDataPath, 'logs', 'php-error.log')
 
     // Ensure logs directory exists
@@ -184,7 +186,8 @@ LOG_LEVEL=debug
       fs.mkdirSync(logsDir, { recursive: true })
     }
 
-    // Create php.ini in PHP directory (not AppData) so it's auto-loaded
+    // Create php.ini in AppData (writable location)
+    // Use PHPRC environment variable to tell PHP where to find it
     const phpIniContent = `extension_dir="${path.join(phpDir, 'ext')}"
 extension=fileinfo
 extension=mbstring
@@ -255,6 +258,8 @@ Checking prerequisites...
       shell: false,
       env: {
         ...process.env,
+        // Tell PHP where to find php.ini
+        PHPRC: userDataPath,
         // Laravel will read .env from backend folder automatically
         APP_ENV: 'production',
         DB_CONNECTION: 'sqlite',
