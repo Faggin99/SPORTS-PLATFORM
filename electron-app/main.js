@@ -25,11 +25,12 @@ function initializeDatabase() {
     const artisanPath = path.join(backendPath, 'artisan')
     const userDataPath = app.getPath('userData')
 
-    spawn(phpPath, [artisanPath, 'migrate', '--force', '--seed'], {
+    const phpIniPath = path.join(userDataPath, 'php.ini')
+
+    spawn(phpPath, ['-c', phpIniPath, artisanPath, 'migrate', '--force', '--seed'], {
       cwd: backendPath,
       env: {
         ...process.env,
-        PHPRC: userDataPath,
         DB_DATABASE: dbPath
       }
     })
@@ -253,13 +254,11 @@ Checking prerequisites...
 
     laravelLogStream.write('\nStarting Laravel server...\n\n')
 
-    laravelProcess = spawn(phpPath, ['artisan', 'serve', '--port=8000', '--host=127.0.0.1'], {
+    laravelProcess = spawn(phpPath, ['-c', phpIniPath, 'artisan', 'serve', '--port=8000', '--host=127.0.0.1'], {
       cwd: backendPath,
       shell: false,
       env: {
         ...process.env,
-        // Tell PHP where to find php.ini
-        PHPRC: userDataPath,
         // Laravel will read .env from backend folder automatically
         APP_ENV: 'production',
         DB_CONNECTION: 'sqlite',
