@@ -1,0 +1,196 @@
+import { useState } from 'react';
+import { Building2, ArrowRight } from 'lucide-react';
+import { useTheme } from '../../contexts/ThemeContext';
+
+export function ClubOnboardingModal({ onCreateClub }) {
+  const { colors } = useTheme();
+  const [clubName, setClubName] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+
+    if (!clubName.trim()) {
+      setError('Por favor, insira o nome do clube');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+
+    try {
+      await onCreateClub({ name: clubName.trim() });
+    } catch (err) {
+      setError(err.message || 'Erro ao criar clube');
+      setLoading(false);
+    }
+  }
+
+  const overlayStyle = {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 9999,
+    padding: '1rem',
+  };
+
+  const modalStyle = {
+    backgroundColor: colors.background,
+    borderRadius: '0.75rem',
+    width: '100%',
+    maxWidth: '500px',
+    padding: '2rem',
+    boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
+  };
+
+  const headerStyle = {
+    textAlign: 'center',
+    marginBottom: '2rem',
+  };
+
+  const iconContainerStyle = {
+    width: '80px',
+    height: '80px',
+    borderRadius: '50%',
+    backgroundColor: colors.primary + '20',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    margin: '0 auto 1.5rem',
+  };
+
+  const titleStyle = {
+    fontSize: '1.75rem',
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: '0.5rem',
+  };
+
+  const subtitleStyle = {
+    fontSize: '0.95rem',
+    color: colors.textSecondary,
+    lineHeight: '1.5',
+  };
+
+  const formStyle = {
+    marginTop: '1.5rem',
+  };
+
+  const labelStyle = {
+    display: 'block',
+    fontSize: '0.875rem',
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: '0.5rem',
+  };
+
+  const inputStyle = {
+    width: '100%',
+    padding: '0.875rem',
+    backgroundColor: colors.surface,
+    border: `2px solid ${error ? colors.danger : colors.border}`,
+    borderRadius: '0.5rem',
+    color: colors.text,
+    fontSize: '1rem',
+    transition: 'border-color 0.2s',
+  };
+
+  const errorStyle = {
+    color: colors.danger,
+    fontSize: '0.875rem',
+    marginTop: '0.5rem',
+  };
+
+  const buttonStyle = {
+    width: '100%',
+    padding: '0.875rem',
+    backgroundColor: colors.primary,
+    color: '#fff',
+    border: 'none',
+    borderRadius: '0.5rem',
+    fontSize: '1rem',
+    fontWeight: '600',
+    cursor: loading ? 'not-allowed' : 'pointer',
+    marginTop: '1.5rem',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '0.5rem',
+    transition: 'opacity 0.2s',
+    opacity: loading ? 0.6 : 1,
+  };
+
+  const infoBoxStyle = {
+    backgroundColor: colors.primary + '10',
+    border: `1px solid ${colors.primary}30`,
+    borderRadius: '0.5rem',
+    padding: '1rem',
+    marginTop: '1.5rem',
+  };
+
+  const infoTextStyle = {
+    fontSize: '0.875rem',
+    color: colors.text,
+    lineHeight: '1.5',
+  };
+
+  return (
+    <div style={overlayStyle}>
+      <div style={modalStyle}>
+        <div style={headerStyle}>
+          <div style={iconContainerStyle}>
+            <Building2 size={40} color={colors.primary} />
+          </div>
+          <h2 style={titleStyle}>Bem-vindo!</h2>
+          <p style={subtitleStyle}>
+            Para começar, vamos criar seu primeiro clube. Todos os seus treinos e atletas serão organizados por clube.
+          </p>
+        </div>
+
+        <form onSubmit={handleSubmit} style={formStyle}>
+          <div>
+            <label style={labelStyle}>Nome do Clube *</label>
+            <input
+              type="text"
+              value={clubName}
+              onChange={(e) => {
+                setClubName(e.target.value);
+                setError('');
+              }}
+              placeholder="Ex: Clube de Futebol ABC"
+              style={inputStyle}
+              autoFocus
+              disabled={loading}
+              required
+            />
+            {error && <div style={errorStyle}>{error}</div>}
+          </div>
+
+          <button
+            type="submit"
+            style={buttonStyle}
+            disabled={loading}
+            onMouseEnter={(e) => !loading && (e.currentTarget.style.opacity = '0.9')}
+            onMouseLeave={(e) => !loading && (e.currentTarget.style.opacity = '1')}
+          >
+            {loading ? 'Criando...' : 'Criar Clube e Começar'}
+            {!loading && <ArrowRight size={20} />}
+          </button>
+        </form>
+
+        <div style={infoBoxStyle}>
+          <p style={infoTextStyle}>
+            💡 <strong>Dica:</strong> Você pode adicionar mais clubes depois nas configurações. Cada clube terá seus próprios treinos e atletas.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}

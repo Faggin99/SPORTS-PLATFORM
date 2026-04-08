@@ -24,8 +24,8 @@ export function CreateTitleModal({ isOpen, onClose, onSave }) {
 
   async function loadContents() {
     try {
-      const data = await trainingService.getContents();
-      setContents(data || []);
+      const response = await trainingService.getContents();
+      setContents(response?.data || []);
     } catch (error) {
       console.error('Error loading contents:', error);
     }

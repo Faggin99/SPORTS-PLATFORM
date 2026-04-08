@@ -42,9 +42,9 @@ export function SessionModal({ isOpen, onClose, session, onSave }) {
         trainingService.getTitles(),
       ]);
 
-      const loadedContents = contentsData || [];
-      const loadedStages = stagesData || [];
-      const loadedTitles = Array.isArray(titlesData) ? titlesData : titlesData?.data || [];
+      const loadedContents = contentsData?.data || [];
+      const loadedStages = stagesData?.data || [];
+      const loadedTitles = titlesData?.data || [];
 
       setContents(loadedContents);
       setStages(loadedStages);

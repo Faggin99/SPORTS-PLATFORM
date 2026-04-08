@@ -1,11 +1,13 @@
 import { useState } from 'react';
-import { NavLink } from 'react-router-dom';
-import { Calendar, Users, BarChart3, Settings } from 'lucide-react';
+import { NavLink, useLocation } from 'react-router-dom';
+import { Calendar, Users, BarChart3, Settings, ChevronDown, User, Building2, Target, Waypoints } from 'lucide-react';
 import { useTheme } from '../../contexts/ThemeContext';
 
 export function Sidebar() {
   const { colors } = useTheme();
   const [hoveredLink, setHoveredLink] = useState(null);
+  const [settingsExpanded, setSettingsExpanded] = useState(false);
+  const location = useLocation();
 
   const sidebarStyle = {
     width: '5.5rem',
@@ -69,11 +71,81 @@ export function Sidebar() {
       label: 'Plantel de Atletas',
     },
     {
-      to: '/settings',
-      icon: Settings,
-      label: 'Configurações',
+      to: '/tactical-board',
+      icon: Waypoints,
+      label: 'Quadro Tático',
     },
   ];
+
+  const settingsSubLinks = [
+    {
+      to: '/settings',
+      icon: User,
+      label: 'Usuário',
+    },
+    {
+      to: '/settings/clubs',
+      icon: Building2,
+      label: 'Clubes',
+    },
+    {
+      to: '/settings/activities',
+      icon: Target,
+      label: 'Atividades',
+    },
+  ];
+
+  const isSettingsActive = location.pathname.startsWith('/settings');
+
+  const settingsButtonStyle = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '0.75rem',
+    color: isSettingsActive ? colors.primary : colors.text,
+    textDecoration: 'none',
+    fontSize: '0.875rem',
+    fontWeight: '500',
+    backgroundColor: isSettingsActive ? `${colors.primary}10` : 'transparent',
+    borderLeft: `3px solid ${isSettingsActive ? colors.primary : 'transparent'}`,
+    transition: 'background-color 0.2s, border-color 0.2s',
+    position: 'relative',
+    width: '100%',
+    boxSizing: 'border-box',
+    cursor: 'pointer',
+    border: 'none',
+  };
+
+  const submenuStyle = {
+    position: 'absolute',
+    left: 'calc(100% - 0.5rem)',
+    top: 0,
+    zIndex: 1000,
+    minWidth: '200px',
+    paddingLeft: '0.5rem',
+  };
+
+  const submenuContainerStyle = {
+    backgroundColor: colors.background,
+    border: `1px solid ${colors.border}`,
+    borderRadius: '0.375rem',
+    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+    overflow: 'hidden',
+  };
+
+  const submenuItemStyle = (isActive) => ({
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.75rem',
+    padding: '0.75rem 1rem',
+    color: isActive ? colors.primary : colors.text,
+    textDecoration: 'none',
+    fontSize: '0.875rem',
+    fontWeight: '500',
+    backgroundColor: isActive ? `${colors.primary}10` : 'transparent',
+    borderLeft: `3px solid ${isActive ? colors.primary : 'transparent'}`,
+    transition: 'background-color 0.2s',
+  });
 
   return (
     <aside style={sidebarStyle}>
@@ -103,6 +175,64 @@ export function Sidebar() {
             )}
           </NavLink>
         ))}
+
+        {/* Settings with submenu */}
+        <div style={{ position: 'relative' }}>
+          <button
+            style={settingsButtonStyle}
+            onMouseEnter={() => {
+              setHoveredLink('settings');
+              setSettingsExpanded(true);
+            }}
+            onMouseLeave={() => {
+              setHoveredLink(null);
+              setSettingsExpanded(false);
+            }}
+          >
+            <span style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '48px',
+              height: '48px',
+              flexShrink: 0
+            }}>
+              <Settings size={48} strokeWidth={1.5} />
+            </span>
+
+            {(hoveredLink === 'settings' || settingsExpanded) && (
+              <div
+                style={submenuStyle}
+                onMouseEnter={() => setSettingsExpanded(true)}
+                onMouseLeave={() => setSettingsExpanded(false)}
+              >
+                <div style={submenuContainerStyle}>
+                  {settingsSubLinks.map((subLink) => (
+                    <NavLink
+                      key={subLink.to}
+                      to={subLink.to}
+                      end={subLink.to === '/settings'}
+                      style={({ isActive }) => submenuItemStyle(isActive)}
+                      onMouseEnter={(e) => {
+                        if (!location.pathname.startsWith(subLink.to)) {
+                          e.currentTarget.style.backgroundColor = colors.surfaceHover;
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!location.pathname.startsWith(subLink.to)) {
+                          e.currentTarget.style.backgroundColor = 'transparent';
+                        }
+                      }}
+                    >
+                      <subLink.icon size={18} />
+                      {subLink.label}
+                    </NavLink>
+                  ))}
+                </div>
+              </div>
+            )}
+          </button>
+        </div>
       </nav>
     </aside>
   );

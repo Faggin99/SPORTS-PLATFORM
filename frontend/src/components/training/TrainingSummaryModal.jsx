@@ -286,12 +286,7 @@ export function TrainingSummaryModal({ isOpen, onClose, session }) {
             <div style={pageStyle}>
               <h1 style={titleStyle}>Treino - {session.day_name}</h1>
               <p style={subtitleStyle}>
-                {new Date(session.date).toLocaleDateString('pt-BR', {
-                  weekday: 'long',
-                  day: '2-digit',
-                  month: 'long',
-                  year: 'numeric'
-                })}
+                {(() => { const [y,m,d] = (session.date||'').split('-'); return d ? new Date(+y, +m-1, +d).toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' }) : ''; })()}
               </p>
 
               {/* Blocks */}

@@ -1,11 +1,127 @@
 const { app, BrowserWindow } = require('electron')
 const path = require('path')
-const { spawn } = require('child_process')
+const { spawn, spawnSync } = require('child_process')
 const fs = require('fs')
 
 let mainWindow
 let laravelProcess
 let frontendProcess
+
+// Versão atual do app (deve corresponder ao package.json)
+const APP_VERSION = '1.2.0'
+
+/**
+ * Verifica se precisa atualizar os arquivos do backend
+ * Isso permite que atualizações do instalador sejam propagadas
+ * sem precisar desinstalar/reinstalar
+ */
+function checkAndUpdateBackend() {
+  const userDataPath = app.getPath('userData')
+  const versionFile = path.join(userDataPath, '.app-version')
+  const backendPath = path.join(userDataPath, 'backend')
+
+  console.log('=== Verificando atualização ===')
+  console.log('User data path:', userDataPath)
+  console.log('Version file:', versionFile)
+  console.log('Backend path:', backendPath)
+
+  let installedVersion = '0.0.0'
+
+  // Ler versão instalada
+  if (fs.existsSync(versionFile)) {
+    try {
+      installedVersion = fs.readFileSync(versionFile, 'utf8').trim()
+    } catch (e) {
+      console.log('Erro ao ler versão:', e.message)
+    }
+  }
+
+  console.log(`Versão instalada: ${installedVersion}`)
+  console.log(`Versão atual: ${APP_VERSION}`)
+
+  const sourceBackendPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'app', 'backend')
+    : path.join(__dirname, '..', 'backend')
+
+  console.log('Source backend path:', sourceBackendPath)
+  console.log('Source backend exists:', fs.existsSync(sourceBackendPath))
+
+  // Se a versão mudou, atualizar o backend
+  if (installedVersion !== APP_VERSION) {
+    console.log('🔄 Nova versão detectada! Atualizando backend...')
+
+    // Se o backend existir, atualizá-lo
+    if (fs.existsSync(backendPath)) {
+      try {
+        // Preservar arquivos importantes do usuário
+        const preserveFiles = ['.env']
+        const preserved = {}
+
+        for (const file of preserveFiles) {
+          const filePath = path.join(backendPath, file)
+          if (fs.existsSync(filePath)) {
+            preserved[file] = fs.readFileSync(filePath, 'utf8')
+            console.log(`📦 Preservando ${file}`)
+          }
+        }
+
+        // Remover backend antigo
+        console.log('🗑️  Removendo backend antigo...')
+        fs.rmSync(backendPath, { recursive: true, force: true })
+
+        // Copiar novo backend
+        console.log('📁 Copiando novo backend de:', sourceBackendPath)
+        fs.cpSync(sourceBackendPath, backendPath, {
+          recursive: true,
+          filter: (src) => !src.includes('vendor')
+        })
+        console.log('📁 Backend copiado (sem vendor)')
+
+        // Verificar se artisan foi copiado
+        const artisanPath = path.join(backendPath, 'artisan')
+        console.log('Artisan path:', artisanPath)
+        console.log('Artisan exists:', fs.existsSync(artisanPath))
+
+        // Copiar vendor
+        const sourceVendor = path.join(sourceBackendPath, 'vendor')
+        const destVendor = path.join(backendPath, 'vendor')
+        if (fs.existsSync(sourceVendor)) {
+          console.log('📁 Copiando vendor de:', sourceVendor)
+          fs.cpSync(sourceVendor, destVendor, { recursive: true })
+          console.log('📁 Vendor copiado')
+        } else {
+          console.error('❌ Vendor não encontrado em:', sourceVendor)
+        }
+
+        // Restaurar arquivos preservados
+        for (const [file, content] of Object.entries(preserved)) {
+          const filePath = path.join(backendPath, file)
+          fs.writeFileSync(filePath, content)
+          console.log(`📦 Restaurando ${file}`)
+        }
+
+        console.log('✅ Backend atualizado com sucesso!')
+      } catch (e) {
+        console.error('❌ Erro ao atualizar backend:', e.message)
+        console.error('Stack:', e.stack)
+      }
+    } else {
+      console.log('Backend não existe ainda, será criado na primeira execução')
+    }
+
+    // Salvar nova versão
+    try {
+      fs.writeFileSync(versionFile, APP_VERSION)
+      console.log(`✅ Versão atualizada para ${APP_VERSION}`)
+    } catch (e) {
+      console.error('❌ Erro ao salvar versão:', e.message)
+    }
+
+    return true // Indica que houve atualização
+  }
+
+  return false // Não houve atualização
+}
 
 function initializeDatabase() {
   const dbPath = path.join(app.getPath('userData'), 'database.sqlite')
@@ -15,25 +131,78 @@ function initializeDatabase() {
 
   console.log('Database path:', dbPath)
 
-  // Create database if doesn't exist
+  // Copy pre-populated database if doesn't exist
   if (!fs.existsSync(dbPath)) {
-    console.log('Creating new database...')
-    fs.writeFileSync(dbPath, '')
+    console.log('First run - copying pre-populated database...')
+    const sourceDb = path.join(backendPath, 'database', 'database.sqlite')
 
-    // Run migrations
-    const phpPath = getPHPPath()
-    const artisanPath = path.join(backendPath, 'artisan')
-    const userDataPath = app.getPath('userData')
+    if (fs.existsSync(sourceDb)) {
+      fs.copyFileSync(sourceDb, dbPath)
+      console.log('✅ Database copied successfully with existing users!')
+    } else {
+      console.log('⚠️  Source database not found, creating empty database...')
+      fs.writeFileSync(dbPath, '')
 
-    const phpIniPath = path.join(userDataPath, 'php.ini')
+      // Run migrations if we had to create empty database
+      const phpPath = getPHPPath()
+      const phpDir = path.dirname(phpPath)
+      const phpIniPath = path.join(phpDir, 'php.ini')
+      const artisanPath = path.join(backendPath, 'artisan')
 
-    spawn(phpPath, ['-c', phpIniPath, artisanPath, 'migrate', '--force', '--seed'], {
-      cwd: backendPath,
-      env: {
-        ...process.env,
-        DB_DATABASE: dbPath
+      console.log('Running migrations and seeding (this may take a moment)...')
+
+      // Use spawnSync to wait for migrations to complete BEFORE starting the server
+      const migrateResult = spawnSync(phpPath, ['-c', phpIniPath, artisanPath, 'migrate:fresh', '--force', '--seed'], {
+        cwd: backendPath,
+        shell: false,
+        env: {
+          ...process.env,
+          DB_CONNECTION: 'sqlite',
+          DB_DATABASE: dbPath,
+          APP_ENV: 'production'
+        },
+        encoding: 'utf8'
+      })
+
+      if (migrateResult.stdout) {
+        console.log('[Migration]', migrateResult.stdout)
       }
-    })
+
+      if (migrateResult.stderr) {
+        console.error('[Migration Error]', migrateResult.stderr)
+      }
+
+      console.log(`Migration completed with code ${migrateResult.status}`)
+
+      // After migrations, ensure trainer user exists
+      if (migrateResult.status === 0) {
+        console.log('Creating/updating trainer user...')
+        const createTrainerScript = path.join(backendPath, 'create_trainer.php')
+
+        const trainerResult = spawnSync(phpPath, ['-c', phpIniPath, createTrainerScript], {
+          cwd: backendPath,
+          shell: false,
+          env: {
+            ...process.env,
+            DB_CONNECTION: 'sqlite',
+            DB_DATABASE: dbPath
+          },
+          encoding: 'utf8'
+        })
+
+        if (trainerResult.stdout) {
+          console.log('[Trainer]', trainerResult.stdout)
+        }
+
+        if (trainerResult.stderr) {
+          console.error('[Trainer Error]', trainerResult.stderr)
+        }
+
+        console.log(`Trainer setup completed with code ${trainerResult.status}`)
+      }
+    }
+  } else {
+    console.log('Database already exists, using existing data')
   }
 
   return dbPath
@@ -57,6 +226,9 @@ function startBackend() {
 
     const userDataPath = app.getPath('userData')
     const backendPath = path.join(userDataPath, 'backend')
+
+    // Verificar se precisa atualizar (nova versão instalada)
+    const wasUpdated = checkAndUpdateBackend()
 
     // Copy backend to writable location on first run
     if (!fs.existsSync(backendPath)) {
@@ -85,8 +257,12 @@ function startBackend() {
         console.error('WARNING: Source vendor folder not found at:', sourceVendor)
       }
 
+      // Salvar versão após primeira instalação
+      const versionFile = path.join(userDataPath, '.app-version')
+      fs.writeFileSync(versionFile, APP_VERSION)
+
       console.log('Backend setup complete')
-    } else {
+    } else if (!wasUpdated) {
       console.log('Backend already exists at:', backendPath)
 
       // Verify vendor exists, if not, copy it
@@ -106,7 +282,7 @@ function startBackend() {
     const dbPath = initializeDatabase()
     const phpPath = getPHPPath()
 
-    console.log('Starting Laravel backend on port 8000...')
+    console.log('Starting Laravel backend on port 8080...')
     console.log('PHP:', phpPath)
     console.log('Backend:', backendPath)
     console.log('Database:', dbPath)
@@ -161,7 +337,7 @@ function startBackend() {
 APP_ENV=production
 APP_KEY=${appKey}
 APP_DEBUG=false
-APP_URL=http://localhost:8000
+APP_URL=http://localhost:8080
 
 DB_CONNECTION=sqlite
 DB_DATABASE=${dbPath.replace(/\\/g, '\\\\')}
@@ -172,46 +348,28 @@ QUEUE_CONNECTION=sync
 
 LOG_CHANNEL=single
 LOG_LEVEL=debug
+
+VIEW_COMPILED_PATH=${path.join(storagePath, 'framework', 'views').replace(/\\/g, '\\\\')}
+CACHE_PATH=${path.join(storagePath, 'framework', 'cache').replace(/\\/g, '\\\\')}
 `
     fs.writeFileSync(backendEnvPath, backendEnvContent)
     console.log('Created .env file at:', backendEnvPath)
 
-    // Configure PHP extension directory with error logging
-    const phpDir = path.dirname(phpPath)
-    const phpIniPath = path.join(userDataPath, 'php.ini')
-    const phpErrorLogPath = path.join(userDataPath, 'logs', 'php-error.log')
-
-    // Ensure logs directory exists
+    // Setup logging directory
     const logsDir = path.join(userDataPath, 'logs')
     if (!fs.existsSync(logsDir)) {
       fs.mkdirSync(logsDir, { recursive: true })
     }
-
-    // Create php.ini in AppData (writable location)
-    // Use PHPRC environment variable to tell PHP where to find it
-    const phpIniContent = `extension_dir="${path.join(phpDir, 'ext')}"
-extension=fileinfo
-extension=mbstring
-extension=openssl
-extension=pdo_sqlite
-extension=sqlite3
-
-; Error logging
-display_errors=On
-display_startup_errors=On
-log_errors=On
-error_log="${phpErrorLogPath.replace(/\\/g, '\\\\')}"
-error_reporting=E_ALL
-`
-    fs.writeFileSync(phpIniPath, phpIniContent)
-    console.log('Created php.ini at:', phpIniPath)
-    console.log('PHP errors will be logged to:', phpErrorLogPath)
 
     // Create log files for Laravel output
     const laravelLogPath = path.join(userDataPath, 'logs', 'laravel-output.log')
     const laravelErrorLogPath = path.join(userDataPath, 'logs', 'laravel-error.log')
     const laravelLogStream = fs.createWriteStream(laravelLogPath, { flags: 'a' })
     const laravelErrorLogStream = fs.createWriteStream(laravelErrorLogPath, { flags: 'a' })
+
+    // Get PHP ini path
+    const phpDir = path.dirname(phpPath)
+    const phpIniPath = path.join(phpDir, 'php.ini')
 
     // Log startup info
     const startupInfo = `
@@ -230,8 +388,10 @@ Checking prerequisites...
     console.log(startupInfo)
 
     // Verify critical files exist
+
     const criticalFiles = [
       { path: phpPath, name: 'PHP executable' },
+      { path: phpIniPath, name: 'php.ini' },
       { path: path.join(backendPath, 'artisan'), name: 'artisan' },
       { path: path.join(backendPath, 'vendor', 'autoload.php'), name: 'vendor/autoload.php' },
       { path: backendEnvPath, name: '.env file' },
@@ -254,7 +414,13 @@ Checking prerequisites...
 
     laravelLogStream.write('\nStarting Laravel server...\n\n')
 
-    laravelProcess = spawn(phpPath, ['-c', phpIniPath, 'artisan', 'serve', '--port=8000', '--host=127.0.0.1'], {
+    // Use PHP built-in server directly instead of artisan serve to avoid socket issues
+    // The router script will be public/index.php (Laravel's default)
+    const publicPath = path.join(backendPath, 'public')
+    const routerScript = path.join(publicPath, 'index.php')
+
+    // Use shell: false to avoid issues with spaces in paths - Node.js handles path quoting automatically
+    laravelProcess = spawn(phpPath, ['-c', phpIniPath, '-S', '127.0.0.1:8080', '-t', publicPath, routerScript], {
       cwd: backendPath,
       shell: false,
       env: {
@@ -290,6 +456,16 @@ Checking prerequisites...
       console.error(`[Laravel Error] ${error}`)
       errorOutput += error + '\n'
       laravelErrorLogStream.write(error)
+
+      // PHP built-in server outputs startup info to stderr
+      if (error.includes('started') || error.includes('Development Server')) {
+        if (!serverStarted) {
+          serverStarted = true
+          console.log('[Laravel] Server is ready!')
+          laravelLogStream.write('✓ Laravel server started successfully!\n')
+          resolve()
+        }
+      }
     })
 
     laravelProcess.on('error', (err) => {

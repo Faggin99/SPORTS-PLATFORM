@@ -3,4 +3,7 @@ vendor/
 .env
 .DS_Store
 electron-app/dist/
-electron-app/php-portable/ 
+electron-app/php-portable/
+electron-app/frontend/dist/assets/
+frontend/dev-dist/
+*.sqlite

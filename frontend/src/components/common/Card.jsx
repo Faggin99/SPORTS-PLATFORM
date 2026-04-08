@@ -3,6 +3,9 @@ import { useTheme } from '../../contexts/ThemeContext';
 export function Card({ children, title, actions, className = '', style = {} }) {
   const { colors } = useTheme();
 
+  // Detecta se o card usa flexbox column para propagar ao conteúdo
+  const isFlexColumn = style.display === 'flex' && style.flexDirection === 'column';
+
   const cardStyle = {
     backgroundColor: colors.surface,
     border: `1px solid ${colors.border}`,
@@ -28,6 +31,13 @@ export function Card({ children, title, actions, className = '', style = {} }) {
 
   const contentStyle = {
     padding: '1.5rem',
+    // Se o card é flex column, o conteúdo deve expandir e também ser flex column
+    ...(isFlexColumn && {
+      flex: 1,
+      display: 'flex',
+      flexDirection: 'column',
+      minHeight: 0,
+    }),
   };
 
   return (

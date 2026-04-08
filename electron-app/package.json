@@ -1,6 +1,6 @@
 {
   "name": "sports-platform-desktop",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Sports Platform - Training Management Desktop App",
   "main": "main.js",
   "scripts": {
@@ -25,11 +25,13 @@
     "files": [
       "main.js",
       "setup-php.js",
+      "php-portable-production.ini",
       "assets/**/*",
       "php-portable/**/*",
       "frontend/dist/**/*",
       "backend/**/*",
       "backend/vendor/**/*",
+      "backend/database/database.sqlite",
       "!backend/node_modules",
       "!backend/storage/logs",
       "!backend/storage/framework/sessions/*",

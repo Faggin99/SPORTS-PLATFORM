@@ -109,23 +109,33 @@ async function setupPHP() {
   console.log('📦 Extracting PHP...');
   await extractZip(zipPath, PHP_DIR);
 
-  // Copy php.ini
-  const phpIniDev = path.join(PHP_DIR, 'php.ini-development');
+  // Copy production php.ini
+  console.log('📄 Creating production php.ini...');
   const phpIni = path.join(PHP_DIR, 'php.ini');
+  const productionIni = path.join(__dirname, 'php-portable-production.ini');
 
-  if (fs.existsSync(phpIniDev)) {
-    fs.copyFileSync(phpIniDev, phpIni);
+  if (fs.existsSync(productionIni)) {
+    // Copy production INI
+    fs.copyFileSync(productionIni, phpIni);
+    console.log('✅ Production php.ini installed');
+  } else {
+    // Fallback: use development INI
+    console.log('⚠️  Production INI not found, using development INI...');
+    const phpIniDev = path.join(PHP_DIR, 'php.ini-development');
+    if (fs.existsSync(phpIniDev)) {
+      fs.copyFileSync(phpIniDev, phpIni);
 
-    // Enable required extensions
-    let iniContent = fs.readFileSync(phpIni, 'utf8');
-    iniContent = iniContent
-      .replace(/;extension=fileinfo/g, 'extension=fileinfo')
-      .replace(/;extension=mbstring/g, 'extension=mbstring')
-      .replace(/;extension=openssl/g, 'extension=openssl')
-      .replace(/;extension=pdo_sqlite/g, 'extension=pdo_sqlite')
-      .replace(/;extension=sqlite3/g, 'extension=sqlite3');
+      // Enable required extensions
+      let iniContent = fs.readFileSync(phpIni, 'utf8');
+      iniContent = iniContent
+        .replace(/;extension=fileinfo/g, 'extension=fileinfo')
+        .replace(/;extension=mbstring/g, 'extension=mbstring')
+        .replace(/;extension=openssl/g, 'extension=openssl')
+        .replace(/;extension=pdo_sqlite/g, 'extension=pdo_sqlite')
+        .replace(/;extension=sqlite3/g, 'extension=sqlite3');
 
-    fs.writeFileSync(phpIni, iniContent);
+      fs.writeFileSync(phpIni, iniContent);
+    }
   }
 
   // Cleanup

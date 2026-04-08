@@ -69,13 +69,13 @@ export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initial
         trainingService.getContents(),
         trainingService.getStages(),
         trainingService.getTitles(),
-        session?.id ? trainingService.getSessionFiles(session.id) : Promise.resolve([]),
+        session?.id ? trainingService.getSessionFiles(session.id) : Promise.resolve({ data: [] }),
       ]);
 
-      const loadedContents = contentsData || [];
-      const loadedStages = stagesData || [];
-      const loadedTitles = Array.isArray(titlesData) ? titlesData : titlesData?.data || [];
-      const loadedFiles = filesData || [];
+      const loadedContents = contentsData?.data || [];
+      const loadedStages = stagesData?.data || [];
+      const loadedTitles = titlesData?.data || [];
+      const loadedFiles = filesData?.data || [];
 
       setContents(loadedContents);
       setStages(loadedStages);
@@ -83,9 +83,12 @@ export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initial
       setExistingFiles(loadedFiles);
 
       // Initialize block data with existing activity data
+      // Use block.id as key if available, otherwise use block.order as fallback key
       const initialData = {};
       session?.blocks?.forEach((block) => {
         const activity = block?.activity;
+        // Use block.id if it exists, otherwise use order as key (prefixed to avoid confusion)
+        const blockKey = block.id || `order_${block.order}`;
 
         if (activity) {
           // Map saved stage_names to stage IDs
@@ -96,23 +99,35 @@ export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initial
             })
             .filter(id => id) || [];
 
-          initialData[block.id] = {
-            selectedContents: activity.contents?.map((c) => c.id) || [],
+          // Map contents - handle both nested {content: {id}} and flat {id} structures
+          const contentIds = activity.contents?.map((c) => {
+            // If it's nested structure from Supabase join: { content: { id, name } }
+            if (c.content && c.content.id) {
+              return c.content.id;
+            }
+            // If it's flat structure: { id, name }
+            return c.id;
+          }).filter(id => id) || [];
+
+          initialData[blockKey] = {
+            selectedContents: contentIds,
             selectedStages: stageIds,
             titleId: activity.title_id || '',
             description: activity.description || '',
             selectedGroups: activity.groups || [],
             durationMinutes: activity.duration_minutes || '',
+            blockOrder: block.order, // Include order for mapping when saving
           };
         } else {
           // Empty data for blocks without activity
-          initialData[block.id] = {
+          initialData[blockKey] = {
             selectedContents: [],
             selectedStages: [],
             titleId: '',
             description: '',
             selectedGroups: [],
             durationMinutes: '',
+            blockOrder: block.order, // Include order for mapping when saving
           };
         }
       });
@@ -271,10 +286,10 @@ export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initial
   const handleSave = async () => {
     // Check if session date is in the past
     if (session?.date) {
-      const sessionDate = new Date(session.date);
+      const [sy, sm, sd] = session.date.split('-').map(Number);
+      const sessionDate = new Date(sy, sm - 1, sd);
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      sessionDate.setHours(0, 0, 0, 0);
 
       if (sessionDate < today) {
         const confirmed = window.confirm(
@@ -456,7 +471,7 @@ export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initial
       <Modal
         isOpen={isOpen}
         onClose={onClose}
-        title={`Treino - ${session?.day_name} (${session?.date ? new Date(session.date).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) : ''})`}
+        title={`Treino - ${session?.day_name} (${session?.date ? session.date.split('-').reverse().slice(0, 2).join('/') : ''})`}
         size="xl"
         footer={
           <>
@@ -515,6 +530,9 @@ export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initial
                   const block = session?.blocks?.[activeTab];
                   if (!block) return null;
 
+                  // Use block.id if available, otherwise use order as key
+                  const blockKey = block.id || `order_${block.order}`;
+
                   return (
                     <div style={blockFormStyle}>
                       {/* Linha 1: Conteúdos e Etapas lado a lado */}
@@ -522,18 +540,18 @@ export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initial
                         <MultiSelect
                           label="Conteúdos"
                           options={contents.map((c) => ({ value: c.id, label: c.name }))}
-                          value={blockData[block.id]?.selectedContents || []}
-                          onChange={(value) => handleFieldChange(block.id, 'selectedContents', value)}
+                          value={blockData[blockKey]?.selectedContents || []}
+                          onChange={(value) => handleFieldChange(blockKey, 'selectedContents', value)}
                           placeholder="Selecione conteúdos..."
                         />
 
                         <MultiSelect
                           label="Etapas"
-                          options={getAvailableStages(block.id).map((s) => ({ value: s.id, label: s.name }))}
-                          value={blockData[block.id]?.selectedStages || []}
-                          onChange={(value) => handleFieldChange(block.id, 'selectedStages', value)}
-                          placeholder={blockData[block.id]?.selectedContents?.length > 0 ? "Selecione etapas..." : "Selecione conteúdos primeiro..."}
-                          disabled={!blockData[block.id]?.selectedContents?.length}
+                          options={getAvailableStages(blockKey).map((s) => ({ value: s.id, label: s.name }))}
+                          value={blockData[blockKey]?.selectedStages || []}
+                          onChange={(value) => handleFieldChange(blockKey, 'selectedStages', value)}
+                          placeholder={blockData[blockKey]?.selectedContents?.length > 0 ? "Selecione etapas..." : "Selecione conteúdos primeiro..."}
+                          disabled={!blockData[blockKey]?.selectedContents?.length}
                         />
                       </div>
 
@@ -544,10 +562,10 @@ export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initial
                             <Select
                               label="Tema da Atividade"
                               fullWidth
-                              options={getFilteredTitles(block.id).map((t) => ({ value: t.id, label: t.title }))}
-                              value={blockData[block.id]?.titleId || ''}
-                              onChange={(e) => handleFieldChange(block.id, 'titleId', e.target.value)}
-                              placeholder={blockData[block.id]?.selectedContents?.length > 0 ? "Selecione um tema..." : "Selecione conteúdos primeiro..."}
+                              options={getFilteredTitles(blockKey).map((t) => ({ value: t.id, label: t.title }))}
+                              value={blockData[blockKey]?.titleId || ''}
+                              onChange={(e) => handleFieldChange(blockKey, 'titleId', e.target.value)}
+                              placeholder={blockData[blockKey]?.selectedContents?.length > 0 ? "Selecione um tema..." : "Selecione conteúdos primeiro..."}
                             />
                           </div>
                           <Button
@@ -561,8 +579,8 @@ export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initial
                         <MultiSelect
                           label="Grupos"
                           options={groupOptions}
-                          value={blockData[block.id]?.selectedGroups || []}
-                          onChange={(value) => handleFieldChange(block.id, 'selectedGroups', value)}
+                          value={blockData[blockKey]?.selectedGroups || []}
+                          onChange={(value) => handleFieldChange(blockKey, 'selectedGroups', value)}
                           placeholder="Selecione grupos..."
                         />
                         <div>
@@ -573,8 +591,8 @@ export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initial
                             type="number"
                             min="0"
                             step="1"
-                            value={blockData[block.id]?.durationMinutes || ''}
-                            onChange={(e) => handleFieldChange(block.id, 'durationMinutes', e.target.value)}
+                            value={blockData[blockKey]?.durationMinutes || ''}
+                            onChange={(e) => handleFieldChange(blockKey, 'durationMinutes', e.target.value)}
                             placeholder="Ex: 30"
                             style={{
                               width: '100%',
@@ -594,8 +612,8 @@ export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initial
                         label="Descrição"
                         fullWidth
                         rows={4}
-                        value={blockData[block.id]?.description || ''}
-                        onChange={(e) => handleFieldChange(block.id, 'description', e.target.value)}
+                        value={blockData[blockKey]?.description || ''}
+                        onChange={(e) => handleFieldChange(blockKey, 'description', e.target.value)}
                         placeholder="Adicione uma descrição sobre esta atividade..."
                       />
                     </div>

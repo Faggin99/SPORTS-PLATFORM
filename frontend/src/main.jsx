@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import './styles/responsive.css'
 import './styles/lucide-fix.css'
-import './registerSW'
+// import './registerSW' // Desabilitado temporariamente para testar login com Supabase
 import App from './App.jsx'
 
 createRoot(document.getElementById('root')).render(

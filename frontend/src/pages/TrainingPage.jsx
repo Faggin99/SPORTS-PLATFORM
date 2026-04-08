@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { ChevronLeft, ChevronRight, Plus, Moon, Trophy } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
+import { useClub } from '../contexts/ClubContext';
 import { Button } from '../components/common/Button';
 import { Card } from '../components/common/Card';
 import { LoadingOverlay } from '../components/common/LoadingOverlay';
@@ -9,24 +10,33 @@ import { UnifiedTrainingModal } from '../components/training/UnifiedTrainingModa
 import { TrainingSummaryModal } from '../components/training/TrainingSummaryModal';
 import { CreateTitleModal } from '../components/training/CreateTitleModal';
 import { SessionTypeModal } from '../components/training/SessionTypeModal';
-import { WeekCalendar } from '../components/training/WeekCalendar';
+import { GameModal } from '../components/training/GameModal';
+import { WeekSelector } from '../components/stats/WeekSelector';
+import { ClubSelector } from '../components/club/ClubSelector';
 import { trainingService } from '../services/trainingService';
 
 export function TrainingPage() {
   const { colors } = useTheme();
+  const { selectedClub } = useClub();
   const [currentWeek, setCurrentWeek] = useState(() => {
     // Try to load saved week from localStorage
     const savedWeek = localStorage.getItem('selectedTrainingWeek');
     if (savedWeek) {
       try {
         const { startDate } = JSON.parse(savedWeek);
-        return getWeekInfo(new Date(startDate));
+        const week = getWeekInfo(new Date(startDate));
+        console.log('Loaded week from localStorage:', week);
+        return week;
       } catch (e) {
+        console.log('Error parsing saved week, using current week:', e);
         // If parsing fails, fall back to current week
         return getWeekInfo(new Date());
       }
     }
-    return getWeekInfo(new Date());
+    console.log('No saved week, using current week');
+    const currentWeekInfo = getWeekInfo(new Date());
+    console.log('Current week:', currentWeekInfo);
+    return currentWeekInfo;
   });
   const [microcycle, setMicrocycle] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -36,13 +46,26 @@ export function TrainingPage() {
   const [showSummaryModal, setShowSummaryModal] = useState(false);
   const [initialModalTab, setInitialModalTab] = useState(0);
   const [showCreateTitle, setShowCreateTitle] = useState(false);
-  const [showWeekCalendar, setShowWeekCalendar] = useState(false);
   const [showSessionTypeModal, setShowSessionTypeModal] = useState(false);
+  const [showGameModal, setShowGameModal] = useState(false);
   const [microcycleCache, setMicrocycleCache] = useState({});
 
+  // Load microcycle when week or club changes
   useEffect(() => {
-    loadMicrocycle();
-  }, [currentWeek]);
+    if (selectedClub?.id) {
+      loadMicrocycle();
+    }
+  }, [currentWeek, selectedClub?.id]);
+
+  // Clear cache and reload when club changes
+  useEffect(() => {
+    if (selectedClub?.id) {
+      console.log('Club changed, clearing cache and reloading:', selectedClub.id);
+      setMicrocycleCache({});
+      setMicrocycle(null); // Clear current microcycle immediately
+      loadMicrocycle(true); // Force reload from server
+    }
+  }, [selectedClub?.id]);
 
   // Save selected week to localStorage whenever it changes
   useEffect(() => {
@@ -52,26 +75,39 @@ export function TrainingPage() {
     }));
   }, [currentWeek]);
 
-  async function loadMicrocycle() {
-    // Check cache first
-    const cacheKey = currentWeek.identifier;
-    if (microcycleCache[cacheKey]) {
+  async function loadMicrocycle(forceReload = false) {
+    // Require club to be selected
+    if (!selectedClub?.id) {
+      console.log('No club selected, skipping load');
+      setMicrocycle(null);
+      setInitialLoad(false);
+      return;
+    }
+
+    // Check cache first (skip if forceReload) - include club in cache key
+    const cacheKey = `${selectedClub.id}-${currentWeek.identifier}`;
+    if (!forceReload && microcycleCache[cacheKey]) {
+      console.log('Loading from cache:', cacheKey);
       setMicrocycle(microcycleCache[cacheKey]);
       setInitialLoad(false);
       return;
     }
 
+    console.log('Loading from Supabase:', cacheKey);
     setLoading(true);
     try {
-      const data = await trainingService.getMicrocycle(currentWeek.identifier);
-      setMicrocycle(data);
+      const response = await trainingService.getMicrocycle(currentWeek.identifier, selectedClub.id);
+      const microcycleData = response.data; // Extract data from { data: microcycle }
+      console.log('Microcycle loaded:', microcycleData);
+      setMicrocycle(microcycleData);
       // Cache the result
       setMicrocycleCache(prev => ({
         ...prev,
-        [cacheKey]: data,
+        [cacheKey]: microcycleData,
       }));
     } catch (error) {
       console.error('Error loading microcycle:', error);
+      setMicrocycle(null); // Clear microcycle on error
     } finally {
       setLoading(false);
       setInitialLoad(false);
@@ -108,6 +144,17 @@ export function TrainingPage() {
     return monday;
   }
 
+  function getDateOfISOWeek(week, year) {
+    const simple = new Date(year, 0, 1 + (week - 1) * 7);
+    const dow = simple.getDay();
+    const ISOweekStart = simple;
+    if (dow <= 4)
+      ISOweekStart.setDate(simple.getDate() - simple.getDay() + 1);
+    else
+      ISOweekStart.setDate(simple.getDate() + 8 - simple.getDay());
+    return ISOweekStart;
+  }
+
   function navigateWeek(direction) {
     const newDate = new Date(currentWeek.startDate);
     newDate.setDate(newDate.getDate() + (direction * 7));
@@ -115,9 +162,10 @@ export function TrainingPage() {
   }
 
   function isToday(dateString) {
+    if (!dateString) return false;
     const today = new Date();
-    const sessionDate = new Date(dateString);
-    return today.toDateString() === sessionDate.toDateString();
+    const [y, m, d] = dateString.split('-').map(Number);
+    return today.getFullYear() === y && today.getMonth() === m - 1 && today.getDate() === d;
   }
 
   function abbreviateContent(contentName) {
@@ -297,36 +345,22 @@ export function TrainingPage() {
       {/* Loading overlay - only shows when reloading with existing data */}
       <LoadingOverlay isLoading={loading && !initialLoad} message="Atualizando..." />
       <div style={headerStyle}>
-        <div style={weekNavStyle}>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => navigateWeek(-1)}
-            icon={<ChevronLeft size={24} strokeWidth={1.5} />}
-          />
-          <div style={{ position: 'relative' }}>
-            <h1
-              style={{ ...weekTitleStyle, cursor: 'pointer' }}
-              onClick={() => setShowWeekCalendar(!showWeekCalendar)}
-            >
-              Microciclo {currentWeek.week}/{currentWeek.year}
-            </h1>
-            {showWeekCalendar && (
-              <WeekCalendar
-                currentWeek={currentWeek}
-                onWeekSelect={(week) => {
-                  setCurrentWeek(week);
-                  setShowWeekCalendar(false);
-                }}
-                onClose={() => setShowWeekCalendar(false)}
-              />
-            )}
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => navigateWeek(1)}
-            icon={<ChevronRight size={24} strokeWidth={1.5} />}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <ClubSelector />
+          <WeekSelector
+            value={currentWeek.identifier}
+            onChange={(newIdentifier) => {
+              const [year, week] = newIdentifier.split('-').map(Number);
+              const monday = getDateOfISOWeek(week, year);
+              setCurrentWeek({
+                year,
+                week,
+                identifier: newIdentifier,
+                startDate: monday,
+              });
+            }}
+            label="Microciclo"
+            rangeCount={1}
           />
         </div>
 
@@ -340,7 +374,7 @@ export function TrainingPage() {
           {microcycle?.sessions?.map((session, dayIndex) => {
             const currentDay = isToday(session.date);
             return (
-              <div key={session.id} style={dayColumnStyle}>
+              <div key={session.id || `empty-${session.date}`} style={dayColumnStyle}>
                 <div
                   style={dayHeaderStyle(currentDay)}
                   onClick={() => {
@@ -368,7 +402,7 @@ export function TrainingPage() {
                 >
                   {session.day_name}
                   <div style={{ fontSize: '0.75rem', opacity: 0.9, marginTop: '0.25rem' }}>
-                    {new Date(session.date).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                    {(() => { const [y,m,d] = (session.date || '').split('-'); return d && m ? `${d}/${m}` : ''; })()}
                   </div>
                 </div>
 
@@ -447,6 +481,23 @@ export function TrainingPage() {
                           fontWeight: '600',
                           color: colors.text,
                           gap: '0.5rem',
+                          cursor: 'pointer',
+                        }}
+                        onClick={() => {
+                          setSelectedSession(session);
+                          setShowGameModal(true);
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.borderColor = colors.primary;
+                          e.currentTarget.style.backgroundColor = colors.surfaceHover;
+                          e.currentTarget.style.transform = 'translateY(-2px) scale(1.02)';
+                          e.currentTarget.style.boxShadow = `0 4px 12px ${colors.primary}30`;
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.borderColor = colors.border;
+                          e.currentTarget.style.backgroundColor = colors.surface;
+                          e.currentTarget.style.transform = 'translateY(0) scale(1)';
+                          e.currentTarget.style.boxShadow = 'none';
                         }}
                       >
                         <Trophy size={48} strokeWidth={1.5} />
@@ -523,7 +574,7 @@ export function TrainingPage() {
                 // TREINO NORMAL - 6 blocos
                 return session.blocks?.map((block, blockIndex) => (
                   <div
-                    key={block.id}
+                    key={block.id || `empty-block-${session.date}-${blockIndex}`}
                     style={blockStyle}
                     onClick={() => {
                       setSelectedSession(session);
@@ -599,14 +650,106 @@ export function TrainingPage() {
         onSave={async (data) => {
           console.log('Saving unified training data:', data);
           try {
-            // Save each block's activity
-            for (const [blockId, activityData] of Object.entries(data.blockData)) {
-              // Skip empty blocks
-              if (!activityData.titleId && !activityData.description &&
-                  activityData.selectedContents.length === 0 &&
-                  activityData.selectedStages.length === 0) {
+            // FIRST: Ensure database structure exists (microcycle, sessions, blocks)
+            // This is called ONLY when actually saving data
+            if (!selectedSession?.id) {
+              console.log('No session ID - ensuring database structure exists...');
+              const response = await trainingService.ensureMicrocycleStructure(currentWeek.identifier, selectedClub.id);
+              const microcycleData = response.data;
+
+              // Find the session for the current day
+              const realSession = microcycleData.sessions.find(s =>
+                s.day_of_week === selectedSession.day_of_week
+              );
+
+              if (!realSession) {
+                throw new Error('Falha ao criar sessão no banco de dados');
+              }
+
+              console.log('Database structure created. Session ID:', realSession.id);
+
+              // Update selectedSession with the real session from database
+              setSelectedSession(realSession);
+
+              // Also update microcycle state
+              setMicrocycle(microcycleData);
+
+              // Cache the new microcycle (include club in cache key)
+              const cacheKey = `${selectedClub.id}-${currentWeek.identifier}`;
+              setMicrocycleCache(prev => ({
+                ...prev,
+                [cacheKey]: microcycleData,
+              }));
+            }
+
+            // Get the current session with real IDs from database
+            // If we just created the structure, use the realSession from microcycleData
+            // Otherwise use the existing selectedSession
+            const currentSession = microcycle?.sessions?.find(s =>
+              s.day_of_week === selectedSession?.day_of_week
+            ) || selectedSession;
+
+            console.log('Current session for saving:', currentSession?.id, 'blocks:', currentSession?.blocks?.length);
+
+            // THEN: Save each block's activity
+            for (const [blockIdOrIndex, activityData] of Object.entries(data.blockData)) {
+              // Check if ALL fields are empty
+              const isEmpty = !activityData.titleId &&
+                             !activityData.description &&
+                             (!activityData.selectedContents || activityData.selectedContents.length === 0) &&
+                             (!activityData.selectedStages || activityData.selectedStages.length === 0) &&
+                             !activityData.durationMinutes;
+
+              // Find the real block - either by ID if it exists, or by order/index
+              let realBlock = null;
+
+              // Check if key is in format "order_X" (used for new blocks without DB id)
+              if (blockIdOrIndex && blockIdOrIndex.startsWith('order_')) {
+                const orderNum = parseInt(blockIdOrIndex.replace('order_', ''));
+                if (!isNaN(orderNum)) {
+                  realBlock = currentSession?.blocks?.find(b => b.order === orderNum);
+                }
+              }
+              // Otherwise try to find by ID
+              else if (blockIdOrIndex && blockIdOrIndex !== 'null' && blockIdOrIndex !== 'undefined') {
+                realBlock = currentSession?.blocks?.find(b => b.id === blockIdOrIndex);
+              }
+
+              // If not found by ID, try to find by order from activityData
+              if (!realBlock && activityData.blockOrder !== undefined) {
+                realBlock = currentSession?.blocks?.find(b => b.order === activityData.blockOrder);
+              }
+
+              // Last resort: if blockIdOrIndex is a number string, use it as order
+              if (!realBlock) {
+                const orderNum = parseInt(blockIdOrIndex);
+                if (!isNaN(orderNum)) {
+                  realBlock = currentSession?.blocks?.find(b => b.order === orderNum);
+                }
+              }
+
+              const realBlockId = realBlock?.id;
+
+              if (isEmpty) {
+                // Delete existing activity if block is now empty
+                if (realBlockId) {
+                  console.log('Block is empty, deleting any existing activity:', realBlockId);
+                  try {
+                    await trainingService.deleteActivityByBlockId(realBlockId);
+                  } catch (err) {
+                    console.log('No activity to delete or error:', err.message);
+                  }
+                }
                 continue;
               }
+
+              // Skip if we couldn't find a real block ID
+              if (!realBlockId) {
+                console.warn('Could not find real block ID for:', blockIdOrIndex, 'skipping...');
+                continue;
+              }
+
+              console.log('Saving block:', realBlockId, '(original key:', blockIdOrIndex, ')', activityData);
 
               // Convert camelCase to snake_case for backend
               const backendData = {
@@ -617,21 +760,25 @@ export function TrainingPage() {
               };
               delete backendData.durationMinutes;
               delete backendData.selectedGroups;
+              delete backendData.blockOrder; // Remove helper field
 
-              // Find the block to check if it has an existing activity
-              const block = selectedSession?.blocks?.find(b => b.id === blockId);
-
-              if (block?.activity?.id) {
+              if (realBlock?.activity?.id) {
                 // Update existing activity
-                await trainingService.updateActivity(block.activity.id, backendData);
+                console.log('Updating activity:', realBlock.activity.id);
+                const result = await trainingService.updateActivity(realBlock.activity.id, backendData);
+                console.log('Update result:', result);
               } else {
                 // Create new activity
-                await trainingService.createActivity({
+                console.log('Creating new activity for block:', realBlockId);
+                const result = await trainingService.createActivity({
                   ...backendData,
-                  block_id: blockId,
+                  block_id: realBlockId,
                 });
+                console.log('Create result:', result);
               }
             }
+
+            console.log('All blocks saved successfully');
 
             // Upload files to session
             if (data.files && data.files.length > 0) {
@@ -646,16 +793,16 @@ export function TrainingPage() {
               }
             }
 
-            // Invalidate cache for this week to force fresh data
-            const cacheKey = currentWeek.identifier;
+            // Invalidate cache for this week to force fresh data (include club in cache key)
+            const invalidateCacheKey = `${selectedClub.id}-${currentWeek.identifier}`;
             setMicrocycleCache(prev => {
               const newCache = { ...prev };
-              delete newCache[cacheKey];
+              delete newCache[invalidateCacheKey];
               return newCache;
             });
 
-            // Reload data first, then close modal
-            await loadMicrocycle();
+            // Reload data first, then close modal (force reload to bypass cache)
+            await loadMicrocycle(true);
             setShowUnifiedModal(false);
           } catch (error) {
             console.error('Error saving training data:', error);
@@ -682,20 +829,63 @@ export function TrainingPage() {
         session={selectedSession}
         onSave={async (data) => {
           try {
-            await trainingService.updateSessionType(selectedSession.id, data);
+            // FIRST: Ensure database structure exists if session doesn't have ID
+            if (!selectedSession?.id) {
+              console.log('No session ID - ensuring database structure exists...');
+              const response = await trainingService.ensureMicrocycleStructure(currentWeek.identifier, selectedClub.id);
+              const microcycleData = response.data;
+
+              // Find the session for the current day
+              const realSession = microcycleData.sessions.find(s =>
+                s.day_of_week === selectedSession.day_of_week
+              );
+
+              if (!realSession) {
+                throw new Error('Falha ao criar sessão no banco de dados');
+              }
+
+              console.log('Database structure created. Session ID:', realSession.id);
+
+              // Update selectedSession with the real session from database
+              setSelectedSession(realSession);
+
+              // Update data with real session ID
+              data.sessionId = realSession.id;
+            }
+
+            // THEN: Update session type
+            const sessionId = selectedSession?.id || data.sessionId;
+            await trainingService.updateSessionType(sessionId, data);
             setShowSessionTypeModal(false);
-            // Invalidate cache and reload microcycle
-            const cacheKey = currentWeek.identifier;
+
+            // Invalidate cache and reload microcycle (include club in cache key)
+            const invalidateCacheKey = `${selectedClub.id}-${currentWeek.identifier}`;
             setMicrocycleCache(prev => {
               const newCache = { ...prev };
-              delete newCache[cacheKey];
+              delete newCache[invalidateCacheKey];
               return newCache;
             });
-            await loadMicrocycle();
+            await loadMicrocycle(true); // Force reload to bypass cache
           } catch (error) {
             console.error('Error updating session type:', error);
-            alert('Erro ao atualizar tipo de sessão');
+            alert('Erro ao atualizar tipo de sessão: ' + error.message);
           }
+        }}
+      />
+
+      <GameModal
+        isOpen={showGameModal}
+        onClose={() => setShowGameModal(false)}
+        session={selectedSession}
+        onSave={async (data) => {
+          // Invalidate cache and reload microcycle
+          const invalidateCacheKey = `${selectedClub.id}-${currentWeek.identifier}`;
+          setMicrocycleCache(prev => {
+            const newCache = { ...prev };
+            delete newCache[invalidateCacheKey];
+            return newCache;
+          });
+          await loadMicrocycle(true);
         }}
       />
     </div>

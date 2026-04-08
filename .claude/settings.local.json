@@ -1,12 +1,28 @@
 {
   "permissions": {
     "allow": [
+      "Bash(\"C:/Program Files/Sports Platform/resources/app/php-portable/php.exe\":*)",
+      "Bash(npm run dev:*)",
+      "Bash(taskkill:*)",
+      "Bash(nul)",
       "Bash(netstat:*)",
       "Bash(findstr:*)",
-      "Bash(taskkill:*)",
+      "Bash(dir \"C:\\Users\\arthu\\sports-platform\\frontend\\dist\" 2)",
+      "Bash(npm run build:*)",
+      "Bash(dir:*)",
+      "Bash(test:*)",
       "Bash(npm run build:win:*)",
-      "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(xcopy:*)",
+      "Bash(timeout:*)",
+      "Bash(npm install:*)",
+      "Bash(cat:*)",
+      "Bash(npx vite:*)",
+      "Read(//c/Users/arthu/Downloads/**)",
+      "Bash(find c:Usersarthusports-platform -type d -name *actal* -o -name *tical*)",
+      "Bash(ffprobe -v quiet -print_format json -show_format -show_streams 'C:/Users/arthu/Downloads/TaticalPad/Transição Def e Of.mp4')",
+      "Read(//c/Users/arthu/**)",
+      "Bash(rm -rf c:/Users/arthu/sports-platform/electron-app/frontend/dist)",
+      "Bash(cp -r c:/Users/arthu/sports-platform/frontend/dist c:/Users/arthu/sports-platform/electron-app/frontend/dist)"
     ],
     "deny": [],
     "ask": []

@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
-import { User, Camera, Save, Lock, Settings } from 'lucide-react';
+import { User, Camera, Save, Lock, Settings as SettingsIcon } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { Button } from '../components/common/Button';
 import { Card } from '../components/common/Card';
 import { ChangePasswordModal } from '../components/settings/ChangePasswordModal';
 import { PhotoCropModal } from '../components/settings/PhotoCropModal';
-import { api } from '../services/api';
+import { userProfileService } from '../services/userProfileService';
 
 export function SettingsPage() {
   const { colors } = useTheme();
@@ -17,7 +17,6 @@ export function SettingsPage() {
     phone: '',
     bio: '',
   });
-  const [showPhotoModal, setShowPhotoModal] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [showPhotoCropModal, setShowPhotoCropModal] = useState(false);
   const [selectedPhotoFile, setSelectedPhotoFile] = useState(null);
@@ -28,7 +27,8 @@ export function SettingsPage() {
 
   async function loadProfile() {
     try {
-      const data = await api.get('/profile');
+      const data = await userProfileService.getProfile();
+      console.log('Profile loaded:', data);
       setUser(data);
       setFormData({
         name: data.name || '',
@@ -46,7 +46,7 @@ export function SettingsPage() {
     setLoading(true);
 
     try {
-      await api.put('/profile', formData);
+      await userProfileService.updateProfile(formData);
       alert('Perfil atualizado com sucesso!');
       await loadProfile();
     } catch (error) {
@@ -81,54 +81,35 @@ export function SettingsPage() {
   }
 
   async function handlePhotoUpload(file) {
-    const formData = new FormData();
-    formData.append('photo', file);
-
     setLoading(true);
     try {
-      const token = localStorage.getItem('auth_token');
-      const response = await fetch(`${api.baseURL}/profile/photo`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Accept': 'application/json',
-        },
-        body: formData,
-      });
-
-      if (!response.ok) throw new Error('Upload failed');
-
+      console.log('Uploading photo...');
+      const result = await userProfileService.uploadPhoto(file);
+      console.log('Photo uploaded, result:', result);
       await loadProfile();
       setShowPhotoCropModal(false);
       setSelectedPhotoFile(null);
-      alert('Foto atualizada com sucesso!');
     } catch (error) {
       console.error('Error uploading photo:', error);
-      alert('Erro ao fazer upload da foto');
+      alert('Erro ao fazer upload da foto: ' + error.message);
     } finally {
       setLoading(false);
     }
   }
 
-  async function handlePasswordChange(passwordData) {
+  async function handlePasswordChange(passwords) {
     setLoading(true);
     try {
-      await api.put('/profile', passwordData);
+      await userProfileService.changePassword(passwords.currentPassword, passwords.newPassword);
       alert('Senha alterada com sucesso!');
       setShowPasswordModal(false);
     } catch (error) {
       console.error('Error changing password:', error);
-      const message = error.response?.data?.message || 'Erro ao alterar senha';
-      alert(message);
+      alert(error.message || 'Erro ao alterar senha');
     } finally {
       setLoading(false);
     }
   }
-
-  const getPhotoUrl = () => {
-    if (!user?.profile_photo) return null;
-    return `${api.baseURL.replace('/api', '')}/storage/${user.profile_photo}`;
-  };
 
   const inputStyle = {
     width: '100%',
@@ -145,6 +126,41 @@ export function SettingsPage() {
     marginBottom: '0.5rem',
     fontWeight: '500',
     color: colors.text,
+  };
+
+  const photoContainerStyle = {
+    position: 'relative',
+    width: '120px',
+    height: '120px',
+    margin: '0 auto 1.5rem',
+  };
+
+  const photoStyle = {
+    width: '120px',
+    height: '120px',
+    borderRadius: '50%',
+    backgroundColor: colors.surface,
+    border: `3px solid ${colors.border}`,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  };
+
+  const cameraButtonStyle = {
+    position: 'absolute',
+    bottom: '0',
+    right: '0',
+    width: '40px',
+    height: '40px',
+    borderRadius: '50%',
+    backgroundColor: colors.primary,
+    border: `3px solid ${colors.background}`,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
   };
 
   return (
@@ -167,8 +183,8 @@ export function SettingsPage() {
           alignItems: 'center',
           gap: '0.75rem',
         }}>
-          <Settings size={40} strokeWidth={1.5} />
-          Configurações
+          <SettingsIcon size={28} strokeWidth={1.5} />
+          Configurações do Usuário
         </h1>
       </div>
 
@@ -188,146 +204,155 @@ export function SettingsPage() {
           {/* Coluna Esquerda - Perfil */}
           <div>
             <Card style={{ height: 'fit-content' }}>
-        <div style={{ padding: '1.5rem' }}>
-          {/* Foto de Perfil */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', marginBottom: '1.5rem' }}>
-            <div
-              style={{
-                position: 'relative',
-                width: '100px',
-                height: '100px',
-                borderRadius: '50%',
-                backgroundColor: colors.surfaceHover,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                overflow: 'hidden',
-                cursor: 'pointer',
-                border: `2px solid ${colors.border}`,
-                flexShrink: 0,
-              }}
-              onClick={() => getPhotoUrl() && setShowPhotoModal(true)}
-            >
-              {getPhotoUrl() ? (
-                <img
-                  src={getPhotoUrl()}
-                  alt="Profile"
-                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                />
-              ) : (
-                <User size={40} color={colors.textSecondary} />
-              )}
-            </div>
-
-            <div>
-              <h3 style={{ fontSize: '1.125rem', fontWeight: '600', color: colors.text, marginBottom: '0.5rem' }}>
-                Foto de Perfil
-              </h3>
-              <p style={{ fontSize: '0.875rem', color: colors.textSecondary, marginBottom: '0.75rem' }}>
-                Clique na foto para visualizar
-              </p>
-              <label htmlFor="photo-upload" style={{ cursor: 'pointer' }}>
-                <div style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  padding: '0.5rem 1rem',
-                  backgroundColor: colors.surface,
-                  border: `1px solid ${colors.border}`,
-                  borderRadius: '0.375rem',
-                  fontSize: '0.875rem',
-                  fontWeight: '500',
+              <div style={{ padding: '1.5rem' }}>
+                <h2 style={{
+                  fontSize: '1.125rem',
+                  fontWeight: '600',
                   color: colors.text,
-                  cursor: loading ? 'not-allowed' : 'pointer',
-                  opacity: loading ? 0.5 : 1,
-                  transition: 'all 0.2s',
+                  marginBottom: '1.5rem',
+                  textAlign: 'center'
                 }}>
-                  <Camera size={18} />
-                  Alterar Foto
+                  Perfil
+                </h2>
+
+                {/* Foto de Perfil */}
+                <div style={photoContainerStyle}>
+                  <div style={photoStyle}>
+                    {user?.profile_photo && userProfileService.getPhotoUrl(user.profile_photo) ? (
+                      <img
+                        src={userProfileService.getPhotoUrl(user.profile_photo)}
+                        alt="Profile"
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
+                    ) : (
+                      <User size={48} color={colors.textSecondary} />
+                    )}
+                  </div>
+
+                  <label style={cameraButtonStyle}>
+                    <Camera size={20} color="#fff" />
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handlePhotoSelect}
+                      style={{ display: 'none' }}
+                      disabled={loading}
+                    />
+                  </label>
                 </div>
-              </label>
-              <input
-                id="photo-upload"
-                type="file"
-                accept="image/*"
-                onChange={handlePhotoSelect}
-                style={{ display: 'none' }}
-                disabled={loading}
-              />
-            </div>
-          </div>
 
-          {/* Formulário */}
-          <form onSubmit={handleSubmit}>
-            <div style={{ display: 'grid', gap: '1rem' }}>
-              <div>
-                <label style={labelStyle}>Nome</label>
-                <input
-                  type="text"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  style={inputStyle}
-                  required
-                />
-              </div>
+                <p style={{
+                  textAlign: 'center',
+                  fontSize: '0.875rem',
+                  color: colors.textSecondary,
+                  marginBottom: '1.5rem'
+                }}>
+                  Clique no ícone da câmera para alterar sua foto
+                </p>
 
-              <div>
-                <label style={labelStyle}>Email</label>
-                <input
-                  type="email"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  style={inputStyle}
-                  required
-                />
-              </div>
+                {/* Formulário */}
+                <form onSubmit={handleSubmit}>
+                  <div style={{ display: 'grid', gap: '1rem' }}>
+                    <div>
+                      <label style={labelStyle}>Nome *</label>
+                      <input
+                        type="text"
+                        value={formData.name}
+                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                        style={inputStyle}
+                        required
+                      />
+                    </div>
 
-              <div>
-                <label style={labelStyle}>Telefone</label>
-                <input
-                  type="tel"
-                  value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  style={inputStyle}
-                  placeholder="(00) 00000-0000"
-                />
-              </div>
+                    <div>
+                      <label style={labelStyle}>Email *</label>
+                      <input
+                        type="email"
+                        value={formData.email}
+                        style={{ ...inputStyle, backgroundColor: colors.surfaceHover, cursor: 'not-allowed' }}
+                        disabled
+                        title="O email não pode ser alterado"
+                      />
+                    </div>
 
-              <div>
-                <label style={labelStyle}>Bio</label>
-                <textarea
-                  value={formData.bio}
-                  onChange={(e) => setFormData({ ...formData, bio: e.target.value })}
-                  style={{ ...inputStyle, minHeight: '80px', resize: 'vertical' }}
-                  maxLength={500}
-                />
-                <div style={{ textAlign: 'right', fontSize: '0.75rem', color: colors.textSecondary, marginTop: '0.25rem' }}>
-                  {formData.bio.length}/500
-                </div>
-              </div>
+                    <div>
+                      <label style={labelStyle}>Telefone</label>
+                      <input
+                        type="tel"
+                        value={formData.phone}
+                        onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                        style={inputStyle}
+                        placeholder="(00) 00000-0000"
+                      />
+                    </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', marginTop: '0.5rem' }}>
-                <Button type="submit" icon={<Save size={18} />} disabled={loading}>
-                  {loading ? 'Salvando...' : 'Salvar Alterações'}
-                </Button>
+                    <div>
+                      <label style={labelStyle}>Bio</label>
+                      <textarea
+                        value={formData.bio}
+                        onChange={(e) => setFormData({ ...formData, bio: e.target.value })}
+                        style={{ ...inputStyle, minHeight: '100px', resize: 'vertical' }}
+                        maxLength={500}
+                        placeholder="Conte um pouco sobre você..."
+                      />
+                      <div style={{
+                        textAlign: 'right',
+                        fontSize: '0.75rem',
+                        color: colors.textSecondary,
+                        marginTop: '0.25rem'
+                      }}>
+                        {formData.bio.length}/500
+                      </div>
+                    </div>
+
+                    <div style={{
+                      display: 'flex',
+                      justifyContent: 'flex-end',
+                      marginTop: '0.5rem'
+                    }}>
+                      <Button type="submit" icon={<Save size={18} />} disabled={loading}>
+                        {loading ? 'Salvando...' : 'Salvar Alterações'}
+                      </Button>
+                    </div>
+                  </div>
+                </form>
               </div>
-            </div>
-          </form>
-        </div>
-      </Card>
+            </Card>
           </div>
 
           {/* Coluna Direita - Segurança */}
           <div>
             <Card style={{ height: 'fit-content' }}>
               <div style={{ padding: '1.5rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <h2 style={{
+                  fontSize: '1.125rem',
+                  fontWeight: '600',
+                  color: colors.text,
+                  marginBottom: '1rem'
+                }}>
+                  Segurança
+                </h2>
+
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '1rem',
+                  backgroundColor: colors.surface,
+                  borderRadius: '0.5rem',
+                  border: `1px solid ${colors.border}`,
+                }}>
                   <div>
-                    <h2 style={{ fontSize: '1rem', fontWeight: '600', color: colors.text, marginBottom: '0.25rem' }}>
-                      Segurança
-                    </h2>
+                    <p style={{
+                      fontSize: '0.9375rem',
+                      fontWeight: '500',
+                      color: colors.text,
+                      marginBottom: '0.25rem'
+                    }}>
+                      Senha
+                    </p>
                     <p style={{ fontSize: '0.8125rem', color: colors.textSecondary }}>
-                      Altere sua senha
+                      Altere sua senha de acesso
                     </p>
                   </div>
                   <Button
@@ -347,46 +372,24 @@ export function SettingsPage() {
       </div>
 
       {/* Modal de Senha */}
-      <ChangePasswordModal
-        isOpen={showPasswordModal}
-        onClose={() => setShowPasswordModal(false)}
-        onSave={handlePasswordChange}
-      />
+      {showPasswordModal && (
+        <ChangePasswordModal
+          onClose={() => setShowPasswordModal(false)}
+          onSave={handlePasswordChange}
+        />
+      )}
 
       {/* Modal de Crop de Foto */}
-      <PhotoCropModal
-        isOpen={showPhotoCropModal}
-        onClose={() => {
-          setShowPhotoCropModal(false);
-          setSelectedPhotoFile(null);
-        }}
-        onSave={handlePhotoUpload}
-        selectedFile={selectedPhotoFile}
-      />
-
-      {/* Modal de Foto */}
-      {showPhotoModal && getPhotoUrl() && (
-        <div
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.9)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1000,
+      {showPhotoCropModal && selectedPhotoFile && (
+        <PhotoCropModal
+          isOpen={showPhotoCropModal}
+          selectedFile={selectedPhotoFile}
+          onClose={() => {
+            setShowPhotoCropModal(false);
+            setSelectedPhotoFile(null);
           }}
-          onClick={() => setShowPhotoModal(false)}
-        >
-          <img
-            src={getPhotoUrl()}
-            alt="Profile"
-            style={{ maxWidth: '90%', maxHeight: '90%', objectFit: 'contain' }}
-          />
-        </div>
+          onSave={handlePhotoUpload}
+        />
       )}
     </div>
   );

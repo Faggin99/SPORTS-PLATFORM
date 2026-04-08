@@ -51,9 +51,9 @@ export function ActivityModal({ isOpen, onClose, onSave, block, onDelete }) {
         trainingService.getTitles(),
       ]);
 
-      const loadedContents = contentsRes || [];
-      const loadedStages = stagesRes || [];
-      const loadedTitles = Array.isArray(titlesRes) ? titlesRes : titlesRes?.data || [];
+      const loadedContents = contentsRes?.data || [];
+      const loadedStages = stagesRes?.data || [];
+      const loadedTitles = titlesRes?.data || [];
 
       setContents(loadedContents);
       setStages(loadedStages);
