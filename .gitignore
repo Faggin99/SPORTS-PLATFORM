@@ -7,3 +7,4 @@ electron-app/php-portable/
 electron-app/frontend/dist/assets/
 frontend/dev-dist/
 *.sqlite
+electron-app/node_modules/
