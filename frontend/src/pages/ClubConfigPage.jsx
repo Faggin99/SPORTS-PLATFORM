@@ -2,10 +2,12 @@ import { useState } from 'react';
 import { Plus, Edit2, Trash2, Building2, X, Check, Camera } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useClub } from '../contexts/ClubContext';
+import { useIsMobile } from '../hooks/useIsMobile';
 import { PhotoCropModal } from '../components/settings/PhotoCropModal';
 
 export function ClubConfigPage() {
   const { colors } = useTheme();
+  const isMobile = useIsMobile();
   const { clubs, createClub, updateClub, deleteClub, uploadLogo, getLogoUrl } = useClub();
   const [showModal, setShowModal] = useState(false);
   const [editingClub, setEditingClub] = useState(null);
@@ -113,7 +115,7 @@ export function ClubConfigPage() {
   }
 
   const pageStyle = {
-    padding: '2rem',
+    padding: isMobile ? '1rem' : '2rem',
     maxWidth: '1200px',
     margin: '0 auto',
   };
@@ -122,11 +124,11 @@ export function ClubConfigPage() {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: '2rem',
+    marginBottom: isMobile ? '1.25rem' : '2rem',
   };
 
   const titleStyle = {
-    fontSize: '1.875rem',
+    fontSize: isMobile ? '1.25rem' : '1.875rem',
     fontWeight: '700',
     color: colors.text,
   };
@@ -148,35 +150,38 @@ export function ClubConfigPage() {
 
   const gridStyle = {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-    gap: '1.5rem',
+    gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(300px, 1fr))',
+    gap: isMobile ? '1rem' : '1.5rem',
   };
 
   const cardStyle = {
     backgroundColor: colors.surface,
     border: `1px solid ${colors.border}`,
     borderRadius: '0.5rem',
-    padding: '1.5rem',
+    padding: isMobile ? '1rem' : '1.5rem',
     transition: 'all 0.2s',
   };
 
   const clubHeaderStyle = {
     display: 'flex',
-    alignItems: 'flex-start',
+    flexDirection: isMobile ? 'column' : 'row',
+    alignItems: isMobile ? 'center' : 'flex-start',
     gap: '1rem',
     marginBottom: '1rem',
   };
 
+  const logoSize = isMobile ? '60px' : '80px';
+
   const logoContainerStyle = {
     position: 'relative',
-    width: '80px',
-    height: '80px',
+    width: logoSize,
+    height: logoSize,
     flexShrink: 0,
   };
 
   const logoStyle = {
-    width: '80px',
-    height: '80px',
+    width: logoSize,
+    height: logoSize,
     borderRadius: '50%',
     objectFit: 'cover',
     backgroundColor: colors.primary + '20',
@@ -238,7 +243,7 @@ export function ClubConfigPage() {
     border: `1px solid ${isDanger ? colors.danger : colors.border}`,
     borderRadius: '0.375rem',
     color: isDanger ? colors.danger : colors.text,
-    fontSize: '0.875rem',
+    fontSize: isMobile ? '0.8rem' : '0.875rem',
     cursor: 'pointer',
     transition: 'all 0.2s',
   });
@@ -251,18 +256,21 @@ export function ClubConfigPage() {
     bottom: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     display: 'flex',
-    alignItems: 'center',
+    alignItems: isMobile ? 'stretch' : 'center',
     justifyContent: 'center',
     zIndex: 1000,
-    padding: '1rem',
+    padding: isMobile ? 0 : '1rem',
   };
 
   const modalStyle = {
     backgroundColor: colors.background,
-    borderRadius: '0.5rem',
+    borderRadius: isMobile ? 0 : '0.5rem',
     width: '100%',
-    maxWidth: '500px',
-    padding: '1.5rem',
+    maxWidth: isMobile ? '100vw' : '500px',
+    height: isMobile ? '100vh' : 'auto',
+    padding: isMobile ? '1rem' : '1.5rem',
+    display: 'flex',
+    flexDirection: 'column',
   };
 
   const modalHeaderStyle = {

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { ChevronLeft, ChevronRight, Plus, Moon, Trophy } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useClub } from '../contexts/ClubContext';
+import { useIsMobile } from '../hooks/useIsMobile';
 import { Button } from '../components/common/Button';
 import { Card } from '../components/common/Card';
 import { LoadingOverlay } from '../components/common/LoadingOverlay';
@@ -14,10 +15,18 @@ import { GameModal } from '../components/training/GameModal';
 import { WeekSelector } from '../components/stats/WeekSelector';
 import { ClubSelector } from '../components/club/ClubSelector';
 import { trainingService } from '../services/trainingService';
+import { MonthlyThemeBanner } from '../components/training/MonthlyThemeBanner';
+import { themeService } from '../services/themeService';
 
 export function TrainingPage() {
   const { colors } = useTheme();
   const { selectedClub } = useClub();
+  const isMobile = useIsMobile();
+  const [selectedDayIndex, setSelectedDayIndex] = useState(() => {
+    // Default to today's day index (0=Mon, 6=Sun)
+    const today = new Date().getDay();
+    return today === 0 ? 6 : today - 1;
+  });
   const [currentWeek, setCurrentWeek] = useState(() => {
     // Try to load saved week from localStorage
     const savedWeek = localStorage.getItem('selectedTrainingWeek');
@@ -49,6 +58,17 @@ export function TrainingPage() {
   const [showSessionTypeModal, setShowSessionTypeModal] = useState(false);
   const [showGameModal, setShowGameModal] = useState(false);
   const [microcycleCache, setMicrocycleCache] = useState({});
+  const [themeContentIds, setThemeContentIds] = useState([]);
+
+  // Get current month from the microcycle start date
+  const currentMonth = (() => {
+    if (microcycle?.start_date) {
+      const [y, m] = microcycle.start_date.split('-');
+      return `${y}-${m}`;
+    }
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  })();
 
   // Load microcycle when week or club changes
   useEffect(() => {
@@ -74,6 +94,23 @@ export function TrainingPage() {
       startDate: currentWeek.startDate.toISOString(),
     }));
   }, [currentWeek]);
+
+  // Load theme content IDs for block highlighting
+  useEffect(() => {
+    if (selectedClub?.id && currentMonth) {
+      themeService.getTheme(currentMonth, selectedClub.id)
+        .then(theme => {
+          if (theme && theme.primary_content_id) {
+            const ids = [theme.primary_content_id];
+            if (theme.secondary_content_id) ids.push(theme.secondary_content_id);
+            setThemeContentIds(ids);
+          } else {
+            setThemeContentIds([]);
+          }
+        })
+        .catch(() => setThemeContentIds([]));
+    }
+  }, [selectedClub?.id, currentMonth]);
 
   async function loadMicrocycle(forceReload = false) {
     // Require club to be selected
@@ -217,56 +254,64 @@ export function TrainingPage() {
   const headerStyle = {
     display: 'flex',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: '1rem',
+    alignItems: isMobile ? 'flex-start' : 'center',
+    marginBottom: isMobile ? '0.5rem' : '1rem',
+    flexDirection: isMobile ? 'column' : 'row',
+    gap: isMobile ? '0.5rem' : 0,
   };
 
   const weekNavStyle = {
     display: 'flex',
     alignItems: 'center',
-    gap: '0.75rem',
+    gap: isMobile ? '0.4rem' : '0.75rem',
   };
 
   const weekTitleStyle = {
-    fontSize: '1.25rem',
+    fontSize: isMobile ? '1rem' : '1.25rem',
     fontWeight: '600',
     color: colors.text,
   };
 
   const calendarStyle = {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(7, 1fr)',
-    gridAutoRows: '1fr',
-    gap: '0.5rem',
-    height: '100%',
+    display: isMobile ? 'flex' : 'grid',
+    flexDirection: isMobile ? 'column' : undefined,
+    gridTemplateColumns: isMobile ? undefined : 'repeat(7, 1fr)',
+    gridAutoRows: isMobile ? undefined : '1fr',
+    gap: isMobile ? '0.35rem' : '0.5rem',
+    height: isMobile ? 'auto' : '100%',
     overflow: 'auto',
+    width: '100%',
   };
 
   const dayColumnStyle = {
-    display: 'grid',
-    gridTemplateRows: 'auto auto 1fr auto', // header, summary, blocks area, duration
+    display: 'flex',
+    flexDirection: 'column',
     gap: '0.3rem',
     minHeight: 0,
-    height: '100%',
+    height: isMobile ? 'auto' : '100%',
+    width: '100%',
   };
 
   const dayHeaderStyle = (isCurrentDay = false) => ({
-    padding: '0.5rem',
+    padding: isMobile ? '0.3rem' : '0.5rem',
     backgroundColor: isCurrentDay ? '#10b981' : colors.primary,
     color: '#ffffff',
     borderRadius: '0.375rem',
     textAlign: 'center',
     fontWeight: '600',
-    fontSize: '0.875rem',
+    fontSize: isMobile ? '0.75rem' : '0.875rem',
     boxShadow: isCurrentDay ? '0 0 0 2px rgba(16, 185, 129, 0.5)' : 'none',
     position: 'relative',
     cursor: 'pointer',
     transition: 'all 0.3s ease',
     flexShrink: 0,
+    WebkitUserSelect: 'none',
+    userSelect: 'none',
+    WebkitTouchCallout: 'none',
   });
 
   const blockStyle = {
-    padding: '0.4rem',
+    padding: isMobile ? '0.3rem' : '0.4rem',
     backgroundColor: colors.surface,
     border: `1px solid ${colors.border}`,
     borderRadius: '0.375rem',
@@ -277,36 +322,62 @@ export function TrainingPage() {
     flexDirection: 'column',
     position: 'relative',
     flex: '1 1 0',
-    minHeight: '0',
+    minHeight: isMobile ? '45px' : '0',
   };
 
   const blockNameStyle = {
-    fontSize: '0.65rem',
+    fontSize: isMobile ? '0.6rem' : '0.65rem',
     fontWeight: '500',
     color: colors.textSecondary,
     marginBottom: '0.2rem',
   };
 
   const blockContentStyle = {
-    fontSize: '0.7rem',
+    fontSize: isMobile ? '0.65rem' : '0.7rem',
     color: colors.textMuted,
   };
 
+  const mobileDaySelectorStyle = {
+    display: 'flex',
+    gap: '0.25rem',
+    marginBottom: '0.75rem',
+    overflowX: 'auto',
+    flexShrink: 0,
+    WebkitOverflowScrolling: 'touch',
+  };
+
+  const mobileDayButtonStyle = (isActive, isCurrentDay) => ({
+    flex: '1 0 auto',
+    padding: '0.5rem 0.6rem',
+    border: 'none',
+    borderRadius: '0.375rem',
+    backgroundColor: isActive
+      ? (isCurrentDay ? '#10b981' : colors.primary)
+      : (isCurrentDay ? '#10b98130' : colors.surface),
+    color: isActive ? '#ffffff' : colors.text,
+    fontSize: '0.8rem',
+    fontWeight: isActive ? '700' : '500',
+    cursor: 'pointer',
+    textAlign: 'center',
+    transition: 'all 0.2s',
+    minWidth: 0,
+  });
+
   const contentsSummaryStyle = {
-    padding: '0.4rem 0.5rem',
+    padding: isMobile ? '0.3rem 0.4rem' : '0.4rem 0.5rem',
     backgroundColor: `${colors.primary}10`,
     border: `1px solid ${colors.border}`,
     borderRadius: '0.375rem',
-    fontSize: '0.75rem',
+    fontSize: isMobile ? '0.65rem' : '0.75rem',
     color: colors.text,
     fontWeight: '500',
     textAlign: 'center',
-    minHeight: '32px',
+    minHeight: isMobile ? '28px' : '32px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     flexWrap: 'wrap',
-    gap: '0.3rem',
+    gap: isMobile ? '0.2rem' : '0.3rem',
     overflow: 'hidden',
     cursor: 'default',
     transition: 'all 0.3s ease',
@@ -314,11 +385,11 @@ export function TrainingPage() {
   };
 
   const durationBadgeStyle = {
-    padding: '0.4rem 0.5rem',
+    padding: isMobile ? '0.3rem 0.4rem' : '0.4rem 0.5rem',
     backgroundColor: colors.surface,
     border: `1px solid ${colors.border}`,
     borderRadius: '0.375rem',
-    fontSize: '0.8rem',
+    fontSize: isMobile ? '0.7rem' : '0.8rem',
     color: colors.text,
     fontWeight: '600',
     textAlign: 'center',
@@ -330,6 +401,7 @@ export function TrainingPage() {
   };
 
   const dayNames = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'];
+  const dayNamesShort = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
 
   // Show initial loading without content
   if (initialLoad && loading) {
@@ -345,7 +417,7 @@ export function TrainingPage() {
       {/* Loading overlay - only shows when reloading with existing data */}
       <LoadingOverlay isLoading={loading && !initialLoad} message="Atualizando..." />
       <div style={headerStyle}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '0.5rem' : '1rem', flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
           <ClubSelector />
           <WeekSelector
             value={currentWeek.identifier}
@@ -364,14 +436,45 @@ export function TrainingPage() {
           />
         </div>
 
-        <Button icon={<Plus size={22} strokeWidth={1.5} />} onClick={() => setShowCreateTitle(true)}>
-          Cadastrar Novo Tema
-        </Button>
+        {themeContentIds.length === 0 && (
+          <Button variant="secondary" size={isMobile ? 'sm' : 'md'} icon={<Plus size={isMobile ? 16 : 18} strokeWidth={1.5} />} onClick={() => setShowCreateTitle(true)}>
+            {isMobile ? 'Novo Tema' : 'Cadastrar Novo Tema'}
+          </Button>
+        )}
       </div>
+
+      {/* Monthly Theme Banner */}
+      {selectedClub?.id && (
+        <MonthlyThemeBanner clubId={selectedClub.id} currentMonth={currentMonth} />
+      )}
+
+      {/* Mobile Day Selector */}
+      {isMobile && microcycle?.sessions && (
+        <div style={mobileDaySelectorStyle}>
+          {microcycle.sessions.map((session, idx) => {
+            const currentDay = isToday(session.date);
+            return (
+              <button
+                key={idx}
+                style={mobileDayButtonStyle(selectedDayIndex === idx, currentDay)}
+                onClick={() => setSelectedDayIndex(idx)}
+              >
+                <div>{dayNamesShort[idx]}</div>
+                <div style={{ fontSize: '0.7rem', opacity: 0.8, marginTop: '0.15rem' }}>
+                  {(() => { const [y,m,d] = (session.date || '').split('-'); return d && m ? `${d}/${m}` : ''; })()}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <div style={calendarStyle}>
-          {microcycle?.sessions?.map((session, dayIndex) => {
+          {(isMobile
+            ? microcycle?.sessions?.filter((_, idx) => idx === selectedDayIndex)
+            : microcycle?.sessions
+          )?.map((session, dayIndex) => {
             const currentDay = isToday(session.date);
             return (
               <div key={session.id || `empty-${session.date}`} style={dayColumnStyle}>
@@ -386,22 +489,40 @@ export function TrainingPage() {
                     setSelectedSession(session);
                     setShowSessionTypeModal(true);
                   }}
+                  onTouchStart={(e) => {
+                    // Long press on mobile opens session type modal
+                    const timer = setTimeout(() => {
+                      setSelectedSession(session);
+                      setShowSessionTypeModal(true);
+                    }, 600);
+                    e.currentTarget._longPressTimer = timer;
+                  }}
+                  onTouchEnd={(e) => {
+                    clearTimeout(e.currentTarget._longPressTimer);
+                  }}
+                  onTouchMove={(e) => {
+                    clearTimeout(e.currentTarget._longPressTimer);
+                  }}
                   onMouseEnter={(e) => {
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                    e.currentTarget.style.boxShadow = currentDay
-                      ? '0 4px 12px rgba(16, 185, 129, 0.4)'
-                      : `0 4px 12px ${colors.primary}60`;
+                    if (!isMobile) {
+                      e.currentTarget.style.transform = 'translateY(-2px)';
+                      e.currentTarget.style.boxShadow = currentDay
+                        ? '0 4px 12px rgba(16, 185, 129, 0.4)'
+                        : `0 4px 12px ${colors.primary}60`;
+                    }
                   }}
                   onMouseLeave={(e) => {
-                    e.currentTarget.style.transform = 'translateY(0)';
-                    e.currentTarget.style.boxShadow = currentDay
-                      ? '0 0 0 2px rgba(16, 185, 129, 0.5)'
-                      : 'none';
+                    if (!isMobile) {
+                      e.currentTarget.style.transform = 'translateY(0)';
+                      e.currentTarget.style.boxShadow = currentDay
+                        ? '0 0 0 2px rgba(16, 185, 129, 0.5)'
+                        : 'none';
+                    }
                   }}
-                  title="Clique esquerdo: Ver resumo | Clique direito: Tipo de sessão"
+                  title={isMobile ? 'Toque: Ver resumo | Segure: Tipo de sessão' : 'Clique esquerdo: Ver resumo | Clique direito: Tipo de sessão'}
                 >
                   {session.day_name}
-                  <div style={{ fontSize: '0.75rem', opacity: 0.9, marginTop: '0.25rem' }}>
+                  <div style={{ fontSize: isMobile ? '0.65rem' : '0.75rem', opacity: 0.9, marginTop: isMobile ? '0.15rem' : '0.25rem' }}>
                     {(() => { const [y,m,d] = (session.date || '').split('-'); return d && m ? `${d}/${m}` : ''; })()}
                   </div>
                 </div>
@@ -452,14 +573,14 @@ export function TrainingPage() {
                         flexDirection: 'column',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        fontSize: '1.2rem',
+                        fontSize: isMobile ? '0.9rem' : '1.2rem',
                         fontWeight: '600',
                         color: colors.textSecondary,
-                        gap: '0.5rem',
+                        gap: isMobile ? '0.3rem' : '0.5rem',
                       }}
                     >
-                      <Moon size={48} strokeWidth={1.5} />
-                      <div>Descanso</div>
+                      <Moon size={isMobile ? 28 : 48} strokeWidth={1.5} />
+                      <div style={{ fontSize: isMobile ? '0.9rem' : '1.2rem' }}>Descanso</div>
                     </div>
                   );
                 }
@@ -477,10 +598,10 @@ export function TrainingPage() {
                           flexDirection: 'column',
                           alignItems: 'center',
                           justifyContent: 'center',
-                          fontSize: '1.2rem',
+                          fontSize: isMobile ? '0.9rem' : '1.2rem',
                           fontWeight: '600',
                           color: colors.text,
-                          gap: '0.5rem',
+                          gap: isMobile ? '0.3rem' : '0.5rem',
                           cursor: 'pointer',
                         }}
                         onClick={() => {
@@ -500,10 +621,10 @@ export function TrainingPage() {
                           e.currentTarget.style.boxShadow = 'none';
                         }}
                       >
-                        <Trophy size={48} strokeWidth={1.5} />
-                        <div>JOGO</div>
+                        <Trophy size={isMobile ? 28 : 48} strokeWidth={1.5} />
+                        <div style={{ fontSize: isMobile ? '0.9rem' : '1.2rem' }}>JOGO</div>
                         {session.opponent_name && (
-                          <div style={{ fontSize: '1rem', color: colors.textSecondary }}>
+                          <div style={{ fontSize: isMobile ? '0.75rem' : '1rem', color: colors.textSecondary }}>
                             vs {session.opponent_name}
                           </div>
                         )}
@@ -572,10 +693,18 @@ export function TrainingPage() {
                 }
 
                 // TREINO NORMAL - 6 blocos
-                return session.blocks?.map((block, blockIndex) => (
+                return session.blocks?.map((block, blockIndex) => {
+                  const blockMatchesTheme = themeContentIds.length > 0 && block.activity?.contents?.some(c => {
+                    const contentId = c.content?.id || c.content_id || c.id;
+                    return themeContentIds.includes(contentId);
+                  });
+                  return (
                   <div
                     key={block.id || `empty-block-${session.date}-${blockIndex}`}
-                    style={blockStyle}
+                    style={{
+                      ...blockStyle,
+                      ...(blockMatchesTheme ? { borderLeft: '3px solid #2563eb', paddingLeft: '0.3rem' } : {}),
+                    }}
                     onClick={() => {
                       setSelectedSession(session);
                       setInitialModalTab(blockIndex);
@@ -626,7 +755,8 @@ export function TrainingPage() {
                       <div style={blockContentStyle}>Clique para editar</div>
                     )}
                   </div>
-                ));
+                  );
+                });
               })()}
               </div>
 

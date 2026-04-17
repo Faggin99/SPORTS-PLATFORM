@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Edit2, Trash2 } from 'lucide-react';
 import { useTheme } from '../../../../contexts/ThemeContext';
+import { useIsMobile } from '../../../../hooks/useIsMobile';
 import { Button } from '../../../../components/common/Button';
 
 const STATUS_OPTIONS = [
@@ -12,6 +13,7 @@ const STATUS_OPTIONS = [
 
 export default function PlayersTable({ players, onEdit, onDelete }) {
   const { colors } = useTheme();
+  const isMobile = useIsMobile();
   const [hoveredObservation, setHoveredObservation] = useState(null);
 
   const containerStyle = {
@@ -106,81 +108,114 @@ export default function PlayersTable({ players, onEdit, onDelete }) {
   }
 
   return (
-    <div style={containerStyle}>
-      <table style={tableStyle}>
-        <thead style={theadStyle}>
-          <tr>
-            <th style={thStyle}>Nome</th>
-            <th style={thStyle}>Posição</th>
-            <th style={thStyle}>Status</th>
-            <th style={thStyle}>Observação</th>
-            <th style={thStyle}>Grupo</th>
-            <th style={thStyle}>Ações</th>
-          </tr>
-        </thead>
-        <tbody>
-          {players.map((player) => (
-            <tr key={player.id}>
-              <td style={tdStyle}>{player.name}</td>
-              <td style={tdStyle}>{player.position || '-'}</td>
-              <td style={tdStyle}>{getStatusLabel(player.status)}</td>
-              <td
-                style={observationCellStyle}
-                onMouseEnter={() => player.observation && player.observation.length > 30 && setHoveredObservation(player.id)}
-                onMouseLeave={() => setHoveredObservation(null)}
-              >
-                {truncateText(player.observation)}
-                {hoveredObservation === player.id && player.observation && (
-                  <div style={tooltipStyle}>
-                    {player.observation}
-                  </div>
-                )}
-              </td>
-              <td style={tdStyle}>{getGroupLabel(player.group)}</td>
-              <td style={tdStyle}>
-                <div style={actionButtonsStyle}>
-                  <button
-                    onClick={() => onEdit(player)}
-                    title="Editar atleta"
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      padding: '0.5rem',
-                      cursor: 'pointer',
-                      color: colors.text,
-                      display: 'flex',
-                      alignItems: 'center',
-                      transition: 'color 0.2s',
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.color = colors.primary}
-                    onMouseLeave={(e) => e.currentTarget.style.color = colors.text}
-                  >
-                    <Edit2 size={24} strokeWidth={1.5} />
+    <>
+      {isMobile ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          {players.map(player => (
+            <div key={player.id} style={{
+              backgroundColor: colors.surface,
+              border: `1px solid ${colors.border}`,
+              borderRadius: '0.75rem',
+              padding: '1rem',
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                <div style={{ fontWeight: '600', fontSize: '1rem', color: colors.text }}>{player.name}</div>
+                <div style={{ display: 'flex', gap: '0.25rem' }}>
+                  <button onClick={() => onEdit(player)} style={{ background: 'none', border: 'none', padding: '0.5rem', cursor: 'pointer', color: colors.primary }}>
+                    <Edit2 size={18} />
                   </button>
-                  <button
-                    onClick={() => onDelete(player.id)}
-                    title="Excluir atleta"
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      padding: '0.5rem',
-                      cursor: 'pointer',
-                      color: colors.textMuted,
-                      display: 'flex',
-                      alignItems: 'center',
-                      transition: 'color 0.2s',
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.color = colors.error}
-                    onMouseLeave={(e) => e.currentTarget.style.color = colors.textMuted}
-                  >
-                    <Trash2 size={24} strokeWidth={1.5} />
+                  <button onClick={() => onDelete(player.id)} style={{ background: 'none', border: 'none', padding: '0.5rem', cursor: 'pointer', color: colors.error || '#ef4444' }}>
+                    <Trash2 size={18} />
                   </button>
                 </div>
-              </td>
-            </tr>
+              </div>
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', fontSize: '0.85rem', color: colors.textSecondary }}>
+                {player.position && <span style={{ backgroundColor: `${colors.primary}15`, padding: '0.2rem 0.6rem', borderRadius: '0.25rem', color: colors.primary, fontWeight: '500' }}>{player.position}</span>}
+                <span>{getStatusLabel(player.status)}</span>
+                <span>{getGroupLabel(player.group)}</span>
+              </div>
+              {player.observation && <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: colors.textMuted }}>{player.observation}</div>}
+            </div>
           ))}
-        </tbody>
-      </table>
-    </div>
+        </div>
+      ) : (
+        <div style={containerStyle}>
+          <table style={tableStyle}>
+            <thead style={theadStyle}>
+              <tr>
+                <th style={thStyle}>Nome</th>
+                <th style={thStyle}>Posição</th>
+                <th style={thStyle}>Status</th>
+                <th style={thStyle}>Observação</th>
+                <th style={thStyle}>Grupo</th>
+                <th style={thStyle}>Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {players.map((player) => (
+                <tr key={player.id}>
+                  <td style={tdStyle}>{player.name}</td>
+                  <td style={tdStyle}>{player.position || '-'}</td>
+                  <td style={tdStyle}>{getStatusLabel(player.status)}</td>
+                  <td
+                    style={observationCellStyle}
+                    onMouseEnter={() => player.observation && player.observation.length > 30 && setHoveredObservation(player.id)}
+                    onMouseLeave={() => setHoveredObservation(null)}
+                  >
+                    {truncateText(player.observation)}
+                    {hoveredObservation === player.id && player.observation && (
+                      <div style={tooltipStyle}>
+                        {player.observation}
+                      </div>
+                    )}
+                  </td>
+                  <td style={tdStyle}>{getGroupLabel(player.group)}</td>
+                  <td style={tdStyle}>
+                    <div style={actionButtonsStyle}>
+                      <button
+                        onClick={() => onEdit(player)}
+                        title="Editar atleta"
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          padding: '0.5rem',
+                          cursor: 'pointer',
+                          color: colors.text,
+                          display: 'flex',
+                          alignItems: 'center',
+                          transition: 'color 0.2s',
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.color = colors.primary}
+                        onMouseLeave={(e) => e.currentTarget.style.color = colors.text}
+                      >
+                        <Edit2 size={24} strokeWidth={1.5} />
+                      </button>
+                      <button
+                        onClick={() => onDelete(player.id)}
+                        title="Excluir atleta"
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          padding: '0.5rem',
+                          cursor: 'pointer',
+                          color: colors.textMuted,
+                          display: 'flex',
+                          alignItems: 'center',
+                          transition: 'color 0.2s',
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.color = colors.error}
+                        onMouseLeave={(e) => e.currentTarget.style.color = colors.textMuted}
+                      >
+                        <Trash2 size={24} strokeWidth={1.5} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
   );
 }

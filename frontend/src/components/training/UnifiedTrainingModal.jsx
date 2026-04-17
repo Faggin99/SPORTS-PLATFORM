@@ -1,16 +1,19 @@
-import { useState, useEffect } from 'react';
-import { Save, ChevronLeft, ChevronRight, Upload, FileText, Video, Image, FileIcon, X, Eye } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Save, ChevronLeft, ChevronRight, Upload, FileText, Video, Image, FileIcon, X, Eye, ChevronDown, Paperclip } from 'lucide-react';
 import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 import { MultiSelect } from '../common/MultiSelect';
 import { Select } from '../common/Select';
 import { Textarea } from '../common/Textarea';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useIsMobile } from '../../hooks/useIsMobile';
 import { trainingService } from '../../services/trainingService';
 import { CreateTitleModal } from './CreateTitleModal';
 
 export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initialTab = 0, isMatchDay = false }) {
   const { colors } = useTheme();
+  const isMobile = useIsMobile();
+  const [attachmentsOpen, setAttachmentsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [contents, setContents] = useState([]);
@@ -29,7 +32,8 @@ export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initial
   const [pendingFile, setPendingFile] = useState(null);
 
   // Para dias de jogo, mostrar apenas o primeiro bloco como "Não relacionados"
-  const tabs = isMatchDay && session?.blocks?.length > 0
+  const ATTACHMENTS_TAB_ID = 'attachments';
+  const blockTabs = isMatchDay && session?.blocks?.length > 0
     ? [{
         id: 0,
         label: 'Não relacionados',
@@ -40,6 +44,28 @@ export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initial
         label: block.name,
         blockId: block.id,
       }));
+  // Add attachments as last tab
+  const tabs = [...blockTabs, { id: ATTACHMENTS_TAB_ID, label: 'Anexos', blockId: null }];
+  const isAttachmentsTab = activeTab === ATTACHMENTS_TAB_ID;
+
+  // Ref for tab scroll container
+  const tabScrollRef = useRef(null);
+
+  // Scroll active tab into center
+  const scrollTabIntoView = useCallback((tabId) => {
+    if (!tabScrollRef.current) return;
+    const container = tabScrollRef.current;
+    const activeBtn = container.querySelector(`[data-tab-id="${tabId}"]`);
+    if (activeBtn) {
+      const containerWidth = container.offsetWidth;
+      const btnLeft = activeBtn.offsetLeft;
+      const btnWidth = activeBtn.offsetWidth;
+      container.scrollTo({
+        left: btnLeft - (containerWidth / 2) + (btnWidth / 2),
+        behavior: 'smooth',
+      });
+    }
+  }, []);
 
   useEffect(() => {
     if (isOpen) {
@@ -322,15 +348,21 @@ export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initial
     setShowCreateTitle(false);
   };
 
+  const tabIndex = tabs.findIndex(t => t.id === activeTab);
+
   const goToPreviousTab = () => {
-    if (activeTab > 0) {
-      setActiveTab(activeTab - 1);
+    if (tabIndex > 0) {
+      const newTab = tabs[tabIndex - 1].id;
+      setActiveTab(newTab);
+      setTimeout(() => scrollTabIntoView(newTab), 50);
     }
   };
 
   const goToNextTab = () => {
-    if (activeTab < tabs.length - 1) {
-      setActiveTab(activeTab + 1);
+    if (tabIndex < tabs.length - 1) {
+      const newTab = tabs[tabIndex + 1].id;
+      setActiveTab(newTab);
+      setTimeout(() => scrollTabIntoView(newTab), 50);
     }
   };
 
@@ -489,35 +521,44 @@ export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initial
             Carregando dados...
           </div>
         ) : (
-          <div style={{ display: 'flex', gap: '1rem', height: '100%' }}>
+          <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: isMobile ? '0' : '1rem', height: '100%' }}>
             {/* Main Content Area */}
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
               {/* Tab Navigation */}
               <div style={tabContainerStyle}>
                 <button
                   onClick={goToPreviousTab}
-                  disabled={activeTab === 0}
-                  style={navButtonStyle(activeTab === 0)}
+                  disabled={tabIndex === 0}
+                  style={navButtonStyle(tabIndex === 0)}
                 >
                   <ChevronLeft size={20} />
                 </button>
 
-                <div style={{ display: 'flex', gap: '0.25rem', flex: 1, overflowX: 'auto' }}>
+                <div ref={tabScrollRef} style={{ display: 'flex', gap: '0.25rem', flex: 1, overflowX: 'auto', scrollBehavior: 'smooth', msOverflowStyle: 'none', scrollbarWidth: 'none' }}>
                   {tabs.map((tab) => (
                     <button
                       key={tab.id}
-                      onClick={() => setActiveTab(tab.id)}
-                      style={tabButtonStyle(activeTab === tab.id)}
+                      data-tab-id={tab.id}
+                      onClick={() => {
+                        setActiveTab(tab.id);
+                        setTimeout(() => scrollTabIntoView(tab.id), 50);
+                      }}
+                      style={{
+                        ...tabButtonStyle(activeTab === tab.id),
+                        ...(tab.id === ATTACHMENTS_TAB_ID ? { display: 'flex', alignItems: 'center', gap: '0.3rem' } : {}),
+                      }}
                     >
+                      {tab.id === ATTACHMENTS_TAB_ID && <Paperclip size={14} />}
                       {tab.label}
+                      {tab.id === ATTACHMENTS_TAB_ID && ` (${existingFiles.length + uploadedFiles.length})`}
                     </button>
                   ))}
                 </div>
 
                 <button
                   onClick={goToNextTab}
-                  disabled={activeTab === tabs.length - 1}
-                  style={navButtonStyle(activeTab === tabs.length - 1)}
+                  disabled={tabIndex === tabs.length - 1}
+                  style={navButtonStyle(tabIndex === tabs.length - 1)}
                 >
                   <ChevronRight size={20} />
                 </button>
@@ -525,6 +566,68 @@ export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initial
 
               {/* Tab Content */}
               <div style={contentAreaStyle}>
+                {/* Attachments Tab */}
+                {isAttachmentsTab ? (
+                  <div style={{ padding: '0.5rem' }}>
+                    {(() => {
+                      const totalFiles = existingFiles.length + uploadedFiles.length;
+                      return (
+                        <>
+                          <div style={{ fontSize: '1rem', fontWeight: '600', color: colors.text, marginBottom: '1rem' }}>
+                            Anexos da Sessão ({totalFiles}/5)
+                          </div>
+
+                          {totalFiles < 5 && (
+                            <label style={{
+                              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem',
+                              padding: '1rem', backgroundColor: colors.primary, color: '#ffffff',
+                              borderRadius: '0.5rem', cursor: 'pointer', fontSize: '0.95rem', fontWeight: '500',
+                              marginBottom: '1rem',
+                            }}>
+                              <Upload size={20} />
+                              Adicionar Anexo
+                              <input type="file" onChange={handleFileUpload} style={{ display: 'none' }} accept="image/*,video/*,.pdf" />
+                            </label>
+                          )}
+
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                            {[...existingFiles, ...uploadedFiles].map((file, i) => {
+                              const FileIconComp = getFileIcon(file.type || file.mime_type || '');
+                              return (
+                                <div key={file.id || i} style={{
+                                  display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem',
+                                  backgroundColor: colors.background, borderRadius: '0.5rem', border: `1px solid ${colors.border}`,
+                                }}>
+                                  <FileIconComp size={24} style={{ color: colors.primary, flexShrink: 0 }} />
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontWeight: '500', fontSize: '0.875rem', color: colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                      {file.title || file.name || file.file_name}
+                                    </div>
+                                    <div style={{ fontSize: '0.75rem', color: colors.textSecondary }}>
+                                      {((file.size || file.file_size || 0) / 1024 / 1024).toFixed(2)} MB
+                                    </div>
+                                  </div>
+                                  <button onClick={() => handlePreviewFile(file)} style={{ padding: '0.4rem', background: colors.primary, color: '#fff', border: 'none', borderRadius: '0.25rem', cursor: 'pointer', display: 'flex' }}>
+                                    <Eye size={16} />
+                                  </button>
+                                  <button onClick={() => handleRemoveFile(file.id, !!file.file_path)} style={{ padding: '0.4rem', background: colors.danger || '#ef4444', color: '#fff', border: 'none', borderRadius: '0.25rem', cursor: 'pointer', display: 'flex' }}>
+                                    <X size={16} />
+                                  </button>
+                                </div>
+                              );
+                            })}
+                            {totalFiles === 0 && (
+                              <div style={{ textAlign: 'center', padding: '2rem', color: colors.textMuted, fontSize: '0.875rem' }}>
+                                Nenhum anexo adicionado
+                              </div>
+                            )}
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                ) : (
+                <>
                 {/* Block Form - renderiza o bloco atual */}
                 {(() => {
                   const block = session?.blocks?.[activeTab];
@@ -536,7 +639,7 @@ export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initial
                   return (
                     <div style={blockFormStyle}>
                       {/* Linha 1: Conteúdos e Etapas lado a lado */}
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: isMobile ? '0.5rem' : '1rem' }}>
                         <MultiSelect
                           label="Conteúdos"
                           options={contents.map((c) => ({ value: c.id, label: c.name }))}
@@ -556,7 +659,7 @@ export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initial
                       </div>
 
                       {/* Linha 2: Tema, Grupo e Tempo */}
-                      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '1rem' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr 1fr', gap: isMobile ? '0.5rem' : '1rem' }}>
                         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end' }}>
                           <div style={{ flex: 1 }}>
                             <Select
@@ -576,13 +679,44 @@ export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initial
                             Novo
                           </Button>
                         </div>
-                        <MultiSelect
-                          label="Grupos"
-                          options={groupOptions}
-                          value={blockData[blockKey]?.selectedGroups || []}
-                          onChange={(value) => handleFieldChange(blockKey, 'selectedGroups', value)}
-                          placeholder="Selecione grupos..."
-                        />
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                            <label style={{ fontSize: '0.875rem', fontWeight: '500', color: colors.text }}>
+                              Grupos
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const allGroups = groupOptions.map(g => g.value);
+                                const current = blockData[blockKey]?.selectedGroups || [];
+                                const allSelected = allGroups.every(g => current.includes(g));
+                                handleFieldChange(blockKey, 'selectedGroups', allSelected ? [] : allGroups);
+                              }}
+                              style={{
+                                background: 'none',
+                                border: `1px solid ${colors.border}`,
+                                borderRadius: '0.25rem',
+                                padding: '0.2rem 0.5rem',
+                                fontSize: '0.75rem',
+                                color: colors.primary,
+                                cursor: 'pointer',
+                                fontWeight: '500',
+                              }}
+                            >
+                              {(() => {
+                                const allGroups = groupOptions.map(g => g.value);
+                                const current = blockData[blockKey]?.selectedGroups || [];
+                                return allGroups.every(g => current.includes(g)) ? 'Limpar' : 'Todos';
+                              })()}
+                            </button>
+                          </div>
+                          <MultiSelect
+                            options={groupOptions}
+                            value={blockData[blockKey]?.selectedGroups || []}
+                            onChange={(value) => handleFieldChange(blockKey, 'selectedGroups', value)}
+                            placeholder="Selecione grupos..."
+                          />
+                        </div>
                         <div>
                           <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', fontWeight: '500', color: colors.text }}>
                             Tempo (minutos)
@@ -619,19 +753,54 @@ export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initial
                     </div>
                   );
                 })()}
+                </>
+                )}
               </div>
             </div>
 
-            {/* Sidebar - Attachments (6 slots) */}
+            {/* Attachments - Sidebar on desktop only (on mobile it's a tab) */}
+            {isMobile ? null : (
             <div style={{
-              width: '250px',
-              borderLeft: `1px solid ${colors.border}`,
+              width: isMobile ? '100%' : '250px',
+              borderLeft: isMobile ? 'none' : `1px solid ${colors.border}`,
+              borderTop: isMobile ? `1px solid ${colors.border}` : 'none',
               display: 'flex',
               flexDirection: 'column',
-              gap: '0.75rem',
-              padding: '1rem',
+              gap: isMobile && !attachmentsOpen ? '0' : '0.75rem',
+              padding: isMobile ? '0' : '1rem',
               backgroundColor: colors.surface,
               flexShrink: 0,
+            }}>
+              {/* Mobile accordion toggle */}
+              {isMobile && (
+                <button
+                  onClick={() => setAttachmentsOpen(!attachmentsOpen)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    width: '100%',
+                    padding: '0.75rem 1rem',
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: colors.text,
+                    fontSize: '0.875rem',
+                    fontWeight: '600',
+                  }}
+                >
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <Paperclip size={16} />
+                    Anexos ({existingFiles.length + uploadedFiles.length}/5)
+                  </span>
+                  <ChevronDown size={18} style={{ transform: attachmentsOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
+                </button>
+              )}
+            <div style={{
+              display: isMobile && !attachmentsOpen ? 'none' : 'flex',
+              flexDirection: 'column',
+              gap: '0.75rem',
+              padding: isMobile ? '0 1rem 1rem' : '0',
             }}>
               {(() => {
                 const totalFiles = existingFiles.length + uploadedFiles.length;
@@ -805,6 +974,8 @@ export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initial
                 })()}
               </div>
             </div>
+            </div>
+            )}
           </div>
         )}
       </Modal>

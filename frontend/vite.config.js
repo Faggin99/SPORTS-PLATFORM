@@ -9,34 +9,40 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'vite.svg'],
+      includeAssets: ['pwa-192.svg', 'pwa-512.svg', 'pwa-192.png', 'pwa-512.png', 'apple-touch-icon-180.png'],
       manifest: {
-        name: 'Sports Platform - Training Management',
-        short_name: 'Training',
-        description: 'Plataforma profissional de gestão de treinos esportivos',
-        theme_color: '#10B981',
+        name: 'TactiPlan - Gestao de Treinos',
+        short_name: 'TactiPlan',
+        description: 'Plataforma profissional de gestao de treinos esportivos',
+        theme_color: '#2563eb',
         background_color: '#ffffff',
         display: 'standalone',
         start_url: '/',
         scope: '/',
         icons: [
           {
-            src: 'pwa-192.svg',
+            src: 'pwa-192.png',
             sizes: '192x192',
-            type: 'image/svg+xml'
+            type: 'image/png'
           },
           {
-            src: 'pwa-512.svg',
+            src: 'pwa-512.png',
             sizes: '512x512',
-            type: 'image/svg+xml',
+            type: 'image/png',
             purpose: 'any maskable'
+          },
+          {
+            src: 'apple-touch-icon-180.png',
+            sizes: '180x180',
+            type: 'image/png',
+            purpose: 'apple touch icon'
           }
         ]
       },
       workbox: {
         runtimeCaching: [
           {
-            urlPattern: /^http:\/\/localhost:8080\/api\/.*/i,
+            urlPattern: /\/api\/.*/i,
             handler: 'NetworkFirst',
             options: {
               cacheName: 'api-cache',

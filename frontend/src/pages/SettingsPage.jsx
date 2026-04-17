@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { User, Camera, Save, Lock, Settings as SettingsIcon } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
+import { useIsMobile } from '../hooks/useIsMobile';
 import { Button } from '../components/common/Button';
 import { Card } from '../components/common/Card';
 import { ChangePasswordModal } from '../components/settings/ChangePasswordModal';
@@ -9,6 +10,7 @@ import { userProfileService } from '../services/userProfileService';
 
 export function SettingsPage() {
   const { colors } = useTheme();
+  const isMobile = useIsMobile();
   const [loading, setLoading] = useState(false);
   const [user, setUser] = useState(null);
   const [formData, setFormData] = useState({
@@ -100,7 +102,7 @@ export function SettingsPage() {
   async function handlePasswordChange(passwords) {
     setLoading(true);
     try {
-      await userProfileService.changePassword(passwords.currentPassword, passwords.newPassword);
+      await userProfileService.changePassword(passwords.current_password, passwords.password);
       alert('Senha alterada com sucesso!');
       setShowPasswordModal(false);
     } catch (error) {
@@ -113,7 +115,7 @@ export function SettingsPage() {
 
   const inputStyle = {
     width: '100%',
-    padding: '0.75rem',
+    padding: isMobile ? '0.6rem' : '0.75rem',
     borderRadius: '0.375rem',
     border: `1px solid ${colors.border}`,
     backgroundColor: colors.surface,
@@ -128,16 +130,18 @@ export function SettingsPage() {
     color: colors.text,
   };
 
+  const photoSize = isMobile ? '100px' : '120px';
+
   const photoContainerStyle = {
     position: 'relative',
-    width: '120px',
-    height: '120px',
+    width: photoSize,
+    height: photoSize,
     margin: '0 auto 1.5rem',
   };
 
   const photoStyle = {
-    width: '120px',
-    height: '120px',
+    width: photoSize,
+    height: photoSize,
     borderRadius: '50%',
     backgroundColor: colors.surface,
     border: `3px solid ${colors.border}`,
@@ -172,18 +176,18 @@ export function SettingsPage() {
     }}>
       {/* Header */}
       <div style={{
-        padding: '1.5rem 2rem 1rem',
+        padding: isMobile ? '1rem' : '1.5rem 2rem 1rem',
         borderBottom: `1px solid ${colors.border}`,
       }}>
         <h1 style={{
-          fontSize: '1.5rem',
+          fontSize: isMobile ? '1.2rem' : '1.5rem',
           fontWeight: '700',
           color: colors.text,
           display: 'flex',
           alignItems: 'center',
           gap: '0.75rem',
         }}>
-          <SettingsIcon size={28} strokeWidth={1.5} />
+          <SettingsIcon size={isMobile ? 22 : 28} strokeWidth={1.5} />
           Configurações do Usuário
         </h1>
       </div>
@@ -192,11 +196,11 @@ export function SettingsPage() {
       <div style={{
         flex: 1,
         overflow: 'auto',
-        padding: '1.5rem 2rem',
+        padding: isMobile ? '1rem' : '1.5rem 2rem',
       }}>
         <div style={{
           display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
+          gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
           gap: '1.5rem',
           maxWidth: '1400px',
           margin: '0 auto',
@@ -372,12 +376,11 @@ export function SettingsPage() {
       </div>
 
       {/* Modal de Senha */}
-      {showPasswordModal && (
-        <ChangePasswordModal
-          onClose={() => setShowPasswordModal(false)}
-          onSave={handlePasswordChange}
-        />
-      )}
+      <ChangePasswordModal
+        isOpen={showPasswordModal}
+        onClose={() => setShowPasswordModal(false)}
+        onSave={handlePasswordChange}
+      />
 
       {/* Modal de Crop de Foto */}
       {showPhotoCropModal && selectedPhotoFile && (

@@ -1,91 +1,24 @@
-import { supabase, getCurrentTenantId } from '../../../lib/supabase';
+import { api } from '../../../services/api';
 
 export const playService = {
   async getAll(clubId = null) {
-    const tenantId = await getCurrentTenantId();
-
-    if (!tenantId) {
-      throw new Error('Usuário não autenticado');
-    }
-
-    let query = supabase
-      .from('tactical_plays')
-      .select('*')
-      .eq('tenant_id', tenantId)
-      .order('updated_at', { ascending: false });
-
-    if (clubId) {
-      query = query.eq('club_id', clubId);
-    }
-
-    const { data, error } = await query;
-
-    if (error) {
-      throw new Error(error.message || 'Erro ao buscar jogadas');
-    }
-
-    return data;
+    const query = clubId ? `?club_id=${clubId}` : '';
+    return await api.get(`/plays${query}`);
   },
 
   async getById(id) {
-    const { data, error } = await supabase
-      .from('tactical_plays')
-      .select('*')
-      .eq('id', id)
-      .single();
-
-    if (error) {
-      throw new Error(error.message || 'Erro ao buscar jogada');
-    }
-
-    return data;
+    return await api.get(`/plays/${id}`);
   },
 
   async create(data) {
-    const tenantId = await getCurrentTenantId();
-
-    if (!tenantId) {
-      throw new Error('Usuário não autenticado');
-    }
-
-    const { data: play, error } = await supabase
-      .from('tactical_plays')
-      .insert([{ ...data, tenant_id: tenantId }])
-      .select()
-      .single();
-
-    if (error) {
-      throw new Error(error.message || 'Erro ao criar jogada');
-    }
-
-    return play;
+    return await api.post('/plays', data);
   },
 
   async update(id, data) {
-    const { data: play, error } = await supabase
-      .from('tactical_plays')
-      .update({ ...data, updated_at: new Date().toISOString() })
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) {
-      throw new Error(error.message || 'Erro ao atualizar jogada');
-    }
-
-    return play;
+    return await api.put(`/plays/${id}`, data);
   },
 
   async delete(id) {
-    const { error } = await supabase
-      .from('tactical_plays')
-      .delete()
-      .eq('id', id);
-
-    if (error) {
-      throw new Error(error.message || 'Erro ao deletar jogada');
-    }
-
-    return { message: 'Jogada deletada com sucesso' };
+    return await api.delete(`/plays/${id}`);
   },
 };

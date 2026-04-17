@@ -2,9 +2,19 @@ node_modules/
 vendor/
 .env
 .DS_Store
+*.sqlite
+*.log
+
+# Build outputs
+frontend/dist/
+frontend/dev-dist/
+electron-app/build-output/
 electron-app/dist/
 electron-app/php-portable/
-electron-app/frontend/dist/assets/
-frontend/dev-dist/
-*.sqlite
-electron-app/node_modules/
+
+# Backend
+backend-node/uploads/
+
+# Large data files (imported to VPS)
+extract.json
+uploads/

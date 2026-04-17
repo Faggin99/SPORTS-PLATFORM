@@ -1,17 +1,17 @@
-import { Moon, Sun, LogOut, User } from 'lucide-react';
+import { Moon, Sun, LogOut, User, Menu } from 'lucide-react';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { Button } from '../common/Button';
 
-export function Header() {
+export function Header({ isMobile = false, onMenuToggle }) {
   const { colors, isDark, toggleTheme } = useTheme();
   const { user, tenant, logout } = useAuth();
 
   const headerStyle = {
     backgroundColor: colors.surface,
     borderBottom: `1px solid ${colors.border}`,
-    padding: '0 1.5rem',
-    height: '4rem',
+    padding: isMobile ? '0 0.75rem' : '0 1.5rem',
+    height: isMobile ? '3.5rem' : '4rem',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -20,8 +20,26 @@ export function Header() {
     zIndex: 100,
   };
 
+  const leftSectionStyle = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: isMobile ? '0.5rem' : '0.75rem',
+  };
+
+  const hamburgerStyle = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    padding: '0.375rem',
+    borderRadius: '0.375rem',
+    color: colors.text,
+  };
+
   const logoStyle = {
-    fontSize: '1.25rem',
+    fontSize: isMobile ? '1rem' : '1.25rem',
     fontWeight: '700',
     color: colors.primary,
     margin: 0,
@@ -30,7 +48,7 @@ export function Header() {
   const userInfoStyle = {
     display: 'flex',
     alignItems: 'center',
-    gap: '1rem',
+    gap: isMobile ? '0.5rem' : '1rem',
   };
 
   const tenantNameStyle = {
@@ -50,15 +68,53 @@ export function Header() {
     gap: '0.5rem',
   };
 
+  const initialsCircleStyle = {
+    width: '2rem',
+    height: '2rem',
+    borderRadius: '50%',
+    backgroundColor: colors.primary,
+    color: '#fff',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '0.75rem',
+    fontWeight: '600',
+    flexShrink: 0,
+  };
+
+  const getInitials = (name) => {
+    if (!name) return '?';
+    const parts = name.trim().split(/\s+/);
+    if (parts.length >= 2) {
+      return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    }
+    return parts[0][0].toUpperCase();
+  };
+
   return (
     <header style={headerStyle}>
-      <h1 style={logoStyle}>Training Manager</h1>
+      <div style={leftSectionStyle}>
+        {isMobile && (
+          <button style={hamburgerStyle} onClick={onMenuToggle}>
+            <Menu size={24} strokeWidth={2} />
+          </button>
+        )}
+        <h1 style={logoStyle}>TactiPlan</h1>
+      </div>
 
       <div style={userInfoStyle}>
-        <div style={{ textAlign: 'right' }}>
-          <div style={tenantNameStyle}>{tenant?.name}</div>
-          <div style={userNameStyle}>{user?.name}</div>
-        </div>
+        {!isMobile && (
+          <div style={{ textAlign: 'right' }}>
+            <div style={tenantNameStyle}>{tenant?.name}</div>
+            <div style={userNameStyle}>{user?.name}</div>
+          </div>
+        )}
+
+        {isMobile && (
+          <div style={initialsCircleStyle}>
+            {getInitials(user?.name)}
+          </div>
+        )}
 
         <div style={actionsStyle}>
           <Button
@@ -68,14 +124,25 @@ export function Header() {
             icon={isDark ? <Sun size={22} strokeWidth={1.5} /> : <Moon size={22} strokeWidth={1.5} />}
           />
 
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={logout}
-            icon={<LogOut size={22} strokeWidth={1.5} />}
-          >
-            Sair
-          </Button>
+          {!isMobile && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={logout}
+              icon={<LogOut size={22} strokeWidth={1.5} />}
+            >
+              Sair
+            </Button>
+          )}
+
+          {isMobile && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={logout}
+              icon={<LogOut size={20} strokeWidth={1.5} />}
+            />
+          )}
         </div>
       </div>
     </header>

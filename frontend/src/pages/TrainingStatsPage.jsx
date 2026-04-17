@@ -2,15 +2,18 @@ import { useState, useEffect, useRef } from 'react';
 import { Card } from '../components/common/Card';
 import { useTheme } from '../contexts/ThemeContext';
 import { useClub } from '../contexts/ClubContext';
+import { useIsMobile } from '../hooks/useIsMobile';
 import { trainingService } from '../services/trainingService';
 import { gameStatsService } from '../services/gameStatsService';
 import { WeekSelector } from '../components/stats/WeekSelector';
 import { ClubSelector } from '../components/club/ClubSelector';
-import { Clock, TrendingUp, Calendar, Target, PieChart, X, ChevronLeft, ChevronRight, Maximize2, List, Trophy, Goal, Shield, AlertTriangle } from 'lucide-react';
+import { Clock, TrendingUp, Calendar, Target, PieChart, X, ChevronLeft, ChevronRight, Maximize2, List, Trophy, Goal, Shield, AlertTriangle, CheckCircle, XCircle, Activity } from 'lucide-react';
+import { themeService } from '../services/themeService';
 
 export function TrainingStatsPage() {
   const { colors } = useTheme();
   const { selectedClub } = useClub();
+  const isMobile = useIsMobile();
   const [activeTab, setActiveTab] = useState('training'); // 'training' ou 'game'
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
@@ -31,7 +34,9 @@ export function TrainingStatsPage() {
   const [endDate, setEndDate] = useState('');
   const [expandedChart, setExpandedChart] = useState(null);
   const [showFullRankingModal, setShowFullRankingModal] = useState(false);
+  const [showComplementarySheet, setShowComplementarySheet] = useState(false);
   const [rankingPage, setRankingPage] = useState(1);
+  const [themeAdherence, setThemeAdherence] = useState(null);
   const itemsPerPage = 10;
 
   // Helper function to parse week identifier and get date range
@@ -143,6 +148,28 @@ export function TrainingStatsPage() {
     }
   }, [filterType, startDate]);
 
+  // Load theme adherence
+  useEffect(() => {
+    const loadThemeAdherence = async () => {
+      try {
+        const clubId = selectedClub?.id;
+        if (!clubId) return;
+
+        // Get current viewing month
+        const now = new Date();
+        const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+        const data = await themeService.getAdherence(month, clubId);
+        setThemeAdherence(data);
+      } catch (error) {
+        console.error('Error loading theme adherence:', error);
+        setThemeAdherence(null);
+      }
+    };
+
+    loadThemeAdherence();
+  }, [selectedClub?.id]);
+
   function getDateRangeParams() {
     let start_date, end_date;
 
@@ -220,9 +247,9 @@ export function TrainingStatsPage() {
   const pageStyle = {
     display: 'flex',
     flexDirection: 'column',
-    height: '100vh',
-    overflow: 'hidden',
-    padding: '0.75rem 1rem',
+    height: '100%',
+    overflow: 'auto',
+    padding: isMobile ? '0.75rem 0.5rem' : '0.75rem 1rem',
     gap: '0.5rem',
   };
 
@@ -244,10 +271,12 @@ export function TrainingStatsPage() {
 
   const filtersStyle = {
     display: 'flex',
-    gap: '0.5rem',
+    gap: isMobile ? '0.35rem' : '0.5rem',
     flexWrap: 'wrap',
     alignItems: 'center',
     flexShrink: 0,
+    overflowX: isMobile ? 'auto' : 'visible',
+    WebkitOverflowScrolling: 'touch',
   };
 
   const filterButtonStyle = (isActive) => ({
@@ -263,17 +292,14 @@ export function TrainingStatsPage() {
   });
 
   const contentStyle = {
-    flex: 1,
     display: 'flex',
     flexDirection: 'column',
     gap: '0.75rem',
-    minHeight: 0,
-    overflow: 'hidden',
   };
 
   const statsGridStyle = {
     display: 'grid',
-    gridTemplateColumns: 'repeat(3, 1fr)',
+    gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)',
     gap: '0.75rem',
     flexShrink: 0,
   };
@@ -306,7 +332,7 @@ export function TrainingStatsPage() {
   };
 
   const statLabelStyle = {
-    fontSize: '0.7rem',
+    fontSize: isMobile ? '0.8rem' : '0.7rem',
     color: colors.textSecondary,
     marginBottom: '0.15rem',
     whiteSpace: 'nowrap',
@@ -315,7 +341,7 @@ export function TrainingStatsPage() {
   };
 
   const statValueStyle = {
-    fontSize: '1.25rem',
+    fontSize: isMobile ? '1.35rem' : '1.25rem',
     fontWeight: '700',
     color: colors.text,
     lineHeight: 1,
@@ -323,18 +349,15 @@ export function TrainingStatsPage() {
 
   const chartsGridStyle = {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+    gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(280px, 1fr))',
     gap: '0.75rem',
-    flex: 1,
-    minHeight: 0,
-    overflow: 'auto',
   };
 
   const chartCardStyle = {
     padding: '0.75rem',
     display: 'flex',
     flexDirection: 'column',
-    minHeight: 0,
+    minHeight: '280px',
     position: 'relative',
   };
 
@@ -387,19 +410,20 @@ export function TrainingStatsPage() {
     bottom: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.85)',
     display: 'flex',
-    alignItems: 'center',
+    alignItems: isMobile ? 'stretch' : 'center',
     justifyContent: 'center',
     zIndex: 10000,
-    padding: '2rem',
+    padding: isMobile ? 0 : '2rem',
   };
 
   const modalContentStyle = {
     backgroundColor: colors.surface,
-    borderRadius: '0.75rem',
-    padding: '2rem',
-    maxWidth: expandedChart === 'ranking' ? '700px' : '900px',
+    borderRadius: isMobile ? 0 : '0.75rem',
+    padding: isMobile ? '1rem' : '2rem',
+    maxWidth: isMobile ? '100vw' : (expandedChart === 'ranking' ? '700px' : '900px'),
     width: '100%',
-    maxHeight: '85vh',
+    height: isMobile ? '100vh' : 'auto',
+    maxHeight: isMobile ? '100vh' : '85vh',
     overflowY: 'auto',
     position: 'relative',
   };
@@ -424,6 +448,7 @@ export function TrainingStatsPage() {
     durationByDay: [],
     topTitles: [],
     groupDistribution: [],
+    complementaryStats: { fisico: { minutes: 0, activities: 0 }, tecnico: { minutes: 0, activities: 0 }, totalMinutes: 0 },
   };
 
   const totalMinutesInContent = displayStats.contentDistribution?.reduce((sum, c) => sum + c.value, 0) || 0;
@@ -504,6 +529,32 @@ export function TrainingStatsPage() {
         <button style={filterButtonStyle(filterType === 'custom')} onClick={() => setFilterType('custom')}>
           Personalizado
         </button>
+        {activeTab === 'training' && (
+          <button
+            onClick={() => setShowComplementarySheet(true)}
+            style={{
+              marginLeft: 'auto',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.35rem',
+              padding: '0.4rem 0.75rem',
+              border: `1px solid ${colors.border}`,
+              borderRadius: '0.375rem',
+              backgroundColor: 'transparent',
+              color: colors.textSecondary,
+              cursor: 'pointer',
+              fontSize: '0.8rem',
+              fontWeight: '500',
+              whiteSpace: 'nowrap',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = colors.surface; e.currentTarget.style.color = colors.text; }}
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = colors.textSecondary; }}
+            title="Ver estatisticas de Fisico e Tecnico"
+          >
+            <Activity size={14} />
+            Fisico/Tecnico
+          </button>
+        )}
       </div>
 
       {/* Week Selector or Date Inputs */}
@@ -622,6 +673,96 @@ export function TrainingStatsPage() {
             <p style={{ margin: 0, fontSize: '0.875rem' }}>
               Selecione outro período ou adicione treinos na página de Planejamento.
             </p>
+          </div>
+        )}
+
+        {/* Monthly Theme Adherence Card */}
+        {themeAdherence && themeAdherence.hasTheme && (
+          <div style={{
+            padding: '1.25rem',
+            backgroundColor: colors.surface,
+            borderRadius: '0.75rem',
+            border: `1px solid ${colors.border}`,
+            marginBottom: '1.5rem',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '1rem',
+          }}>
+            {/* Icon based on adherence level */}
+            <div style={{
+              width: '48px',
+              height: '48px',
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: themeAdherence.adherencePercent >= 75 ? '#10b98120'
+                : themeAdherence.adherencePercent >= 50 ? '#f59e0b20'
+                : '#ef444420',
+              flexShrink: 0,
+            }}>
+              {themeAdherence.adherencePercent >= 75
+                ? <CheckCircle size={24} color="#10b981" />
+                : themeAdherence.adherencePercent >= 50
+                  ? <AlertTriangle size={24} color="#f59e0b" />
+                  : <XCircle size={24} color="#ef4444" />
+              }
+            </div>
+
+            {/* Text */}
+            <div style={{ flex: 1 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+                <Target size={16} color={colors.primary} />
+                <span style={{ fontWeight: '600', color: colors.text, fontSize: '0.95rem' }}>
+                  Tema do Mes: {themeAdherence.theme?.name}
+                </span>
+                {themeAdherence.secondaryTheme && (
+                  <span style={{ fontSize: '0.8rem', color: colors.textSecondary }}>
+                    + {themeAdherence.secondaryTheme.name}
+                  </span>
+                )}
+              </div>
+
+              <div style={{ fontSize: '0.875rem', color: colors.textSecondary, marginBottom: '0.5rem' }}>
+                {themeAdherence.adherencePercent >= 75
+                  ? `Parabens! Voce cumpriu o objetivo do mes, com ${themeAdherence.adherencePercent}% dos treinos focados em ${themeAdherence.theme?.name}.`
+                  : themeAdherence.adherencePercent >= 50
+                    ? `Voce cumpriu parcialmente o objetivo do mes, com ${themeAdherence.adherencePercent}% dos treinos focados em ${themeAdherence.theme?.name}.`
+                    : themeAdherence.adherencePercent > 0
+                      ? `O objetivo do mes nao foi alcancado. Apenas ${themeAdherence.adherencePercent}% dos treinos foram focados em ${themeAdherence.theme?.name}.`
+                      : `Nenhuma atividade foi relacionada ao tema do mes.`
+                }
+              </div>
+
+              {/* Progress bar */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <div style={{
+                  flex: 1,
+                  maxWidth: '200px',
+                  height: '8px',
+                  backgroundColor: colors.border,
+                  borderRadius: '4px',
+                  overflow: 'hidden',
+                }}>
+                  <div style={{
+                    width: `${themeAdherence.adherencePercent}%`,
+                    height: '100%',
+                    borderRadius: '4px',
+                    backgroundColor: themeAdherence.adherencePercent >= 75 ? '#10b981'
+                      : themeAdherence.adherencePercent >= 50 ? '#f59e0b'
+                      : '#ef4444',
+                    transition: 'width 0.5s ease',
+                  }} />
+                </div>
+                <span style={{
+                  fontSize: '0.8rem',
+                  color: colors.textSecondary,
+                  whiteSpace: 'nowrap',
+                }}>
+                  {themeAdherence.themedActivities} de {themeAdherence.totalActivities} atividades
+                </span>
+              </div>
+            </div>
           </div>
         )}
 
@@ -758,9 +899,134 @@ export function TrainingStatsPage() {
               <CompactGroupChart data={displayStats.groupDistribution} colors={colors} />
             </div>
           </Card>
+
         </div>
         )}
       </div>
+
+      {/* Complementary Training Side Sheet */}
+      {showComplementarySheet && (
+        <>
+          <div
+            onClick={() => setShowComplementarySheet(false)}
+            style={{
+              position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+              backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 998,
+            }}
+          />
+          <div style={{
+            position: 'fixed', top: 0, right: 0, bottom: 0,
+            width: isMobile ? '100%' : '450px',
+            backgroundColor: colors.background,
+            boxShadow: '-4px 0 12px rgba(0,0,0,0.2)',
+            zIndex: 999,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            animation: 'slideIn 0.3s ease-out',
+          }}>
+            <div style={{
+              padding: '1rem 1.25rem',
+              borderBottom: `1px solid ${colors.border}`,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexShrink: 0,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Activity size={20} strokeWidth={1.5} color={colors.primary} />
+                <h2 style={{ fontSize: '1.1rem', fontWeight: '700', color: colors.text, margin: 0 }}>
+                  Fisico/Tecnico
+                </h2>
+              </div>
+              <button
+                onClick={() => setShowComplementarySheet(false)}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: colors.text, padding: '0.25rem', display: 'flex' }}
+              >
+                <X size={22} />
+              </button>
+            </div>
+            <div style={{ flex: 1, overflow: 'auto', padding: '1rem 1.25rem' }}>
+              {(() => {
+                const cs = displayStats.complementaryStats || { fisico: {minutes:0, activities:[]}, tecnico: {minutes:0, activities:[]}, totalMinutes: 0 };
+                const sections = [
+                  { key: 'fisico', label: 'Fisico', color: '#06b6d4', data: cs.fisico },
+                  { key: 'tecnico', label: 'Tecnico', color: '#14b8a6', data: cs.tecnico },
+                ];
+
+                if ((cs.totalMinutes || 0) === 0) {
+                  return (
+                    <div style={{ textAlign: 'center', color: colors.textSecondary, padding: '2rem 1rem' }}>
+                      Nenhum treino fisico ou tecnico no periodo selecionado
+                    </div>
+                  );
+                }
+
+                return sections.map(section => (
+                  <div key={section.key} style={{ marginBottom: '1.5rem' }}>
+                    <div style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      marginBottom: '0.75rem',
+                      paddingBottom: '0.5rem',
+                      borderBottom: `2px solid ${section.color}`,
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: section.color }} />
+                        <span style={{ fontSize: '1rem', fontWeight: '600', color: colors.text }}>
+                          {section.label}
+                        </span>
+                      </div>
+                      <span style={{ fontSize: '0.85rem', color: colors.textSecondary }}>
+                        {section.data.minutes} min - {section.data.activities.length} atv
+                      </span>
+                    </div>
+                    {section.data.activities.length === 0 ? (
+                      <div style={{ fontSize: '0.85rem', color: colors.textMuted, padding: '0.5rem 0' }}>
+                        Nenhuma atividade
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                        {section.data.activities.map(act => {
+                          const [y, m, d] = (act.date || '').split('-');
+                          const dateLabel = d && m ? `${d}/${m}` : '-';
+                          return (
+                            <div key={act.id} style={{
+                              padding: '0.6rem 0.75rem',
+                              background: colors.surface,
+                              border: `1px solid ${colors.border}`,
+                              borderLeft: `3px solid ${section.color}`,
+                              borderRadius: '0.375rem',
+                            }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.5rem' }}>
+                                <span style={{ fontSize: '0.9rem', fontWeight: '600', color: colors.text }}>
+                                  {act.title || 'Sem titulo'}
+                                </span>
+                                <span style={{ fontSize: '0.75rem', color: colors.textSecondary, whiteSpace: 'nowrap' }}>
+                                  {dateLabel} {act.day_name ? `- ${act.day_name}` : ''}
+                                </span>
+                              </div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.25rem', fontSize: '0.75rem', color: colors.textSecondary }}>
+                                <span>{act.duration} min</span>
+                              </div>
+                              {act.description && (
+                                <div style={{ fontSize: '0.75rem', color: colors.textMuted, marginTop: '0.25rem', fontStyle: 'italic' }}>
+                                  {act.description}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                ));
+              })()}
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Expanded Chart Modal */}
       {expandedChart && expandedChart !== 'ranking' && (

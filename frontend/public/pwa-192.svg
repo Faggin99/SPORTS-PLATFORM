@@ -1,7 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg width="192" height="192" viewBox="0 0 192 192" xmlns="http://www.w3.org/2000/svg">
-  <rect width="192" height="192" fill="#10B981" rx="28"/>
-  <circle cx="96" cy="67" r="23" fill="white"/>
-  <path d="M 58 96 Q 96 134 134 96" stroke="white" stroke-width="12" fill="none" stroke-linecap="round"/>
-  <rect x="48" y="144" width="96" height="15" fill="white" rx="4"/>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2563eb"/>
+      <stop offset="100%" stop-color="#1d4ed8"/>
+    </linearGradient>
+  </defs>
+  <rect width="192" height="192" fill="url(#bg)" rx="38"/>
+  <text x="96" y="108" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-weight="800" font-size="82" fill="white" letter-spacing="-2">TP</text>
+  <rect x="32" y="142" width="128" height="4" fill="rgba(255,255,255,0.4)" rx="2"/>
 </svg>

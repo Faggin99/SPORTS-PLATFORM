@@ -3,7 +3,7 @@ import { AlertTriangle, Archive, Edit2, Trash2, Info } from 'lucide-react';
 import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 import { useTheme } from '../../contexts/ThemeContext';
-import { supabase, getCurrentTenantId } from '../../lib/supabase';
+import { trainingService } from '../../services/trainingService';
 
 /**
  * Modal de confirmação para ações em títulos de atividades (editar/excluir)
@@ -30,13 +30,7 @@ export function ActivityActionModal({
   async function checkUsage() {
     setLoadingUsage(true);
     try {
-      // Contar quantas vezes esse título foi usado em atividades de treino
-      const { count, error } = await supabase
-        .from('training_activities')
-        .select('id', { count: 'exact', head: true })
-        .eq('title_id', activity.id);
-
-      if (error) throw error;
+      const { count } = await trainingService.getTitleUsageCount(activity.id);
       setUsageCount(count || 0);
     } catch (error) {
       console.error('Error checking usage:', error);

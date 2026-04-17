@@ -6,11 +6,13 @@ import { MultiSelect } from '../common/MultiSelect';
 import { Select } from '../common/Select';
 import { Textarea } from '../common/Textarea';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useIsMobile } from '../../hooks/useIsMobile';
 import { trainingService } from '../../services/trainingService';
 import { CreateTitleModal } from './CreateTitleModal';
 
 export function SessionModal({ isOpen, onClose, session, onSave }) {
   const { colors } = useTheme();
+  const isMobile = useIsMobile();
   const [loading, setLoading] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [contents, setContents] = useState([]);
@@ -136,8 +138,8 @@ export function SessionModal({ isOpen, onClose, session, onSave }) {
   };
 
   const sectionStyle = {
-    marginBottom: '2rem',
-    paddingBottom: '1.5rem',
+    marginBottom: isMobile ? '1rem' : '2rem',
+    paddingBottom: isMobile ? '0.75rem' : '1.5rem',
     borderBottom: `1px solid ${colors.border}`,
   };
 
@@ -149,8 +151,8 @@ export function SessionModal({ isOpen, onClose, session, onSave }) {
   };
 
   const blockContainerStyle = {
-    marginBottom: '2rem',
-    padding: '1rem',
+    marginBottom: isMobile ? '1rem' : '2rem',
+    padding: isMobile ? '0.5rem' : '1rem',
     backgroundColor: `${colors.primary}05`,
     borderRadius: '0.5rem',
     border: `1px solid ${colors.border}`,
@@ -166,7 +168,7 @@ export function SessionModal({ isOpen, onClose, session, onSave }) {
   const uploadAreaStyle = {
     border: `2px dashed ${colors.border}`,
     borderRadius: '0.5rem',
-    padding: '2rem',
+    padding: isMobile ? '1rem' : '2rem',
     textAlign: 'center',
     cursor: 'pointer',
     backgroundColor: colors.background,
@@ -224,7 +226,7 @@ export function SessionModal({ isOpen, onClose, session, onSave }) {
             Carregando dados...
           </div>
         ) : (
-          <div style={{ maxHeight: 'calc(100vh - 200px)', overflowY: 'auto', padding: '0.5rem' }}>
+          <div style={{ maxHeight: 'calc(100vh - 200px)', overflowY: 'auto', padding: isMobile ? '0.25rem' : '0.5rem' }}>
             {/* File Upload Section */}
             <div style={sectionStyle}>
             <div style={sectionTitleStyle}>Arquivos e Vídeos</div>
@@ -298,7 +300,7 @@ export function SessionModal({ isOpen, onClose, session, onSave }) {
                   placeholder="Selecione etapas..."
                 />
 
-                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr', gap: '1rem' }}>
                   <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end' }}>
                     <div style={{ flex: 1 }}>
                       <Select

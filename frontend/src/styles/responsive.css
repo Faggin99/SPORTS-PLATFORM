@@ -17,6 +17,20 @@ body {
   padding: 0 1rem;
 }
 
+/* Global mobile utilities */
+@media (max-width: 768px) {
+  #root {
+    max-width: 100%;
+    padding: 0;
+    margin: 0;
+  }
+
+  /* Reduce all page padding on mobile */
+  .page-content {
+    padding: 0.5rem !important;
+  }
+}
+
 /* Mobile First - Base styles (320px+) */
 @media (max-width: 640px) {
   /* Training Page Grid */

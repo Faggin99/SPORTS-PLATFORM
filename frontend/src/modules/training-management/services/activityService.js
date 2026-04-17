@@ -1,19 +1,15 @@
-import api from './api';
-
-const BASE_PATH = '/training-management/activities';
+import { api } from '../../../services/api';
 
 export const activityService = {
   async create(activityData) {
-    const response = await api.post(BASE_PATH, activityData);
-    return response.data;
+    return await api.post('/activities', activityData);
   },
 
   async update(activityId, activityData) {
-    const response = await api.put(`${BASE_PATH}/${activityId}`, activityData);
-    return response.data;
+    return await api.put(`/activities/${activityId}`, activityData);
   },
 
   async delete(activityId) {
-    await api.delete(`${BASE_PATH}/${activityId}`);
+    return await api.delete(`/activities/${activityId}`);
   },
 };

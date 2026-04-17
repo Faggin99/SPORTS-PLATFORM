@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Edit2, Archive, Search, RotateCcw, Eye, EyeOff } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
+import { useIsMobile } from '../hooks/useIsMobile';
 import { trainingService } from '../services/trainingService';
 import { CreateTitleModal } from '../components/training/CreateTitleModal';
 import { EditActivityModal } from '../components/training/EditActivityModal';
@@ -8,6 +9,7 @@ import { ActivityActionModal } from '../components/training/ActivityActionModal'
 
 export function ActivitiesConfigPage() {
   const { colors } = useTheme();
+  const isMobile = useIsMobile();
   const [contents, setContents] = useState([]);
   const [activities, setActivities] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -132,7 +134,7 @@ export function ActivitiesConfigPage() {
   const archivedActivities = filteredActivities.filter(a => a.is_archived);
 
   const pageStyle = {
-    padding: '2rem',
+    padding: isMobile ? '1rem' : '2rem',
     maxWidth: '1400px',
     margin: '0 auto',
   };
@@ -140,12 +142,14 @@ export function ActivitiesConfigPage() {
   const headerStyle = {
     display: 'flex',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: isMobile ? 'column' : 'row',
+    alignItems: isMobile ? 'flex-start' : 'center',
+    gap: isMobile ? '0.75rem' : '0',
     marginBottom: '2rem',
   };
 
   const titleStyle = {
-    fontSize: '1.875rem',
+    fontSize: isMobile ? '1.25rem' : '1.875rem',
     fontWeight: '700',
     color: colors.text,
   };
@@ -167,15 +171,16 @@ export function ActivitiesConfigPage() {
 
   const filtersStyle = {
     display: 'flex',
+    flexDirection: isMobile ? 'column' : 'row',
     gap: '1rem',
     marginBottom: '1.5rem',
     flexWrap: 'wrap',
-    alignItems: 'center',
+    alignItems: isMobile ? 'stretch' : 'center',
   };
 
   const searchBoxStyle = {
     flex: '1',
-    minWidth: '250px',
+    minWidth: isMobile ? '100%' : '250px',
     position: 'relative',
   };
 
@@ -204,7 +209,7 @@ export function ActivitiesConfigPage() {
     borderRadius: '0.375rem',
     color: colors.text,
     fontSize: '0.875rem',
-    minWidth: '200px',
+    minWidth: isMobile ? '100%' : '200px',
   };
 
   const toggleButtonStyle = (isActive) => ({
@@ -368,108 +373,66 @@ export function ActivitiesConfigPage() {
       </div>
 
       {/* Active Activities Table */}
-      <div style={tableContainerStyle}>
-        <table style={tableStyle}>
-          <thead>
-            <tr>
-              <th style={thStyle}>Atividade</th>
-              <th style={thStyle}>Conteudo</th>
-              <th style={thStyle}>Descricao</th>
-              <th style={{ ...thStyle, width: '120px', textAlign: 'center' }}>Acoes</th>
-            </tr>
-          </thead>
-          <tbody>
-            {activeActivities.length === 0 ? (
-              <tr>
-                <td colSpan="4" style={{ ...tdStyle, textAlign: 'center', padding: '2rem', color: colors.textSecondary }}>
-                  Nenhuma atividade encontrada
-                </td>
-              </tr>
-            ) : (
-              activeActivities.map((activity) => (
-                <tr
-                  key={activity.id}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = colors.surfaceHover}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                >
-                  <td style={tdStyle}>
-                    <span style={{ fontWeight: '500' }}>{activity.title}</span>
-                  </td>
-                  <td style={tdStyle}>
-                    {activity.content && (
-                      <div style={contentBadgeStyle(activity.content.color)}>
-                        <div style={contentDotStyle(activity.content.color)} />
-                        {activity.content.name}
-                      </div>
-                    )}
-                  </td>
-                  <td style={tdStyle}>
-                    <span style={{ color: colors.textSecondary }}>
-                      {activity.description || '-'}
-                    </span>
-                  </td>
-                  <td style={{ ...tdStyle, textAlign: 'center' }}>
-                    <div style={actionsStyle}>
-                      <button
-                        style={iconButtonStyle('default')}
-                        onClick={() => handleEditClick(activity)}
-                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = colors.background}
-                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                        title="Editar"
-                      >
-                        <Edit2 size={16} />
-                      </button>
-                      <button
-                        style={iconButtonStyle('danger')}
-                        onClick={() => handleArchiveClick(activity)}
-                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = `${colors.danger || '#ef4444'}10`}
-                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                        title="Arquivar"
-                      >
-                        <Archive size={16} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Archived Activities Section */}
-      {showArchived && archivedActivities.length > 0 && (
-        <>
-          <div style={sectionTitleStyle}>
-            <Archive size={18} />
-            Atividades Arquivadas ({archivedActivities.length})
+      {isMobile ? (
+        activeActivities.length === 0 ? (
+          <div style={{ backgroundColor: colors.surface, border: `1px solid ${colors.border}`, borderRadius: '0.5rem', padding: '2rem', textAlign: 'center', color: colors.textSecondary }}>
+            Nenhuma atividade encontrada
           </div>
-          <div style={{ ...tableContainerStyle, opacity: 0.8 }}>
-            <table style={tableStyle}>
-              <thead>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            {activeActivities.map(activity => (
+              <div key={activity.id} style={{
+                backgroundColor: colors.surface,
+                border: `1px solid ${colors.border}`,
+                borderRadius: '0.75rem',
+                padding: '1rem',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <div style={{ fontWeight: '600', fontSize: '0.95rem', color: colors.text, marginBottom: '0.25rem' }}>{activity.title}</div>
+                    {activity.content && <div style={contentBadgeStyle(activity.content.color)}><div style={contentDotStyle(activity.content.color)} />{activity.content.name}</div>}
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.25rem' }}>
+                    <button style={iconButtonStyle('default')} onClick={() => handleEditClick(activity)}><Edit2 size={18} /></button>
+                    <button style={iconButtonStyle('danger')} onClick={() => handleArchiveClick(activity)}><Archive size={18} /></button>
+                  </div>
+                </div>
+                {activity.description && <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: colors.textSecondary }}>{activity.description}</div>}
+              </div>
+            ))}
+          </div>
+        )
+      ) : (
+        <div style={tableContainerStyle}>
+          <table style={tableStyle}>
+            <thead>
+              <tr>
+                <th style={thStyle}>Atividade</th>
+                <th style={thStyle}>Conteudo</th>
+                <th style={thStyle}>Descricao</th>
+                <th style={{ ...thStyle, width: '120px', textAlign: 'center' }}>Acoes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {activeActivities.length === 0 ? (
                 <tr>
-                  <th style={thStyle}>Atividade</th>
-                  <th style={thStyle}>Conteudo</th>
-                  <th style={thStyle}>Descricao</th>
-                  <th style={{ ...thStyle, width: '120px', textAlign: 'center' }}>Acoes</th>
+                  <td colSpan="4" style={{ ...tdStyle, textAlign: 'center', padding: '2rem', color: colors.textSecondary }}>
+                    Nenhuma atividade encontrada
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {archivedActivities.map((activity) => (
+              ) : (
+                activeActivities.map((activity) => (
                   <tr
                     key={activity.id}
                     onMouseEnter={(e) => e.currentTarget.style.backgroundColor = colors.surfaceHover}
                     onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                   >
                     <td style={tdStyle}>
-                      <span style={{ fontWeight: '500', color: colors.textSecondary }}>
-                        {activity.title}
-                      </span>
-                      <span style={archivedBadgeStyle}>arquivada</span>
+                      <span style={{ fontWeight: '500' }}>{activity.title}</span>
                     </td>
                     <td style={tdStyle}>
                       {activity.content && (
-                        <div style={{ ...contentBadgeStyle(activity.content.color), opacity: 0.6 }}>
+                        <div style={contentBadgeStyle(activity.content.color)}>
                           <div style={contentDotStyle(activity.content.color)} />
                           {activity.content.name}
                         </div>
@@ -483,21 +446,121 @@ export function ActivitiesConfigPage() {
                     <td style={{ ...tdStyle, textAlign: 'center' }}>
                       <div style={actionsStyle}>
                         <button
-                          style={iconButtonStyle('success')}
-                          onClick={() => handleUnarchive(activity)}
-                          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#10b98115'}
+                          style={iconButtonStyle('default')}
+                          onClick={() => handleEditClick(activity)}
+                          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = colors.background}
                           onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                          title="Restaurar"
+                          title="Editar"
                         >
-                          <RotateCcw size={16} />
+                          <Edit2 size={16} />
+                        </button>
+                        <button
+                          style={iconButtonStyle('danger')}
+                          onClick={() => handleArchiveClick(activity)}
+                          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = `${colors.danger || '#ef4444'}10`}
+                          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                          title="Arquivar"
+                        >
+                          <Archive size={16} />
                         </button>
                       </div>
                     </td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Archived Activities Section */}
+      {showArchived && archivedActivities.length > 0 && (
+        <>
+          <div style={sectionTitleStyle}>
+            <Archive size={18} />
+            Atividades Arquivadas ({archivedActivities.length})
           </div>
+          {isMobile ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', opacity: 0.8 }}>
+              {archivedActivities.map(activity => (
+                <div key={activity.id} style={{
+                  backgroundColor: colors.surface,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: '0.75rem',
+                  padding: '1rem',
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div>
+                      <div style={{ fontWeight: '600', fontSize: '0.95rem', color: colors.textSecondary, marginBottom: '0.25rem' }}>
+                        {activity.title}
+                        <span style={archivedBadgeStyle}>arquivada</span>
+                      </div>
+                      {activity.content && <div style={{ ...contentBadgeStyle(activity.content.color), opacity: 0.6 }}><div style={contentDotStyle(activity.content.color)} />{activity.content.name}</div>}
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.25rem' }}>
+                      <button style={iconButtonStyle('success')} onClick={() => handleUnarchive(activity)}><RotateCcw size={18} /></button>
+                    </div>
+                  </div>
+                  {activity.description && <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: colors.textSecondary }}>{activity.description}</div>}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ ...tableContainerStyle, opacity: 0.8 }}>
+              <table style={tableStyle}>
+                <thead>
+                  <tr>
+                    <th style={thStyle}>Atividade</th>
+                    <th style={thStyle}>Conteudo</th>
+                    <th style={thStyle}>Descricao</th>
+                    <th style={{ ...thStyle, width: '120px', textAlign: 'center' }}>Acoes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {archivedActivities.map((activity) => (
+                    <tr
+                      key={activity.id}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = colors.surfaceHover}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                    >
+                      <td style={tdStyle}>
+                        <span style={{ fontWeight: '500', color: colors.textSecondary }}>
+                          {activity.title}
+                        </span>
+                        <span style={archivedBadgeStyle}>arquivada</span>
+                      </td>
+                      <td style={tdStyle}>
+                        {activity.content && (
+                          <div style={{ ...contentBadgeStyle(activity.content.color), opacity: 0.6 }}>
+                            <div style={contentDotStyle(activity.content.color)} />
+                            {activity.content.name}
+                          </div>
+                        )}
+                      </td>
+                      <td style={tdStyle}>
+                        <span style={{ color: colors.textSecondary }}>
+                          {activity.description || '-'}
+                        </span>
+                      </td>
+                      <td style={{ ...tdStyle, textAlign: 'center' }}>
+                        <div style={actionsStyle}>
+                          <button
+                            style={iconButtonStyle('success')}
+                            onClick={() => handleUnarchive(activity)}
+                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#10b98115'}
+                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                            title="Restaurar"
+                          >
+                            <RotateCcw size={16} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </>
       )}
 

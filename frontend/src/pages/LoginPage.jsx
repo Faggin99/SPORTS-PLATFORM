@@ -7,8 +7,8 @@ import { Input } from '../components/common/Input';
 import { Button } from '../components/common/Button';
 
 export function LoginPage() {
-  const [email, setEmail] = useState('admin@arena1.com');
-  const [password, setPassword] = useState('password');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
@@ -81,7 +81,7 @@ export function LoginPage() {
   return (
     <div style={containerStyle}>
       <div style={cardStyle}>
-        <h1 style={titleStyle}>Training Manager</h1>
+        <h1 style={titleStyle}>TactiPlan</h1>
         <p style={subtitleStyle}>Faça login para continuar</p>
 
         <form onSubmit={handleSubmit} style={formStyle}>

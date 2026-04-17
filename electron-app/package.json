@@ -1,60 +1,36 @@
 {
-  "name": "sports-platform-desktop",
-  "version": "1.2.0",
-  "description": "Sports Platform - Training Management Desktop App",
+  "name": "tactiplan-desktop",
+  "version": "2.0.0",
+  "description": "TactiPlan - Gestao de Treinos",
   "main": "main.js",
   "scripts": {
-    "start": "cross-env NODE_ENV=development electron .",
-    "setup-php": "node setup-php.js",
-    "prebuild": "node setup-php.js",
+    "start": "electron .",
     "build": "electron-builder",
     "build:win": "electron-builder --win",
     "build:mac": "electron-builder --mac",
     "build:linux": "electron-builder --linux"
   },
-  "keywords": ["sports", "training", "management", "desktop"],
-  "author": "Sports Platform Team",
+  "keywords": ["sports", "training", "tactical", "tactiplan"],
+  "author": "TactiPlan",
   "license": "MIT",
   "build": {
-    "appId": "com.sportsplatform.training",
-    "productName": "Sports Platform",
+    "appId": "com.tactiplan.app",
+    "productName": "TactiPlan",
     "directories": {
-      "output": "dist"
+      "output": "build-output"
     },
-    "asar": false,
     "files": [
       "main.js",
-      "setup-php.js",
-      "php-portable-production.ini",
       "assets/**/*",
-      "php-portable/**/*",
-      "frontend/dist/**/*",
-      "backend/**/*",
-      "backend/vendor/**/*",
-      "backend/database/database.sqlite",
-      "!backend/node_modules",
-      "!backend/storage/logs",
-      "!backend/storage/framework/sessions/*",
-      "!backend/storage/framework/views/*",
-      "!backend/tests",
-      "!backend/.env",
-      "backend/.env.electron"
-    ],
-    "extraFiles": [
-      {
-        "from": "backend/vendor",
-        "to": "resources/app/backend/vendor",
-        "filter": ["**/*"]
-      }
+      "!assets/icon.ico.bak"
     ],
     "win": {
-      "target": ["nsis"],
-      "icon": "assets/icon.ico",
-      "signAndEditExecutable": false
+      "target": ["nsis", "portable"],
+      "icon": "assets/icon.png"
     },
     "mac": {
       "target": ["dmg"],
-      "icon": "assets/icon.icns",
+      "icon": "assets/icon.png",
       "category": "public.app-category.productivity"
     },
     "linux": {
@@ -66,13 +42,9 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "shortcutName": "TactiPlan"
     }
-  },
-  "dependencies": {
-    "concurrently": "^9.2.1",
-    "cross-env": "^10.1.0",
-    "wait-on": "^9.0.3"
   },
   "devDependencies": {
     "electron": "^39.2.1",

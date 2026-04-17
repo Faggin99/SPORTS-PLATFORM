@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Plus, Save, Users, List, Grid, FileText } from 'lucide-react';
 import { useTheme } from '../../../contexts/ThemeContext';
+import { useIsMobile } from '../../../hooks/useIsMobile';
 import { Button } from '../../../components/common/Button';
 import { athleteService } from '../services/athleteService';
 import PlayerModal from '../components/plantel/PlayerModal';
@@ -10,6 +11,7 @@ import { generatePlantelPDF } from '../utils/pdfGenerator';
 
 export default function PlantelPage() {
   const { colors } = useTheme();
+  const isMobile = useIsMobile();
   const [athletes, setAthletes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -189,13 +191,15 @@ export default function PlantelPage() {
   const headerStyle = {
     display: 'flex',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: isMobile ? 'flex-start' : 'center',
     marginBottom: '1rem',
     flexShrink: 0,
+    flexDirection: isMobile ? 'column' : 'row',
+    gap: isMobile ? '0.75rem' : 0,
   };
 
   const titleStyle = {
-    fontSize: '1.5rem',
+    fontSize: isMobile ? '1.2rem' : '1.5rem',
     fontWeight: '700',
     color: colors.text,
     display: 'flex',
@@ -207,6 +211,7 @@ export default function PlantelPage() {
     display: 'flex',
     gap: '0.5rem',
     alignItems: 'center',
+    width: isMobile ? '100%' : 'auto',
   };
 
   const sectionStyle = {
@@ -227,11 +232,13 @@ export default function PlantelPage() {
     marginBottom: '1rem',
     borderBottom: `1px solid ${colors.border}`,
     flexShrink: 0,
+    overflowX: isMobile ? 'auto' : 'visible',
+    WebkitOverflowScrolling: 'touch',
   };
 
   const tabStyle = (isActive) => ({
-    padding: '0.65rem 1.25rem',
-    fontSize: '0.875rem',
+    padding: isMobile ? '0.5rem 0.75rem' : '0.65rem 1.25rem',
+    fontSize: isMobile ? '0.8rem' : '0.875rem',
     fontWeight: '500',
     color: isActive ? colors.primary : colors.text,
     backgroundColor: 'transparent',
@@ -242,6 +249,7 @@ export default function PlantelPage() {
     display: 'flex',
     alignItems: 'center',
     gap: '0.5rem',
+    whiteSpace: 'nowrap',
   });
 
   const contentSectionStyle = {
@@ -254,9 +262,10 @@ export default function PlantelPage() {
 
   const groupsContainerStyle = {
     display: 'flex',
+    flexDirection: isMobile ? 'column' : 'row',
     gap: '0.65rem',
     width: '100%',
-    height: '100%',
+    height: isMobile ? 'auto' : '100%',
   };
 
   const paginationStyle = {

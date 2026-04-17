@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import { clubService } from '../services/clubService';
-import { supabase, getCurrentTenantId } from '../lib/supabase';
+import { api } from '../services/api';
+import { useAuth } from './AuthContext';
 
 const ClubContext = createContext();
 
@@ -8,41 +9,18 @@ export function ClubProvider({ children }) {
   const [clubs, setClubs] = useState([]);
   const [selectedClub, setSelectedClub] = useState(null);
   const [loading, setLoading] = useState(true);
+  const { isAuthenticated } = useAuth();
 
-  // Load clubs on mount, but wait for auth session to be ready
+  // Load clubs when auth state changes
   useEffect(() => {
-    const initClubs = async () => {
-      // Wait for Supabase session to be ready
-      const { data: { session } } = await supabase.auth.getSession();
-
-      if (session) {
-        // Session is ready, load clubs
-        await loadClubs();
-      } else {
-        // No session, stop loading
-        setLoading(false);
-      }
-    };
-
-    initClubs();
-
-    // Listen for auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_IN' && session) {
-        // User just signed in, load clubs
-        loadClubs();
-      } else if (event === 'SIGNED_OUT') {
-        // User signed out, clear clubs
-        setClubs([]);
-        setSelectedClub(null);
-        setLoading(false);
-      }
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, []);
+    if (isAuthenticated) {
+      loadClubs();
+    } else {
+      setClubs([]);
+      setSelectedClub(null);
+      setLoading(false);
+    }
+  }, [isAuthenticated]);
 
   async function loadClubs() {
     try {
@@ -101,23 +79,8 @@ export function ClubProvider({ children }) {
 
   async function migrateOldDataToClub(clubId) {
     try {
-      const tenantId = await getCurrentTenantId();
-      if (!tenantId) return;
-
-      // Migrate training_microcycles without club_id
-      await supabase
-        .from('training_microcycles')
-        .update({ club_id: clubId })
-        .eq('tenant_id', tenantId)
-        .is('club_id', null);
-
-      // Migrate athletes without club_id
-      await supabase
-        .from('athletes')
-        .update({ club_id: clubId })
-        .eq('tenant_id', tenantId)
-        .is('club_id', null);
-
+      // Call backend endpoint to migrate orphaned data
+      await api.post(`/clubs/${clubId}/migrate-data`);
       console.log('Migrated old data to club:', clubId);
     } catch (error) {
       console.error('Error migrating old data:', error);

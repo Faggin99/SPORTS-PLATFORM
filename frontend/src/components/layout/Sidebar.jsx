@@ -1,14 +1,186 @@
 import { useState } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { Calendar, Users, BarChart3, Settings, ChevronDown, User, Building2, Target, Waypoints } from 'lucide-react';
 import { useTheme } from '../../contexts/ThemeContext';
 
-export function Sidebar() {
+export function Sidebar({ isMobile = false, isOpen = false, onClose }) {
   const { colors } = useTheme();
   const [hoveredLink, setHoveredLink] = useState(null);
   const [settingsExpanded, setSettingsExpanded] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
 
+  const navLinks = [
+    {
+      to: '/training',
+      icon: Calendar,
+      label: 'Programacao de Treinos',
+    },
+    {
+      to: '/training-stats',
+      icon: BarChart3,
+      label: 'Estatisticas de Treino',
+    },
+    {
+      to: '/plantel',
+      icon: Users,
+      label: 'Plantel de Atletas',
+    },
+    {
+      to: '/tactical-board',
+      icon: Waypoints,
+      label: 'Quadro Tatico',
+    },
+  ];
+
+  const settingsSubLinks = [
+    {
+      to: '/settings',
+      icon: User,
+      label: 'Usuario',
+    },
+    {
+      to: '/settings/clubs',
+      icon: Building2,
+      label: 'Clubes',
+    },
+    {
+      to: '/settings/activities',
+      icon: Target,
+      label: 'Atividades',
+    },
+  ];
+
+  const isSettingsActive = location.pathname.startsWith('/settings');
+
+  // --- Mobile drawer mode ---
+  if (isMobile) {
+    const backdropStyle = {
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+      zIndex: 200,
+      opacity: isOpen ? 1 : 0,
+      pointerEvents: isOpen ? 'auto' : 'none',
+      transition: 'opacity 0.3s ease',
+    };
+
+    const drawerStyle = {
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      bottom: 0,
+      width: '280px',
+      backgroundColor: colors.surface,
+      borderRight: `1px solid ${colors.border}`,
+      zIndex: 201,
+      transform: isOpen ? 'translateX(0)' : 'translateX(-100%)',
+      transition: 'transform 0.3s ease',
+      display: 'flex',
+      flexDirection: 'column',
+      overflowY: 'auto',
+    };
+
+    const drawerHeaderStyle = {
+      padding: '1rem 1.25rem',
+      borderBottom: `1px solid ${colors.border}`,
+      fontSize: '1.1rem',
+      fontWeight: '700',
+      color: colors.primary,
+    };
+
+    const mobileNavLinkStyle = (isActive) => ({
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.75rem',
+      padding: '0.875rem 1.25rem',
+      color: isActive ? colors.primary : colors.text,
+      textDecoration: 'none',
+      fontSize: '0.9rem',
+      fontWeight: '500',
+      backgroundColor: isActive ? `${colors.primary}10` : 'transparent',
+      borderLeft: `3px solid ${isActive ? colors.primary : 'transparent'}`,
+      transition: 'background-color 0.2s',
+    });
+
+    const handleNavClick = () => {
+      if (onClose) onClose();
+    };
+
+    return (
+      <>
+        {/* Backdrop */}
+        <div style={backdropStyle} onClick={onClose} />
+
+        {/* Drawer */}
+        <aside style={drawerStyle}>
+          <div style={drawerHeaderStyle}>Menu</div>
+          <nav style={{ flex: 1, paddingTop: '0.5rem' }}>
+            {navLinks.map((link) => (
+              <NavLink
+                key={link.to}
+                to={link.to}
+                style={({ isActive }) => mobileNavLinkStyle(isActive)}
+                onClick={handleNavClick}
+              >
+                <link.icon size={22} strokeWidth={1.5} />
+                {link.label}
+              </NavLink>
+            ))}
+
+            {/* Settings section */}
+            <button
+              style={{
+                ...mobileNavLinkStyle(isSettingsActive),
+                border: 'none',
+                cursor: 'pointer',
+                width: '100%',
+                textAlign: 'left',
+                background: isSettingsActive ? `${colors.primary}10` : 'transparent',
+              }}
+              onClick={() => setSettingsExpanded((prev) => !prev)}
+            >
+              <Settings size={22} strokeWidth={1.5} />
+              <span style={{ flex: 1 }}>Configuracoes</span>
+              <ChevronDown
+                size={18}
+                style={{
+                  transform: settingsExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                  transition: 'transform 0.2s',
+                }}
+              />
+            </button>
+
+            {settingsExpanded && (
+              <div style={{ paddingLeft: '1rem' }}>
+                {settingsSubLinks.map((subLink) => (
+                  <NavLink
+                    key={subLink.to}
+                    to={subLink.to}
+                    end={subLink.to === '/settings'}
+                    style={({ isActive }) => ({
+                      ...mobileNavLinkStyle(isActive),
+                      paddingLeft: '1.5rem',
+                      fontSize: '0.85rem',
+                    })}
+                    onClick={handleNavClick}
+                  >
+                    <subLink.icon size={18} strokeWidth={1.5} />
+                    {subLink.label}
+                  </NavLink>
+                ))}
+              </div>
+            )}
+          </nav>
+        </aside>
+      </>
+    );
+  }
+
+  // --- Desktop sidebar mode ---
   const sidebarStyle = {
     width: '5.5rem',
     backgroundColor: colors.surface,
@@ -53,49 +225,6 @@ export function Sidebar() {
     zIndex: 1000,
     pointerEvents: 'none',
   };
-
-  const navLinks = [
-    {
-      to: '/training',
-      icon: Calendar,
-      label: 'Programação de Treinos',
-    },
-    {
-      to: '/training-stats',
-      icon: BarChart3,
-      label: 'Estatísticas de Treino',
-    },
-    {
-      to: '/plantel',
-      icon: Users,
-      label: 'Plantel de Atletas',
-    },
-    {
-      to: '/tactical-board',
-      icon: Waypoints,
-      label: 'Quadro Tático',
-    },
-  ];
-
-  const settingsSubLinks = [
-    {
-      to: '/settings',
-      icon: User,
-      label: 'Usuário',
-    },
-    {
-      to: '/settings/clubs',
-      icon: Building2,
-      label: 'Clubes',
-    },
-    {
-      to: '/settings/activities',
-      icon: Target,
-      label: 'Atividades',
-    },
-  ];
-
-  const isSettingsActive = location.pathname.startsWith('/settings');
 
   const settingsButtonStyle = {
     display: 'flex',
