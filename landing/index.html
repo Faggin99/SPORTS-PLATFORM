@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<script>
+// Clear old PWA service worker and caches from when app was hosted here
+(function() {
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistrations().then(function(regs) {
+      for (var i = 0; i < regs.length; i++) {
+        regs[i].unregister();
+      }
+      if (regs.length > 0) {
+        // Force reload to get clean landing
+        if (!sessionStorage.getItem('sw_cleaned')) {
+          sessionStorage.setItem('sw_cleaned', '1');
+          if ('caches' in window) {
+            caches.keys().then(function(keys) {
+              return Promise.all(keys.map(function(k) { return caches.delete(k); }));
+            }).then(function() { location.reload(); });
+          } else {
+            location.reload();
+          }
+        }
+      }
+    });
+  }
+  // Strip any leftover hash from old PWA routes
+  if (location.hash && location.hash.startsWith('#/')) {
+    history.replaceState(null, '', location.pathname);
+  }
+})();
+</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TactiPlan - Gestao de Treinos para Treinadores</title>
+<meta name="description" content="Plataforma profissional para treinadores de futebol e futsal. Gerencie treinos, jogos, atletas e estrategias em um so lugar.">
+<meta name="theme-color" content="#2563eb">
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      fontFamily: {
+        sans: ['Inter', 'system-ui', 'sans-serif'],
+      },
+      animation: {
+        'float': 'float 6s ease-in-out infinite',
+        'fade-in-up': 'fadeInUp 0.8s ease-out',
+        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+      },
+      keyframes: {
+        float: {
+          '0%, 100%': { transform: 'translateY(0)' },
+          '50%': { transform: 'translateY(-20px)' },
+        },
+        fadeInUp: {
+          '0%': { opacity: 0, transform: 'translateY(30px)' },
+          '100%': { opacity: 1, transform: 'translateY(0)' },
+        },
+      },
+    },
+  },
+}
+</script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  html { scroll-behavior: smooth; }
+  .gradient-text {
+    background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .bg-mesh {
+    background-color: #0a0f1e;
+    background-image:
+      radial-gradient(at 15% 20%, rgba(37, 99, 235, 0.15) 0px, transparent 50%),
+      radial-gradient(at 85% 30%, rgba(124, 58, 237, 0.15) 0px, transparent 50%),
+      radial-gradient(at 50% 90%, rgba(37, 99, 235, 0.1) 0px, transparent 50%);
+  }
+  .card-hover {
+    transition: all 0.3s ease;
+  }
+  .card-hover:hover {
+    transform: translateY(-8px);
+    box-shadow: 0 20px 40px rgba(37, 99, 235, 0.2);
+  }
+  .glass {
+    background: rgba(255, 255, 255, 0.03);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+</style>
+</head>
+<body class="font-sans bg-mesh text-slate-100 min-h-screen antialiased">
+
+<!-- Header -->
+<header class="fixed top-0 left-0 right-0 z-50 glass">
+  <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+    <div class="flex items-center gap-2">
+      <div class="w-10 h-10 bg-gradient-to-br from-blue-600 to-blue-800 rounded-xl flex items-center justify-center font-black text-white text-lg">TP</div>
+      <span class="text-xl font-bold">TactiPlan</span>
+    </div>
+    <nav class="hidden md:flex items-center gap-8">
+      <a href="#recursos" class="text-slate-300 hover:text-white transition">Recursos</a>
+      <a href="#download" class="text-slate-300 hover:text-white transition">Download</a>
+      <a href="https://app.tactiplan.faggin.com.br" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg font-medium transition">Acessar App</a>
+    </nav>
+    <a href="https://app.tactiplan.faggin.com.br" class="md:hidden px-3 py-1.5 bg-blue-600 rounded-lg text-sm font-medium">Acessar</a>
+  </div>
+</header>
+
+<!-- Hero -->
+<section class="relative pt-40 pb-24 px-6 overflow-hidden">
+  <div class="max-w-7xl mx-auto text-center relative z-10">
+    <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full glass mb-8 animate-fade-in-up">
+      <span class="w-2 h-2 bg-emerald-400 rounded-full animate-pulse-slow"></span>
+      <span class="text-sm text-slate-300">Nova versao 2.0 disponivel</span>
+    </div>
+
+    <h1 class="text-5xl md:text-7xl font-black mb-6 leading-tight animate-fade-in-up">
+      Planejamento tatico <br>
+      <span class="gradient-text">profissional</span>
+    </h1>
+
+    <p class="text-xl text-slate-400 max-w-2xl mx-auto mb-12 animate-fade-in-up">
+      A plataforma completa para treinadores de futebol e futsal gerenciarem microciclos, jogos, plantel e estrategias - tudo em um so lugar.
+    </p>
+
+    <div class="flex flex-wrap items-center justify-center gap-4 animate-fade-in-up">
+      <a href="#download" class="group px-8 py-4 bg-blue-600 hover:bg-blue-700 rounded-xl font-semibold flex items-center gap-2 transition transform hover:scale-105">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4 4m0 0l-4-4m4 4V4"/></svg>
+        Baixar Agora
+      </a>
+      <a href="https://app.tactiplan.faggin.com.br" class="px-8 py-4 glass hover:bg-white/5 rounded-xl font-semibold flex items-center gap-2 transition">
+        Acessar Online
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+      </a>
+    </div>
+
+    <!-- Stats -->
+    <div class="mt-20 grid grid-cols-3 gap-8 max-w-2xl mx-auto">
+      <div>
+        <div class="text-3xl md:text-4xl font-black gradient-text">16</div>
+        <div class="text-sm text-slate-400 mt-1">Modulos integrados</div>
+      </div>
+      <div>
+        <div class="text-3xl md:text-4xl font-black gradient-text">100%</div>
+        <div class="text-sm text-slate-400 mt-1">Responsivo</div>
+      </div>
+      <div>
+        <div class="text-3xl md:text-4xl font-black gradient-text">PWA</div>
+        <div class="text-sm text-slate-400 mt-1">Mobile pronto</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Features -->
+<section id="recursos" class="py-24 px-6 relative">
+  <div class="max-w-7xl mx-auto">
+    <div class="text-center mb-16">
+      <h2 class="text-4xl md:text-5xl font-black mb-4">Tudo que voce precisa</h2>
+      <p class="text-xl text-slate-400">Ferramentas poderosas para treinadores profissionais</p>
+    </div>
+
+    <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div class="glass card-hover p-8 rounded-2xl">
+        <div class="w-14 h-14 bg-gradient-to-br from-blue-500 to-blue-700 rounded-xl flex items-center justify-center mb-6">
+          <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+        </div>
+        <h3 class="text-xl font-bold mb-3">Microciclos de Treino</h3>
+        <p class="text-slate-400">Organize a semana completa com 7 sessoes e 6 blocos cada. Arraste, edite e visualize tudo de forma intuitiva.</p>
+      </div>
+
+      <div class="glass card-hover p-8 rounded-2xl">
+        <div class="w-14 h-14 bg-gradient-to-br from-emerald-500 to-emerald-700 rounded-xl flex items-center justify-center mb-6">
+          <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        </div>
+        <h3 class="text-xl font-bold mb-3">Gestao de Plantel</h3>
+        <p class="text-slate-400">Cadastre atletas, divida em grupos (G1, G2, G3), acompanhe status e observacoes de cada jogador.</p>
+      </div>
+
+      <div class="glass card-hover p-8 rounded-2xl">
+        <div class="w-14 h-14 bg-gradient-to-br from-purple-500 to-purple-700 rounded-xl flex items-center justify-center mb-6">
+          <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
+        </div>
+        <h3 class="text-xl font-bold mb-3">Quadro Tatico Interativo</h3>
+        <p class="text-slate-400">Crie jogadas em campo 2D, anime jogadores, desenhe setas e exporte como video. Futebol 11 e futsal.</p>
+      </div>
+
+      <div class="glass card-hover p-8 rounded-2xl">
+        <div class="w-14 h-14 bg-gradient-to-br from-amber-500 to-orange-600 rounded-xl flex items-center justify-center mb-6">
+          <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+        </div>
+        <h3 class="text-xl font-bold mb-3">Estatisticas Completas</h3>
+        <p class="text-slate-400">Graficos de minutagem por conteudo, aderencia ao tema do mes, gols por tipo e minuto, e muito mais.</p>
+      </div>
+
+      <div class="glass card-hover p-8 rounded-2xl">
+        <div class="w-14 h-14 bg-gradient-to-br from-pink-500 to-rose-600 rounded-xl flex items-center justify-center mb-6">
+          <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+        </div>
+        <h3 class="text-xl font-bold mb-3">Tema do Mes</h3>
+        <p class="text-slate-400">Defina um foco tatico para cada mes e acompanhe em tempo real quanto dos treinos aderiram ao objetivo.</p>
+      </div>
+
+      <div class="glass card-hover p-8 rounded-2xl">
+        <div class="w-14 h-14 bg-gradient-to-br from-cyan-500 to-teal-600 rounded-xl flex items-center justify-center mb-6">
+          <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/></svg>
+        </div>
+        <h3 class="text-xl font-bold mb-3">Multi-Clube</h3>
+        <p class="text-slate-400">Gerencie varios clubes na mesma conta. Perfeito para treinadores que trabalham com multiplas equipes.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Download Section -->
+<section id="download" class="py-24 px-6 relative">
+  <div class="max-w-5xl mx-auto">
+    <div class="text-center mb-16">
+      <h2 class="text-4xl md:text-5xl font-black mb-4">Baixe para seu sistema</h2>
+      <p class="text-xl text-slate-400">Aplicativo desktop oficial. Rapido, leve e sempre atualizado.</p>
+    </div>
+
+    <div class="grid md:grid-cols-2 gap-6">
+      <!-- Windows -->
+      <div class="glass card-hover p-8 rounded-2xl">
+        <div class="flex items-start justify-between mb-6">
+          <div>
+            <div class="w-16 h-16 bg-gradient-to-br from-blue-500 to-blue-700 rounded-2xl flex items-center justify-center mb-4">
+              <svg class="w-9 h-9" fill="currentColor" viewBox="0 0 24 24"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></svg>
+            </div>
+            <h3 class="text-2xl font-bold mb-1">Windows</h3>
+            <p class="text-sm text-slate-400">Executavel unico - pronto pra usar</p>
+          </div>
+          <div class="text-right">
+            <div class="text-xs text-slate-500">Tamanho</div>
+            <div class="text-lg font-bold">84 MB</div>
+          </div>
+        </div>
+
+        <div class="space-y-3 text-sm text-slate-400 mb-6">
+          <div class="flex items-center gap-2">
+            <svg class="w-4 h-4 text-emerald-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+            Windows 10 ou superior
+          </div>
+          <div class="flex items-center gap-2">
+            <svg class="w-4 h-4 text-emerald-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+            Nao precisa instalar
+          </div>
+          <div class="flex items-center gap-2">
+            <svg class="w-4 h-4 text-emerald-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+            Basta executar o .exe
+          </div>
+        </div>
+
+        <a href="/downloads/TactiPlan-2.0.0-portable.exe" download class="block w-full text-center px-6 py-4 bg-blue-600 hover:bg-blue-700 rounded-xl font-semibold transition transform hover:scale-[1.02]">
+          Baixar para Windows
+        </a>
+        <p class="text-xs text-center text-slate-500 mt-3">Windows pode exibir aviso - clique em "Mais informacoes" e "Executar mesmo assim"</p>
+      </div>
+
+      <!-- Linux -->
+      <div class="glass card-hover p-8 rounded-2xl">
+        <div class="flex items-start justify-between mb-6">
+          <div>
+            <div class="w-16 h-16 bg-gradient-to-br from-amber-500 to-orange-600 rounded-2xl flex items-center justify-center mb-4">
+              <svg class="w-9 h-9" fill="currentColor" viewBox="0 0 24 24"><path d="M12.504 0C5.603 0 .003 5.603.003 12.504c0 6.901 5.6 12.496 12.501 12.496C19.404 25 25 19.405 25 12.504 25 5.603 19.405.003 12.504.003zm0 22.504c-5.516 0-9.999-4.483-9.999-9.999 0-5.516 4.483-9.999 9.999-9.999 5.516 0 9.999 4.483 9.999 9.999 0 5.516-4.483 9.999-9.999 9.999zm-2.917-8.254c.583 0 1.166-.25 1.166-.834 0-.5-.166-.833-.5-1.25-.333-.333-.833-.666-.833-1.166 0-.5.333-.833.833-.833.584 0 1.167.333 1.167.833 0 .25-.084.5-.25.75l.333.333c.25-.417.417-.833.417-1.25 0-1-.75-1.5-1.667-1.5s-1.75.583-1.75 1.5c0 .75.5 1.25.917 1.666.333.333.5.583.5.834 0 .333-.25.583-.583.583s-.583-.25-.583-.583c0-.167.083-.334.166-.5l-.333-.334c-.25.334-.333.667-.333 1 0 .834.666 1.334 1.333 1.334zm5.833.416c.583 0 1.167-.25 1.167-.834 0-.5-.167-.833-.5-1.25-.334-.333-.834-.666-.834-1.166 0-.5.334-.833.834-.833.583 0 1.166.333 1.166.833 0 .25-.083.5-.25.75l.334.333c.25-.417.416-.833.416-1.25 0-1-.75-1.5-1.666-1.5s-1.75.583-1.75 1.5c0 .75.5 1.25.916 1.666.334.333.5.583.5.834 0 .333-.25.583-.583.583s-.583-.25-.583-.583c0-.167.083-.334.167-.5l-.334-.334c-.25.334-.333.667-.333 1 0 .834.667 1.334 1.333 1.334z"/></svg>
+            </div>
+            <h3 class="text-2xl font-bold mb-1">Linux</h3>
+            <p class="text-sm text-slate-400">AppImage - arquivo unico</p>
+          </div>
+          <div class="text-right">
+            <div class="text-xs text-slate-500">Tamanho</div>
+            <div class="text-lg font-bold">110 MB</div>
+          </div>
+        </div>
+
+        <div class="space-y-3 text-sm text-slate-400 mb-6">
+          <div class="flex items-center gap-2">
+            <svg class="w-4 h-4 text-emerald-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+            Qualquer distro moderna
+          </div>
+          <div class="flex items-center gap-2">
+            <svg class="w-4 h-4 text-emerald-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+            Arquitetura x64
+          </div>
+          <div class="flex items-center gap-2">
+            <svg class="w-4 h-4 text-emerald-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+            Arquivo executavel unico
+          </div>
+        </div>
+
+        <a href="/downloads/TactiPlan-2.0.0.AppImage" download class="block w-full text-center px-6 py-4 bg-gradient-to-br from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 rounded-xl font-semibold transition transform hover:scale-[1.02]">
+          Baixar para Linux
+        </a>
+        <p class="text-xs text-center text-slate-500 mt-3">chmod +x e execute</p>
+      </div>
+    </div>
+
+    <!-- Web version -->
+    <div class="mt-8 glass p-8 rounded-2xl text-center">
+      <div class="flex items-center justify-center gap-2 mb-3">
+        <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>
+        <span class="text-sm font-semibold text-blue-400">Prefere usar no navegador?</span>
+      </div>
+      <p class="text-slate-400 mb-4">O TactiPlan tambem funciona diretamente no navegador, sem precisar instalar nada.</p>
+      <a href="https://app.tactiplan.faggin.com.br" class="inline-flex items-center gap-2 px-6 py-3 bg-white/5 hover:bg-white/10 rounded-xl font-semibold transition">
+        Acessar versao web
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="py-24 px-6">
+  <div class="max-w-4xl mx-auto text-center">
+    <div class="glass p-12 rounded-3xl relative overflow-hidden">
+      <div class="absolute inset-0 bg-gradient-to-br from-blue-600/10 to-purple-600/10"></div>
+      <div class="relative">
+        <h2 class="text-4xl md:text-5xl font-black mb-4">Pronto para elevar seus treinos?</h2>
+        <p class="text-xl text-slate-400 mb-8">Junte-se aos treinadores que ja usam TactiPlan para planejamento profissional.</p>
+        <a href="https://app.tactiplan.faggin.com.br" class="inline-flex items-center gap-2 px-8 py-4 bg-blue-600 hover:bg-blue-700 rounded-xl font-bold text-lg transition transform hover:scale-105">
+          Comecar gratis
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer class="py-12 px-6 border-t border-white/5">
+  <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+    <div class="flex items-center gap-2">
+      <div class="w-8 h-8 bg-gradient-to-br from-blue-600 to-blue-800 rounded-lg flex items-center justify-center font-black text-white text-sm">TP</div>
+      <span class="font-bold">TactiPlan</span>
+      <span class="text-slate-500 text-sm ml-2">v2.0</span>
+    </div>
+    <div class="text-sm text-slate-500">
+      &copy; 2026 TactiPlan. Plataforma de gestao de treinos.
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

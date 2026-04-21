@@ -4,7 +4,7 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vite.dev/config/
 export default defineConfig({
-  base: './', // Use relative paths for Electron compatibility
+  base: '/', // App served from root of app subdomain
   plugins: [
     react(),
     VitePWA({

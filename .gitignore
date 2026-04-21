@@ -18,3 +18,4 @@ backend-node/uploads/
 # Large data files (imported to VPS)
 extract.json
 uploads/
+landing/downloads/

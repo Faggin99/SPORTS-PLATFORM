@@ -1,7 +1,7 @@
 const { app, BrowserWindow, shell, Menu } = require('electron')
 const path = require('path')
 
-const APP_URL = 'https://tactiplan.faggin.com.br'
+const APP_URL = 'https://app.tactiplan.faggin.com.br'
 
 let mainWindow
 
