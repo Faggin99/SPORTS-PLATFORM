@@ -24,8 +24,14 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+const allowedOrigins = (process.env.CORS_ORIGIN || '*').split(',').map(s => s.trim());
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || '*',
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error('Not allowed by CORS'));
+  },
   credentials: true
 }));
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
