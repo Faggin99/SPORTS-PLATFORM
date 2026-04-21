@@ -6,7 +6,38 @@
       <stop offset="100%" stop-color="#1d4ed8"/>
     </linearGradient>
   </defs>
+
+  <!-- Rounded background -->
   <rect width="512" height="512" fill="url(#bg)" rx="96"/>
-  <text x="256" y="290" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-weight="800" font-size="220" fill="white" letter-spacing="-6">TP</text>
-  <rect x="80" y="380" width="352" height="8" fill="rgba(255,255,255,0.4)" rx="4"/>
+
+  <!-- Field outline and lines -->
+  <g stroke="rgba(255,255,255,0.4)" stroke-width="6" fill="none">
+    <rect x="68" y="88" width="376" height="336" rx="14"/>
+    <line x1="256" y1="88" x2="256" y2="424"/>
+    <circle cx="256" cy="256" r="52"/>
+    <rect x="68" y="172" width="64" height="168"/>
+    <rect x="380" y="172" width="64" height="168"/>
+  </g>
+
+  <!-- Tactical arrow (movement) -->
+  <path d="M 140 340 Q 220 250 320 200"
+        fill="none"
+        stroke="#fbbf24"
+        stroke-width="12"
+        stroke-linecap="round"
+        stroke-dasharray="0"/>
+
+  <!-- Arrow head -->
+  <path d="M 300 188 L 336 198 L 320 230 Z"
+        fill="#fbbf24"/>
+
+  <!-- Players (dots) -->
+  <!-- Team A -->
+  <circle cx="140" cy="340" r="22" fill="#ffffff"/>
+  <circle cx="200" cy="170" r="22" fill="#ffffff"/>
+  <circle cx="240" cy="380" r="22" fill="#ffffff"/>
+  <circle cx="320" cy="200" r="22" fill="#ffffff"/>
+  <!-- Team B -->
+  <circle cx="380" cy="140" r="22" fill="#ef4444"/>
+  <circle cx="370" cy="340" r="22" fill="#ef4444"/>
 </svg>
