@@ -81,6 +81,9 @@ export function LoginPage() {
   return (
     <div style={containerStyle}>
       <div style={cardStyle}>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1rem' }}>
+          <img src="/pwa-192.svg" alt="TactiPlan" style={{ width: '80px', height: '80px', borderRadius: '16px' }} />
+        </div>
         <h1 style={titleStyle}>TactiPlan</h1>
         <p style={subtitleStyle}>Faça login para continuar</p>
 

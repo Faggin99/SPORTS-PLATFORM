@@ -175,11 +175,24 @@
 
 ---
 
-## Duvidas a definir com usuario
+## Decisoes confirmadas com usuario (21/04/2026)
 
-1. Nome comercial dos planos (Essencial/Pro ta bom?)
-2. Precos finais (as sugestoes estao competitivas vs TacticalPad)
-3. Periodo de trial (14 dias ou 30 dias?)
-4. Policy de reembolso (7 dias garantia?)
-5. Ja tem CNPJ pra receber pagamentos?
-6. Politica de privacidade e termos de uso (precisa ter antes de cobrar)
+1. **Nome dos planos**: Essencial + Pro (confirmado)
+2. **Precos**: R$ 199/ano (Essencial), R$ 399/ano (Pro) - confirmado
+3. **Trial**: **30 dias** gratis do Pro
+4. **Reembolso**: **garantia de 7 dias** apos primeira cobranca
+5. **CNPJ**: **MEI** ativo
+6. **Policies**: criadas em `docs/POLITICA_PRIVACIDADE.md` e `docs/TERMOS_USO.md` - aguardando dados do MEI (nome, CNPJ, endereco, responsavel)
+7. **Cupons**: planejamento para oferecer 10-15% de desconto em campanhas futuras
+
+## Dados pendentes do usuario para finalizar policies
+
+Para publicar a politica de privacidade e termos de uso, precisa fornecer:
+- Nome da empresa (razao social do MEI)
+- CNPJ
+- Endereco completo registrado no MEI
+- Nome do responsavel (voce)
+- Telefone WhatsApp de suporte
+- Cidade/UF do foro
+
+Substituir os placeholders `{{NOME_DA_EMPRESA}}`, `{{CNPJ_MEI}}`, `{{ENDERECO_COMPLETO}}`, `{{NOME_RESPONSAVEL}}`, `{{TELEFONE_WHATSAPP}}`, `{{CIDADE}}`, `{{UF}}` nos arquivos de policy.
