@@ -15,6 +15,8 @@ export const userProfileService = {
 
   getPhotoUrl(photoPath) {
     if (!photoPath) return null;
+    if (photoPath.startsWith('http://') || photoPath.startsWith('https://')) return photoPath;
+    if (photoPath.startsWith('/')) return photoPath;
     return `/uploads/profile-photos/${photoPath}`;
   },
 

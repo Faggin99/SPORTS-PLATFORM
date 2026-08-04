@@ -59,6 +59,7 @@ export function AuthProvider({ children }) {
     loading,
     login,
     logout,
+    refresh: loadUser,
     isAuthenticated: !!token,
     isHeadCoach: user?.role === 'admin',
     isAssistant: user?.role === 'coach',

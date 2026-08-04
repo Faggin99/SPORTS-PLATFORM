@@ -28,6 +28,12 @@ class Cache {
   delete(key) {
     this.cache.delete(key);
   }
+
+  clearPattern(prefix) {
+    for (const key of this.cache.keys()) {
+      if (key.startsWith(prefix)) this.cache.delete(key);
+    }
+  }
 }
 
 export const cache = new Cache();

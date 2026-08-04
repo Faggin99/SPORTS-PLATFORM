@@ -6,6 +6,7 @@ import { trainingService } from '../services/trainingService';
 import { CreateTitleModal } from '../components/training/CreateTitleModal';
 import { EditActivityModal } from '../components/training/EditActivityModal';
 import { ActivityActionModal } from '../components/training/ActivityActionModal';
+import { Select } from '../components/common/Select';
 
 export function ActivitiesConfigPage() {
   const { colors } = useTheme();
@@ -134,9 +135,8 @@ export function ActivitiesConfigPage() {
   const archivedActivities = filteredActivities.filter(a => a.is_archived);
 
   const pageStyle = {
-    padding: isMobile ? '1rem' : '2rem',
-    maxWidth: '1400px',
-    margin: '0 auto',
+    padding: isMobile ? '1rem' : '1.5rem 2rem',
+    width: '100%',
   };
 
   const headerStyle = {
@@ -350,18 +350,15 @@ export function ActivitiesConfigPage() {
           />
         </div>
 
-        <select
-          style={selectStyle}
+        <Select
           value={selectedContent}
           onChange={(e) => setSelectedContent(e.target.value)}
-        >
-          <option value="all">Todos os conteudos</option>
-          {contents.map((content) => (
-            <option key={content.id} value={content.id}>
-              {content.name}
-            </option>
-          ))}
-        </select>
+          options={[
+            { value: 'all', label: 'Todos os conteúdos' },
+            ...contents.map((c) => ({ value: c.id, label: c.name })),
+          ]}
+          placeholder="Todos os conteúdos"
+        />
 
         <button
           style={toggleButtonStyle(showArchived)}

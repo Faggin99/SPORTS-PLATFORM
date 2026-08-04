@@ -6,15 +6,32 @@ import { PlayerSelectionModal } from './PlayerSelectionModal';
 import { EventModal } from './EventModal';
 import { gameService } from '../../services/gameService';
 import { useAthletes } from '../../modules/training-management/hooks/useAthletes';
+import { useSportConfig } from '../../hooks/useSportConfig';
+import { useClub } from '../../contexts/ClubContext';
+import { competitionService } from '../../services/competitionService';
+import { LineupField } from './LineupField';
+import { preloadAthletePhotos } from '../../modules/training-management/utils/pdfGenerator';
+import { drawLineupOnPdf } from '../../utils/pdfLineupRender';
+import { readJersey, computeMinutesPlayed } from '../../lib/lineupLayout';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { PDF_THEME, addTitleStrip, drawCover, paginate, applyClubPrimaryColor, setFillHex, setTextHex, setDrawHex } from '../../utils/pdfTheme';
+import { newWorkbook, addSheet, saveWorkbook, addMetaSheet } from '../../utils/excelTheme';
+import { ExportMenu } from '../common/ExportMenu';
 
 export function GameModal({ isOpen, onClose, session, onSave }) {
   const { colors } = useTheme();
   const { athletes } = useAthletes();
+  const sport = useSportConfig();
+  const { selectedClub } = useClub();
 
   const [opponentName, setOpponentName] = useState('');
-  const [matchDuration, setMatchDuration] = useState(90);
+  const [matchDuration, setMatchDuration] = useState(sport.defaultDuration);
+  const [competitionId, setCompetitionId] = useState('');
+  const [matchRound, setMatchRound] = useState('');
+  const [matchLocation, setMatchLocation] = useState(''); // 'home' | 'away' | ''
+  const [videoFullUrl, setVideoFullUrl] = useState('');
+  const [competitions, setCompetitions] = useState([]);
   const [selectedPlayers, setSelectedPlayers] = useState([]);
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -30,6 +47,20 @@ export function GameModal({ isOpen, onClose, session, onSave }) {
     }
   }, [isOpen, session]);
 
+  useEffect(() => {
+    if (!isOpen || !selectedClub?.id) return;
+    let cancel = false;
+    (async () => {
+      try {
+        const list = await competitionService.list({ clubId: selectedClub.id });
+        if (!cancel) setCompetitions(Array.isArray(list) ? list : []);
+      } catch (err) {
+        console.error('Erro ao carregar campeonatos:', err);
+      }
+    })();
+    return () => { cancel = true; };
+  }, [isOpen, selectedClub?.id]);
+
   const loadMatchData = async () => {
     if (!session?.id) return;
 
@@ -37,7 +68,11 @@ export function GameModal({ isOpen, onClose, session, onSave }) {
     try {
       // Carregar dados existentes
       setOpponentName(session.opponent_name || '');
-      setMatchDuration(session.match_duration || 90);
+      setMatchDuration(session.match_duration || sport.defaultDuration);
+      setCompetitionId(session.competition_id || '');
+      setMatchRound(session.match_round || '');
+      setMatchLocation(session.match_location || '');
+      setVideoFullUrl(session.video_full_url || '');
 
       const matchData = await gameService.getMatchData(session.id);
 
@@ -45,9 +80,10 @@ export function GameModal({ isOpen, onClose, session, onSave }) {
         athlete_id: p.athlete_id,
         status: p.status,
         minutes_played: p.minutes_played || 0,
+        // Camisa por JOGO: usa o override se existir, senão o nº permanente do plantel
+        jersey_number: (p.jersey_number != null && p.jersey_number !== '') ? p.jersey_number : (p.athlete?.jersey_number ?? ''),
         athlete: p.athlete,
         name: p.athlete?.name,
-        jersey_number: p.athlete?.jersey_number,
       })));
 
       setEvents(matchData.events.map(e => ({
@@ -57,6 +93,9 @@ export function GameModal({ isOpen, onClose, session, onSave }) {
         goal_type: e.goal_type,
         minute: e.minute,
         player: e.player,
+        secondary_player: e.secondary_player,
+        player_id: e.player_id,
+        secondary_player_id: e.secondary_player_id,
       })));
     } catch (error) {
       console.error('Erro ao carregar dados do jogo:', error);
@@ -70,16 +109,32 @@ export function GameModal({ isOpen, onClose, session, onSave }) {
 
     setSaving(true);
     try {
+      // Recalcula minutos jogados a partir dos eventos antes de salvar.
+      // Em futsal o cálculo retorna 0 pra todos (não rastreamos).
+      const playersToSave = selectedPlayers.map((p) => ({
+        ...p,
+        minutes_played: sport.tracksMinutes
+          ? computeMinutesPlayed(p, events, matchDuration)
+          : 0,
+      }));
       await gameService.saveAllMatchData(session.id, {
         opponent_name: opponentName,
         match_duration: matchDuration,
-        players: selectedPlayers,
+        players: playersToSave,
         events: events,
+        competition_id: competitionId || null,
+        match_round: matchRound || null,
+        match_location: matchLocation || null,
+        video_full_url: videoFullUrl || null,
       });
 
       onSave?.({
         opponent_name: opponentName,
         match_duration: matchDuration,
+        competition_id: competitionId || null,
+        match_round: matchRound || null,
+        match_location: matchLocation || null,
+        video_full_url: videoFullUrl || null,
       });
 
       onClose();
@@ -108,12 +163,13 @@ export function GameModal({ isOpen, onClose, session, onSave }) {
     setEvents(events.filter(e => e.id !== eventId));
   };
 
-  const updatePlayerMinutes = (athleteId, minutes) => {
-    const value = parseInt(minutes) || 0;
-    // Não permitir valor maior que a duração do jogo
-    const clampedValue = Math.min(Math.max(value, 0), matchDuration);
+  // Minutos jogados não são editáveis manualmente — vêm dos eventos de
+  // substituição (calculados em tempo real). Em futsal nem rastreamos.
+
+  const updatePlayerJersey = (athleteId, raw) => {
+    const v = raw === '' ? '' : Math.min(99, Math.max(1, parseInt(raw) || 0));
     setSelectedPlayers(selectedPlayers.map(p =>
-      p.athlete_id === athleteId ? { ...p, minutes_played: clampedValue } : p
+      p.athlete_id === athleteId ? { ...p, jersey_number: v } : p
     ));
   };
 
@@ -154,168 +210,159 @@ export function GameModal({ isOpen, onClose, session, onSave }) {
     return types[goalType] || '';
   };
 
-  const exportToPdf = () => {
+  const exportToPdf = async () => {
     if (selectedPlayers.length === 0) {
       alert('Selecione jogadores antes de exportar');
       return;
     }
+    const resetColor = applyClubPrimaryColor(selectedClub?.primary_color || null);
+    try {
 
     const gameDate = session?.date ? session.date.split('-').reverse().join('/') : '';
     const opponent = opponentName || 'Adversário';
+    const clubName = selectedClub?.name || '';
 
-    // Criar documento PDF em formato A4 retrato
-    const doc = new jsPDF({
-      orientation: 'portrait',
-      unit: 'mm',
-      format: 'a4',
+    // Pré-carrega fotos
+    const photoMap = await preloadAthletePhotos(
+      selectedPlayers.map(p => ({ id: p.athlete_id, photo_url: p.athlete?.photo_url }))
+    );
+    const detectFmt = (dataUrl) => dataUrl?.startsWith('data:image/png') ? 'PNG'
+      : dataUrl?.startsWith('data:image/webp') ? 'WEBP' : 'JPEG';
+
+    // LANDSCAPE — estilo U.E.C.
+    const doc = new jsPDF({ orientation: PDF_THEME.orientation, unit: 'mm', format: PDF_THEME.pageFormat });
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const M = PDF_THEME.margins;
+    const totalW = pageW - M.left - M.right;
+    const colGap = 4;
+
+    // ============ PÁGINA 1: Capa ============
+    drawCover(doc, {
+      title: 'Convocação',
+      subtitle: `vs ${opponent}`,
+      clubName,
+      periodLabel: gameDate,
     });
 
-    // Configurações de cores
-    const primaryColor = [41, 128, 185]; // Azul profissional
-    const secondaryColor = [52, 73, 94]; // Cinza escuro
-    const headerBgColor = [236, 240, 241]; // Cinza claro
-    const starterColor = [34, 197, 94]; // Verde
-    const substituteColor = [245, 158, 11]; // Laranja
+    // ============ PÁGINA 2: Tabelas (Titulares | Reservas em colunas) ============
+    doc.addPage();
+    let y = addTitleStrip(doc, { section: `Convocação · vs ${opponent}`, clubName });
 
-    const pageWidth = doc.internal.pageSize.width;
+    const hexRgb = (hex) => {
+      const h = hex.replace('#', '');
+      return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+    };
 
-    // Título do documento
-    doc.setFontSize(18);
-    doc.setTextColor(...primaryColor);
-    doc.setFont('helvetica', 'bold');
-    doc.text('CONVOCAÇÃO', pageWidth / 2, 20, { align: 'center' });
+    const PHOTO_W = 10;
+    const drawTable = (label, rows, startIdx, x, w) => {
+      // Pill do título
+      setFillHex(doc, PDF_THEME.colors.primary);
+      doc.roundedRect(x, y + 4, w, 8, 1, 1, 'F');
+      doc.setFont(PDF_THEME.fonts.family, 'bold');
+      doc.setFontSize(11);
+      setTextHex(doc, PDF_THEME.colors.light);
+      doc.text(`${label} (${rows.length})`.toUpperCase(), x + w / 2, y + 9.5, { align: 'center' });
 
-    // Subtítulo
-    doc.setFontSize(12);
-    doc.setTextColor(...secondaryColor);
-    doc.setFont('helvetica', 'normal');
-    doc.text(`Jogo do dia ${gameDate}`, pageWidth / 2, 28, { align: 'center' });
+      autoTable(doc, {
+        startY: y + 14,
+        head: [['', '#', 'Cam.', 'Nome', 'Pos.']],
+        body: rows.map((p, idx) => [
+          '',
+          startIdx + idx + 1,
+          readJersey(p) ?? '-',
+          p.name || p.athlete?.name,
+          p.athlete?.position || '—',
+        ]),
+        theme: 'plain',
+        headStyles: { fillColor: hexRgb(PDF_THEME.colors.surfaceAlt), textColor: hexRgb(PDF_THEME.colors.text), fontStyle: 'bold', fontSize: 9, cellPadding: 1.8 },
+        bodyStyles: { fontSize: 9, textColor: hexRgb(PDF_THEME.colors.text), cellPadding: 1.8, minCellHeight: 11, valign: 'middle' },
+        alternateRowStyles: { fillColor: hexRgb(PDF_THEME.colors.surface) },
+        columnStyles: {
+          0: { cellWidth: PHOTO_W, halign: 'center' },
+          1: { cellWidth: 8, halign: 'center', fontStyle: 'bold' },
+          2: { cellWidth: 12, halign: 'center', fontStyle: 'bold' },
+          3: { cellWidth: 'auto' },
+          4: { cellWidth: 16, halign: 'center' },
+        },
+        margin: { left: x, right: pageW - (x + w) },
+        tableWidth: w,
+        styles: { lineColor: hexRgb(PDF_THEME.colors.border), lineWidth: 0.05 },
+        didDrawCell: (hookData) => {
+          if (hookData.section !== 'body' || hookData.column.index !== 0) return;
+          const player = rows[hookData.row.index];
+          const dataUrl = player && photoMap.get(player.athlete_id);
+          if (!dataUrl) return;
+          const { x, y, width, height } = hookData.cell;
+          const side = Math.min(width, height) - 1.2;
+          const cx = x + (width - side) / 2;
+          const cy = y + (height - side) / 2;
+          try { doc.addImage(dataUrl, detectFmt(dataUrl), cx, cy, side, side, undefined, 'FAST'); }
+          catch (err) { /* ignora */ }
+        },
+      });
+    };
 
-    // Adversário
-    doc.setFontSize(14);
-    doc.setFont('helvetica', 'bold');
-    doc.text(`vs ${opponent}`, pageWidth / 2, 36, { align: 'center' });
+    // 2 colunas: Titulares (esquerda) | Reservas (direita)
+    const halfW = (totalW - colGap) / 2;
+    if (starters.length > 0)    drawTable('Titulares', starters, 0, M.left, halfW);
+    if (substitutes.length > 0) drawTable('Reservas',  substitutes, starters.length, M.left + halfW + colGap, halfW);
 
-    let currentY = 48;
-
-    // Seção de Titulares
+    // ============ PÁGINA 3: Escalação no campo ============
     if (starters.length > 0) {
-      doc.setFontSize(11);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(...starterColor);
-      doc.text(`TITULARES (${starters.length})`, 14, currentY);
-      currentY += 3;
+      doc.addPage();
+      y = addTitleStrip(doc, { section: 'Escalação', clubName });
 
-      const startersTableData = starters.map((p, idx) => [
-        idx + 1,
-        p.jersey_number || '-',
-        p.name || p.athlete?.name,
-      ]);
-
-      autoTable(doc, {
-        startY: currentY,
-        head: [['#', 'Camisa', 'Nome']],
-        body: startersTableData,
-        theme: 'striped',
-        headStyles: {
-          fillColor: starterColor,
-          textColor: [255, 255, 255],
-          fontStyle: 'bold',
-          fontSize: 9,
-        },
-        bodyStyles: {
-          fontSize: 9,
-          textColor: [50, 50, 50],
-        },
-        columnStyles: {
-          0: { cellWidth: 12, halign: 'center' },
-          1: { cellWidth: 20, halign: 'center' },
-          2: { cellWidth: 'auto' },
-        },
-        margin: { left: 14, right: 14 },
-        alternateRowStyles: {
-          fillColor: [250, 250, 250],
-        },
+      // Campo no centro da página
+      const fH = pageH - y - M.bottom - 12;
+      const fW = fH / 1.5;
+      const fX = (pageW - fW) / 2;
+      const fY = y + 4;
+      drawLineupOnPdf(doc, {
+        x: fX, y: fY, w: fW, h: fH,
+        players: selectedPlayers,
+        modality: sport.modality,
+        photoMap,
       });
 
-      currentY = doc.lastAutoTable.finalY + 10;
+      // Legenda
+      doc.setFont(PDF_THEME.fonts.family, 'normal');
+      doc.setFontSize(8);
+      setTextHex(doc, PDF_THEME.colors.textMuted);
+      doc.text('Camisas exibidas são as deste jogo (fallback: nº permanente do plantel).', M.left, pageH - M.bottom - 2);
     }
 
-    // Seção de Reservas
-    if (substitutes.length > 0) {
-      doc.setFontSize(11);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(...substituteColor);
-      doc.text(`RESERVAS (${substitutes.length})`, 14, currentY);
-      currentY += 3;
-
-      const substitutesTableData = substitutes.map((p, idx) => [
-        starters.length + idx + 1,
-        p.jersey_number || '-',
-        p.name || p.athlete?.name,
-      ]);
-
-      autoTable(doc, {
-        startY: currentY,
-        head: [['#', 'Camisa', 'Nome']],
-        body: substitutesTableData,
-        theme: 'striped',
-        headStyles: {
-          fillColor: substituteColor,
-          textColor: [255, 255, 255],
-          fontStyle: 'bold',
-          fontSize: 9,
-        },
-        bodyStyles: {
-          fontSize: 9,
-          textColor: [50, 50, 50],
-        },
-        columnStyles: {
-          0: { cellWidth: 12, halign: 'center' },
-          1: { cellWidth: 20, halign: 'center' },
-          2: { cellWidth: 'auto' },
-        },
-        margin: { left: 14, right: 14 },
-        alternateRowStyles: {
-          fillColor: [250, 250, 250],
-        },
-      });
-
-      currentY = doc.lastAutoTable.finalY + 10;
-    }
-
-    // Resumo
-    doc.setFillColor(...headerBgColor);
-    doc.roundedRect(14, currentY, pageWidth - 28, 20, 2, 2, 'F');
-
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(...secondaryColor);
-    doc.text('RESUMO', 20, currentY + 7);
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    doc.text(`Total de Jogadores: ${selectedPlayers.length}`, 20, currentY + 13);
-    doc.text(`Titulares: ${starters.length}`, 80, currentY + 13);
-    doc.text(`Reservas: ${substitutes.length}`, 130, currentY + 13);
-
-    // Rodapé
-    doc.setFontSize(8);
-    doc.setTextColor(150, 150, 150);
-    const generatedDate = new Date().toLocaleDateString('pt-BR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-    doc.text(`Gerado em: ${generatedDate}`, pageWidth / 2, doc.internal.pageSize.height - 10, { align: 'center' });
-
-    // Gerar nome do arquivo
+    paginate(doc);
     const fileName = `Convocacao_${opponent.replace(/\s+/g, '_')}_${gameDate.replace(/\//g, '-')}.pdf`;
-
-    // Download
     doc.save(fileName);
+    } finally { resetColor(); }
+  };
+
+  const exportToExcel = () => {
+    if (selectedPlayers.length === 0) {
+      alert('Selecione jogadores antes de exportar');
+      return;
+    }
+    const gameDate = session?.date ? session.date.split('-').reverse().join('/') : '';
+    const opponent = opponentName || 'Adversário';
+
+    const wb = newWorkbook({ title: `Convocação vs ${opponent}` });
+    addMetaSheet(wb, {
+      title: `Convocação vs ${opponent}`,
+      period: gameDate,
+      totals: [
+        ['Total de jogadores', selectedPlayers.length],
+        ['Titulares', starters.length],
+        ['Reservas', substitutes.length],
+      ],
+    });
+
+    const allRows = [['#', 'Status', 'Camisa', 'Nome']];
+    starters.forEach((p, i) => allRows.push([i + 1, 'Titular', p.jersey_number || '', p.name || p.athlete?.name || '']));
+    substitutes.forEach((p, i) => allRows.push([starters.length + i + 1, 'Reserva', p.jersey_number || '', p.name || p.athlete?.name || '']));
+    addSheet(wb, 'Convocação', allRows, { widths: [6, 12, 10, 32], freezeHeader: true, autoFilter: true });
+
+    saveWorkbook(wb, `Convocacao_${opponent.replace(/\s+/g, '_')}_${gameDate.replace(/\//g, '-')}.xlsx`);
   };
 
   const overlayStyle = {
@@ -337,9 +384,9 @@ export function GameModal({ isOpen, onClose, session, onSave }) {
     backgroundColor: colors.background,
     borderRadius: '0.75rem',
     width: '100%',
-    maxWidth: '1100px',
-    height: 'auto',
-    maxHeight: '90vh',
+    maxWidth: '1400px',
+    height: '95vh',
+    maxHeight: '95vh',
     display: 'flex',
     flexDirection: 'column',
     boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
@@ -347,7 +394,7 @@ export function GameModal({ isOpen, onClose, session, onSave }) {
   };
 
   const headerStyle = {
-    padding: '1rem 1.5rem',
+    padding: '0.6rem 1.25rem',
     borderBottom: `1px solid ${colors.border}`,
     display: 'flex',
     alignItems: 'center',
@@ -358,11 +405,12 @@ export function GameModal({ isOpen, onClose, session, onSave }) {
   const contentStyle = {
     flex: 1,
     overflow: 'auto',
-    padding: '1rem 1.5rem',
+    padding: '0.75rem 1.25rem',
+    minHeight: 0,
   };
 
   const footerStyle = {
-    padding: '1rem 1.5rem',
+    padding: '0.6rem 1.25rem',
     borderTop: `1px solid ${colors.border}`,
     display: 'flex',
     justifyContent: 'flex-end',
@@ -385,8 +433,11 @@ export function GameModal({ isOpen, onClose, session, onSave }) {
     backgroundColor: colors.surface,
     borderRadius: '0.5rem',
     border: `1px solid ${colors.border}`,
-    padding: '1rem',
+    padding: '0.6rem 0.7rem',
     height: '100%',
+    display: 'flex',
+    flexDirection: 'column',
+    minHeight: 0,
   };
 
   const sectionTitleStyle = {
@@ -421,18 +472,16 @@ export function GameModal({ isOpen, onClose, session, onSave }) {
     <>
       <div style={overlayStyle} onClick={onClose}>
         <div style={modalStyle} onClick={(e) => e.stopPropagation()}>
-          {/* Header */}
+          {/* Header — compacto: título inline com a data */}
           <div style={headerStyle}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <Trophy size={24} style={{ color: colors.primary }} />
-              <div>
-                <h2 style={{ margin: 0, fontSize: '1.2rem', fontWeight: '600', color: colors.text }}>
-                  Dados do Jogo
-                </h2>
-                <span style={{ fontSize: '0.8rem', color: colors.textSecondary }}>
-                  {session?.day_name} - {session?.date ? session.date.split('-').reverse().join('/') : ''}
-                </span>
-              </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <Trophy size={18} style={{ color: colors.primary }} />
+              <h2 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 600, color: colors.text }}>
+                Dados do Jogo
+              </h2>
+              <span style={{ fontSize: '0.75rem', color: colors.textSecondary }}>
+                · {session?.day_name} {session?.date ? session.date.split('-').reverse().join('/') : ''}
+              </span>
             </div>
             <button
               onClick={onClose}
@@ -455,90 +504,117 @@ export function GameModal({ isOpen, onClose, session, onSave }) {
                 Carregando...
               </div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                {/* Row 1: Adversário e Duração */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', minHeight: '100%' }}>
+                {/* Topo COMPACTO: todos os metadados em UMA faixa horizontal + placar inline.
+                    O label de cada campo vira chip pequeno acima do input. */}
+                {(() => {
+                  const labelStyle = { display: 'block', marginBottom: '0.18rem', fontSize: '0.62rem', fontWeight: 600, color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: '0.02em' };
+                  const compactInput = { ...inputStyle, padding: '0.35rem 0.5rem', fontSize: '0.78rem' };
+                  return (
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'minmax(160px, 2.2fr) 80px 75px minmax(160px, 1.8fr) 55px minmax(140px, 1.5fr) 110px',
+                      gap: '0.5rem',
+                      alignItems: 'end',
+                    }}>
+                      <div>
+                        <label style={labelStyle}>Adversário</label>
+                        <input type="text" value={opponentName} onChange={(e) => setOpponentName(e.target.value)} placeholder="Nome do adversário" style={compactInput} />
+                      </div>
+                      <div>
+                        <label style={labelStyle}>Local</label>
+                        <select value={matchLocation} onChange={(e) => setMatchLocation(e.target.value)} style={compactInput}>
+                          <option value="">—</option>
+                          <option value="home">Casa</option>
+                          <option value="away">Fora</option>
+                          <option value="neutral">Neutro</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label style={labelStyle}>Duração</label>
+                        <input type="number" value={matchDuration} onChange={(e) => setMatchDuration(parseInt(e.target.value) || sport.defaultDuration)} min="1" max="150" style={compactInput} />
+                      </div>
+                      <div>
+                        <label style={labelStyle}>Campeonato</label>
+                        <select value={competitionId} onChange={(e) => setCompetitionId(e.target.value)} style={compactInput}>
+                          <option value="">— sem campeonato —</option>
+                          {competitions.map((c) => (
+                            <option key={c.id} value={c.id}>{c.name}{c.season ? ` · ${c.season}` : ''}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label style={labelStyle}>Rodada</label>
+                        <input type="text" value={matchRound} onChange={(e) => setMatchRound(e.target.value)} placeholder="Nº" style={compactInput} />
+                      </div>
+                      <div>
+                        <label style={labelStyle}>Vídeo</label>
+                        <input type="url" value={videoFullUrl} onChange={(e) => setVideoFullUrl(e.target.value)} placeholder="YouTube / Drive" style={compactInput} />
+                      </div>
+                      {/* Placar inline minimalista */}
+                      <div style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        gap: '0.35rem',
+                        padding: '0.25rem 0.4rem',
+                        backgroundColor: `${colors.primary}10`,
+                        borderRadius: '0.35rem',
+                        border: `1px solid ${colors.border}`,
+                        height: 'fit-content',
+                      }}>
+                        <div style={{ textAlign: 'center', minWidth: 24 }}>
+                          <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#22c55e', lineHeight: 1 }}>{goalsScored}</div>
+                          <div style={{ fontSize: '0.5rem', color: colors.textSecondary, marginTop: 1 }}>FEITOS</div>
+                        </div>
+                        <div style={{ fontSize: '0.85rem', color: colors.textSecondary, fontWeight: 600 }}>×</div>
+                        <div style={{ textAlign: 'center', minWidth: 24 }}>
+                          <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#ef4444', lineHeight: 1 }}>{goalsConceded}</div>
+                          <div style={{ fontSize: '0.5rem', color: colors.textSecondary, marginTop: 1 }}>SOFRIDOS</div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Row 2: 3 colunas - Campo | Jogadores | Eventos */}
                 <div style={{
                   display: 'grid',
-                  gridTemplateColumns: '1fr 200px',
-                  gap: '1rem',
-                  alignItems: 'end',
+                  gridTemplateColumns: '260px 1fr 1fr',
+                  gap: '0.65rem',
+                  flex: 1,
+                  minHeight: 0,
                 }}>
-                  <div>
-                    <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem', fontWeight: '500', color: colors.text }}>
-                      Adversário
-                    </label>
-                    <input
-                      type="text"
-                      value={opponentName}
-                      onChange={(e) => setOpponentName(e.target.value)}
-                      placeholder="Nome do adversário..."
-                      style={inputStyle}
-                    />
+                  {/* Coluna 1: Campo (sempre visível) */}
+                  <div style={sectionStyle}>
+                    <div style={{ ...sectionTitleStyle, justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <Trophy size={18} color={colors.primary} />
+                        <span>Escalação no campo</span>
+                      </div>
+                    </div>
+                    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0.25rem 0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <LineupField
+                        players={selectedPlayers}
+                        modality={sport.modality}
+                        colors={colors}
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem', fontWeight: '500', color: colors.text }}>
-                      Duração (min)
-                    </label>
-                    <input
-                      type="number"
-                      value={matchDuration}
-                      onChange={(e) => setMatchDuration(parseInt(e.target.value) || 90)}
-                      min="1"
-                      max="150"
-                      style={inputStyle}
-                    />
-                  </div>
-                </div>
 
-                {/* Placar resumido */}
-                <div style={{
-                  display: 'flex',
-                  justifyContent: 'center',
-                  gap: '2rem',
-                  padding: '0.75rem',
-                  backgroundColor: `${colors.primary}10`,
-                  borderRadius: '0.5rem',
-                }}>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#22c55e' }}>{goalsScored}</div>
-                    <div style={{ fontSize: '0.7rem', color: colors.textSecondary }}>Gols Feitos</div>
-                  </div>
-                  <div style={{
-                    width: '1px',
-                    backgroundColor: colors.border,
-                    margin: '0 1rem',
-                  }} />
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#ef4444' }}>{goalsConceded}</div>
-                    <div style={{ fontSize: '0.7rem', color: colors.textSecondary }}>Gols Tomados</div>
-                  </div>
-                </div>
-
-                {/* Row 2: Jogadores e Eventos lado a lado */}
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: '1fr 1fr',
-                  gap: '1rem',
-                  minHeight: '300px',
-                }}>
-                  {/* Coluna Esquerda: Jogadores */}
+                  {/* Coluna 2: Jogadores */}
                   <div style={sectionStyle}>
                     <div style={{ ...sectionTitleStyle, justifyContent: 'space-between' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                         <Users size={18} color={colors.primary} />
                         <span>Jogadores ({selectedPlayers.length})</span>
                       </div>
-                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                         {selectedPlayers.length > 0 && (
-                          <Button
+                          <ExportMenu
                             size="sm"
-                            variant="ghost"
-                            onClick={exportToPdf}
-                            icon={<FileText size={14} />}
-                            title="Exportar convocação para PDF"
-                          >
-                            PDF
-                          </Button>
+                            variant="outline"
+                            onExportPDF={exportToPdf}
+                            onExportExcel={exportToExcel}
+                          />
                         )}
                         <Button
                           size="sm"
@@ -550,8 +626,7 @@ export function GameModal({ isOpen, onClose, session, onSave }) {
                         </Button>
                       </div>
                     </div>
-
-                    <div style={{ maxHeight: '280px', overflowY: 'auto' }}>
+                    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
                       {selectedPlayers.length === 0 ? (
                         <div style={{
                           textAlign: 'center',
@@ -581,21 +656,24 @@ export function GameModal({ isOpen, onClose, session, onSave }) {
                               </div>
                               {starters.map((player) => (
                                 <div key={player.athlete_id} style={playerRowStyle}>
-                                  <div style={{
-                                    width: '24px',
-                                    height: '24px',
-                                    borderRadius: '50%',
-                                    backgroundColor: '#22c55e20',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    fontSize: '0.65rem',
-                                    fontWeight: '600',
-                                    color: '#22c55e',
-                                    flexShrink: 0,
-                                  }}>
-                                    {player.jersey_number || '-'}
-                                  </div>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    max="99"
+                                    value={player.jersey_number ?? ''}
+                                    onChange={(e) => updatePlayerJersey(player.athlete_id, e.target.value)}
+                                    title="Camisa neste jogo"
+                                    placeholder="–"
+                                    style={{
+                                      width: '34px', height: '24px', borderRadius: '50%',
+                                      backgroundColor: '#22c55e20',
+                                      border: '1px solid #22c55e40',
+                                      color: '#22c55e',
+                                      fontSize: '0.7rem', fontWeight: 700,
+                                      textAlign: 'center', flexShrink: 0,
+                                      padding: 0, outline: 'none',
+                                    }}
+                                  />
                                   <span style={{
                                     flex: 1,
                                     fontSize: '0.8rem',
@@ -606,26 +684,22 @@ export function GameModal({ isOpen, onClose, session, onSave }) {
                                   }}>
                                     {player.name || player.athlete?.name}
                                   </span>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', flexShrink: 0 }}>
-                                    <input
-                                      type="number"
-                                      value={player.minutes_played}
-                                      onChange={(e) => updatePlayerMinutes(player.athlete_id, e.target.value)}
-                                      min="0"
-                                      max={matchDuration}
+                                  {sport.tracksMinutes && (
+                                    <div
+                                      title="Calculado das substituições"
                                       style={{
-                                        width: '45px',
-                                        padding: '0.2rem 0.3rem',
-                                        borderRadius: '0.25rem',
-                                        border: `1px solid ${colors.border}`,
-                                        backgroundColor: colors.background,
-                                        color: colors.text,
-                                        fontSize: '0.75rem',
-                                        textAlign: 'center',
+                                        display: 'flex', alignItems: 'baseline', gap: '0.2rem',
+                                        flexShrink: 0,
+                                        minWidth: 52,
+                                        justifyContent: 'flex-end',
                                       }}
-                                    />
-                                    <span style={{ fontSize: '0.65rem', color: colors.textSecondary }}>min</span>
-                                  </div>
+                                    >
+                                      <span style={{ fontSize: '0.85rem', fontWeight: 600, color: colors.text, fontVariantNumeric: 'tabular-nums' }}>
+                                        {computeMinutesPlayed(player, events, matchDuration)}
+                                      </span>
+                                      <span style={{ fontSize: '0.65rem', color: colors.textSecondary }}>min</span>
+                                    </div>
+                                  )}
                                 </div>
                               ))}
                             </div>
@@ -645,21 +719,24 @@ export function GameModal({ isOpen, onClose, session, onSave }) {
                               </div>
                               {substitutes.map((player) => (
                                 <div key={player.athlete_id} style={playerRowStyle}>
-                                  <div style={{
-                                    width: '24px',
-                                    height: '24px',
-                                    borderRadius: '50%',
-                                    backgroundColor: '#f59e0b20',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    fontSize: '0.65rem',
-                                    fontWeight: '600',
-                                    color: '#f59e0b',
-                                    flexShrink: 0,
-                                  }}>
-                                    {player.jersey_number || '-'}
-                                  </div>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    max="99"
+                                    value={player.jersey_number ?? ''}
+                                    onChange={(e) => updatePlayerJersey(player.athlete_id, e.target.value)}
+                                    title="Camisa neste jogo"
+                                    placeholder="–"
+                                    style={{
+                                      width: '34px', height: '24px', borderRadius: '50%',
+                                      backgroundColor: '#f59e0b20',
+                                      border: '1px solid #f59e0b40',
+                                      color: '#f59e0b',
+                                      fontSize: '0.7rem', fontWeight: 700,
+                                      textAlign: 'center', flexShrink: 0,
+                                      padding: 0, outline: 'none',
+                                    }}
+                                  />
                                   <span style={{
                                     flex: 1,
                                     fontSize: '0.8rem',
@@ -670,26 +747,22 @@ export function GameModal({ isOpen, onClose, session, onSave }) {
                                   }}>
                                     {player.name || player.athlete?.name}
                                   </span>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', flexShrink: 0 }}>
-                                    <input
-                                      type="number"
-                                      value={player.minutes_played}
-                                      onChange={(e) => updatePlayerMinutes(player.athlete_id, e.target.value)}
-                                      min="0"
-                                      max={matchDuration}
+                                  {sport.tracksMinutes && (
+                                    <div
+                                      title="Calculado das substituições"
                                       style={{
-                                        width: '45px',
-                                        padding: '0.2rem 0.3rem',
-                                        borderRadius: '0.25rem',
-                                        border: `1px solid ${colors.border}`,
-                                        backgroundColor: colors.background,
-                                        color: colors.text,
-                                        fontSize: '0.75rem',
-                                        textAlign: 'center',
+                                        display: 'flex', alignItems: 'baseline', gap: '0.2rem',
+                                        flexShrink: 0,
+                                        minWidth: 52,
+                                        justifyContent: 'flex-end',
                                       }}
-                                    />
-                                    <span style={{ fontSize: '0.65rem', color: colors.textSecondary }}>min</span>
-                                  </div>
+                                    >
+                                      <span style={{ fontSize: '0.85rem', fontWeight: 600, color: colors.text, fontVariantNumeric: 'tabular-nums' }}>
+                                        {computeMinutesPlayed(player, events, matchDuration)}
+                                      </span>
+                                      <span style={{ fontSize: '0.65rem', color: colors.textSecondary }}>min</span>
+                                    </div>
+                                  )}
                                 </div>
                               ))}
                             </div>
@@ -699,7 +772,7 @@ export function GameModal({ isOpen, onClose, session, onSave }) {
                     </div>
                   </div>
 
-                  {/* Coluna Direita: Eventos */}
+                  {/* Coluna 3: Eventos */}
                   <div style={sectionStyle}>
                     <div style={{ ...sectionTitleStyle, justifyContent: 'space-between' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -716,7 +789,7 @@ export function GameModal({ isOpen, onClose, session, onSave }) {
                       </Button>
                     </div>
 
-                    <div style={{ maxHeight: '280px', overflowY: 'auto' }}>
+                    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
                       {events.length === 0 ? (
                         <div style={{
                           textAlign: 'center',
@@ -821,6 +894,7 @@ export function GameModal({ isOpen, onClose, session, onSave }) {
         onClose={() => setShowEventModal(false)}
         onAdd={handleAddEvent}
         matchDuration={matchDuration}
+        selectedPlayers={selectedPlayers}
       />
     </>
   );

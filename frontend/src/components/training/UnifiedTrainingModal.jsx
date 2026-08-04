@@ -6,13 +6,16 @@ import { MultiSelect } from '../common/MultiSelect';
 import { Select } from '../common/Select';
 import { Textarea } from '../common/Textarea';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useClub } from '../../contexts/ClubContext';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { trainingService } from '../../services/trainingService';
 import { CreateTitleModal } from './CreateTitleModal';
 
 export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initialTab = 0, isMatchDay = false }) {
   const { colors } = useTheme();
+  const { selectedClub } = useClub();
   const isMobile = useIsMobile();
+  const modality = selectedClub?.modality || 'football_11';
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
@@ -93,13 +96,13 @@ export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initial
     try {
       const [contentsData, stagesData, titlesData, filesData] = await Promise.all([
         trainingService.getContents(),
-        trainingService.getStages(),
+        trainingService.getStages(null, modality),
         trainingService.getTitles(),
         session?.id ? trainingService.getSessionFiles(session.id) : Promise.resolve({ data: [] }),
       ]);
 
-      const loadedContents = contentsData?.data || [];
-      const loadedStages = stagesData?.data || [];
+      const loadedContents = (contentsData?.data || []).filter(c => c.active !== false);
+      const loadedStages = (stagesData?.data || []).filter(s => s.active !== false);
       const loadedTitles = titlesData?.data || [];
       const loadedFiles = filesData?.data || [];
 
@@ -117,17 +120,20 @@ export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initial
         const blockKey = block.id || `order_${block.order}`;
 
         if (activity) {
-          // Map saved stage_names to stage IDs
+          // Map activity stages to stage IDs — prefer stage_id (novo), fallback no stage_name (legado)
           const stageIds = activity.stages
             ?.map(activityStage => {
-              const globalStage = loadedStages.find(s => s.name === activityStage.stage_name);
-              return globalStage?.id;
+              if (activityStage.stage_id && loadedStages.some(s => s.id === activityStage.stage_id)) {
+                return activityStage.stage_id;
+              }
+              const byName = loadedStages.find(s => s.name === activityStage.stage_name);
+              return byName?.id;
             })
             .filter(id => id) || [];
 
           // Map contents - handle both nested {content: {id}} and flat {id} structures
           const contentIds = activity.contents?.map((c) => {
-            // If it's nested structure from Supabase join: { content: { id, name } }
+            // Nested structure (legacy/joined): { content: { id, name } }
             if (c.content && c.content.id) {
               return c.content.id;
             }
@@ -135,7 +141,10 @@ export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initial
             return c.id;
           }).filter(id => id) || [];
 
+          // Derive selectedDimension a partir do content snapshot
+          const firstContent = contentIds[0] ? loadedContents.find(c => c.id === contentIds[0]) : null;
           initialData[blockKey] = {
+            selectedDimension: firstContent?.dimension || '',
             selectedContents: contentIds,
             selectedStages: stageIds,
             titleId: activity.title_id || '',
@@ -145,8 +154,8 @@ export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initial
             blockOrder: block.order, // Include order for mapping when saving
           };
         } else {
-          // Empty data for blocks without activity
           initialData[blockKey] = {
+            selectedDimension: '',
             selectedContents: [],
             selectedStages: [],
             titleId: '',
@@ -185,43 +194,35 @@ export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initial
             updated[blockId].titleId = '';
           }
         }
-        // Limpar etapas selecionadas quando conteúdo mudar
-        updated[blockId].selectedStages = [];
+        // Mantém só as etapas dos conteúdos ainda selecionados
+        const set = new Set(value);
+        updated[blockId].selectedStages = (updated[blockId].selectedStages || []).filter((sid) => {
+          const s = stages.find((x) => x.id === sid);
+          return s && set.has(s.content_id);
+        });
       }
 
       return updated;
     });
   };
 
-  // Função para filtrar etapas baseadas nos conteúdos selecionados
+  // Filtra etapas pelos conteúdos selecionados (via content_id direto).
+  // Quando há múltiplos conteúdos selecionados, agrupa pelo nome do conteúdo no label
+  // para diferenciar etapas homônimas (ex.: "Falta" em BPO vs BPD).
   const getAvailableStages = (blockId) => {
     const blockInfo = blockData[blockId];
-    if (!blockInfo || !blockInfo.selectedContents || blockInfo.selectedContents.length === 0) {
-      return []; // Não mostrar etapas se não houver conteúdo selecionado
-    }
+    if (!blockInfo?.selectedContents?.length) return [];
 
-    const selectedContentNames = blockInfo.selectedContents.map(contentId => {
-      const content = contents.find(c => c.id === contentId);
-      return content?.name;
-    }).filter(Boolean);
+    const selectedSet = new Set(blockInfo.selectedContents);
+    const filtered = stages.filter((s) => selectedSet.has(s.content_id));
 
-    // Filtrar etapas que pertencem aos conteúdos selecionados
-    const filteredStages = stages.filter(stage => {
-      return selectedContentNames.includes(stage.content_name);
-    });
+    if (blockInfo.selectedContents.length === 1) return filtered;
 
-    // Remover duplicatas baseadas no nome da etapa (para BP Ofensiva e Defensiva)
-    const uniqueStages = [];
-    const seenNames = new Set();
-
-    filteredStages.forEach(stage => {
-      if (!seenNames.has(stage.name)) {
-        seenNames.add(stage.name);
-        uniqueStages.push(stage);
-      }
-    });
-
-    return uniqueStages;
+    // Múltiplos contents — prefixa o nome com o conteúdo para evitar confusão
+    return filtered.map((s) => ({
+      ...s,
+      name: s.content_name ? `${s.content_name} · ${s.name}` : s.name,
+    }));
   };
 
   const handleFileUpload = (e) => {
@@ -636,98 +637,154 @@ export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initial
                   // Use block.id if available, otherwise use order as key
                   const blockKey = block.id || `order_${block.order}`;
 
-                  return (
-                    <div style={blockFormStyle}>
-                      {/* Linha 1: Conteúdos e Etapas lado a lado */}
-                      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: isMobile ? '0.5rem' : '1rem' }}>
-                        <MultiSelect
-                          label="Conteúdos"
-                          options={contents.map((c) => ({ value: c.id, label: c.name }))}
-                          value={blockData[blockKey]?.selectedContents || []}
-                          onChange={(value) => handleFieldChange(blockKey, 'selectedContents', value)}
-                          placeholder="Selecione conteúdos..."
-                        />
+                  const DIM_LIST = [
+                    { key: 'tatico',  label: 'Tático',  color: '#3b82f6' },
+                    { key: 'fisico',  label: 'Físico',  color: '#f59e0b' },
+                    { key: 'tecnico', label: 'Técnico', color: '#a855f7' },
+                    { key: 'mental',  label: 'Mental',  color: '#10b981' },
+                  ];
+                  const currentContentId = blockData[blockKey]?.selectedContents?.[0] || '';
+                  const currentContent = contents.find(c => c.id === currentContentId);
+                  const currentDimension = currentContent?.dimension || blockData[blockKey]?.selectedDimension || '';
+                  const contentsOfDimension = contents.filter(c => c.dimension === currentDimension);
+                  const hasContent = !!currentContentId;
+                  const hasDimension = !!currentDimension;
+                  const isTatic = currentDimension === 'tatico';
+                  const contentLabel = isTatic ? 'Momento do Jogo' : 'Conteúdo';
+                  const labelStyle = { display: 'block', fontSize: '0.8rem', fontWeight: 600, color: colors.text, marginBottom: '0.4rem' };
+                  const hintStyle = { fontSize: '0.7rem', color: colors.textSecondary, marginLeft: '0.4rem', fontWeight: 400 };
 
-                        <MultiSelect
-                          label="Etapas"
-                          options={getAvailableStages(blockKey).map((s) => ({ value: s.id, label: s.name }))}
-                          value={blockData[blockKey]?.selectedStages || []}
-                          onChange={(value) => handleFieldChange(blockKey, 'selectedStages', value)}
-                          placeholder={blockData[blockKey]?.selectedContents?.length > 0 ? "Selecione etapas..." : "Selecione conteúdos primeiro..."}
-                          disabled={!blockData[blockKey]?.selectedContents?.length}
-                        />
+                  return (
+                    <div style={blockFormStyle} data-tour="unified-modal-body">
+                      {/*Pilar (chips sempre visíveis) */}
+                      <div>
+                        <label style={labelStyle}>
+                         Pilar <span style={hintStyle}>obrigatório</span>
+                        </label>
+                        <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                          {DIM_LIST.map((d) => {
+                            const isSelected = currentDimension === d.key;
+                            return (
+                              <button
+                                key={d.key}
+                                type="button"
+                                onClick={() => {
+                                  if (isSelected) {
+                                    handleFieldChange(blockKey, 'selectedDimension', '');
+                                    handleFieldChange(blockKey, 'selectedContents', []);
+                                  } else {
+                                    handleFieldChange(blockKey, 'selectedDimension', d.key);
+                                    handleFieldChange(blockKey, 'selectedContents', []);
+                                  }
+                                }}
+                                style={{
+                                  display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
+                                  padding: '0.4rem 0.8rem', borderRadius: '999px',
+                                  border: `1.5px solid ${isSelected ? d.color : colors.border}`,
+                                  backgroundColor: isSelected ? `${d.color}1A` : 'transparent',
+                                  color: isSelected ? d.color : colors.text,
+                                  fontSize: '0.825rem', fontWeight: isSelected ? 600 : 500,
+                                  cursor: 'pointer', transition: 'all 0.15s',
+                                }}
+                              >
+                                <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: d.color }} />
+                                {d.label}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
 
-                      {/* Linha 2: Tema, Grupo e Tempo */}
-                      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr 1fr', gap: isMobile ? '0.5rem' : '1rem' }}>
-                        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end' }}>
-                          <div style={{ flex: 1 }}>
+                      {/* Conteúdo (aparece quando pilar selecionada).
+                          Pra tático: select de momento + submomentos lado a lado.
+                          Pra outras dimensões: só o select de conteúdo. */}
+                      {hasDimension && (
+                        <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: isMobile ? '1fr' : (isTatic ? '1fr 1fr' : '1fr'),
+                          gap: isMobile ? '0.75rem' : '1rem',
+                        }}>
+                          <div>
+                            <label style={labelStyle}>
+                              {contentLabel} <span style={hintStyle}>obrigatório</span>
+                            </label>
                             <Select
-                              label="Tema da Atividade"
                               fullWidth
-                              options={getFilteredTitles(blockKey).map((t) => ({ value: t.id, label: t.title }))}
-                              value={blockData[blockKey]?.titleId || ''}
-                              onChange={(e) => handleFieldChange(blockKey, 'titleId', e.target.value)}
-                              placeholder={blockData[blockKey]?.selectedContents?.length > 0 ? "Selecione um tema..." : "Selecione conteúdos primeiro..."}
+                              options={contentsOfDimension.map((c) => ({ value: c.id, label: c.name }))}
+                              value={currentContentId}
+                              onChange={(e) => handleFieldChange(blockKey, 'selectedContents', e.target.value ? [e.target.value] : [])}
+                              placeholder={isTatic ? 'Selecione um momento...' : 'Selecione um conteúdo...'}
                             />
                           </div>
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => setShowCreateTitle(true)}
-                          >
-                            Novo
-                          </Button>
+                          {isTatic && (
+                            <div>
+                              <label style={labelStyle}>
+                                Submomentos <span style={hintStyle}>opcional</span>
+                              </label>
+                              <MultiSelect
+                                options={getAvailableStages(blockKey).map((s) => ({ value: s.id, label: s.name }))}
+                                value={blockData[blockKey]?.selectedStages || []}
+                                onChange={(value) => handleFieldChange(blockKey, 'selectedStages', value)}
+                                placeholder={hasContent ? 'Marque um ou mais...' : 'Selecione o momento primeiro'}
+                                disabled={!hasContent}
+                              />
+                            </div>
+                          )}
                         </div>
+                      )}
+
+                      {/* Atividade (aparece quando conteúdo selecionado) */}
+                      {hasContent && (
                         <div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                            <label style={{ fontSize: '0.875rem', fontWeight: '500', color: colors.text }}>
-                              Grupos
-                            </label>
+                          <label style={labelStyle}>
+                            Atividade <span style={hintStyle}>obrigatório</span>
+                          </label>
+                          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'stretch' }}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <Select
+                                fullWidth
+                                options={getFilteredTitles(blockKey).map((t) => ({ value: t.id, label: t.title }))}
+                                value={blockData[blockKey]?.titleId || ''}
+                                onChange={(e) => handleFieldChange(blockKey, 'titleId', e.target.value)}
+                                placeholder="Selecione uma atividade..."
+                              />
+                            </div>
                             <button
                               type="button"
-                              onClick={() => {
-                                const allGroups = groupOptions.map(g => g.value);
-                                const current = blockData[blockKey]?.selectedGroups || [];
-                                const allSelected = allGroups.every(g => current.includes(g));
-                                handleFieldChange(blockKey, 'selectedGroups', allSelected ? [] : allGroups);
-                              }}
+                              onClick={() => setShowCreateTitle(true)}
+                              title="Cadastrar nova atividade"
                               style={{
-                                background: 'none',
+                                padding: '0 0.8rem',
                                 border: `1px solid ${colors.border}`,
-                                borderRadius: '0.25rem',
-                                padding: '0.2rem 0.5rem',
-                                fontSize: '0.75rem',
-                                color: colors.primary,
+                                borderRadius: '0.375rem',
+                                backgroundColor: colors.surface,
+                                color: colors.text,
+                                fontSize: '0.825rem',
+                                fontWeight: 500,
                                 cursor: 'pointer',
-                                fontWeight: '500',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.3rem',
+                                whiteSpace: 'nowrap',
                               }}
                             >
-                              {(() => {
-                                const allGroups = groupOptions.map(g => g.value);
-                                const current = blockData[blockKey]?.selectedGroups || [];
-                                return allGroups.every(g => current.includes(g)) ? 'Limpar' : 'Todos';
-                              })()}
+                              + Novo
                             </button>
                           </div>
-                          <MultiSelect
-                            options={groupOptions}
-                            value={blockData[blockKey]?.selectedGroups || []}
-                            onChange={(value) => handleFieldChange(blockKey, 'selectedGroups', value)}
-                            placeholder="Selecione grupos..."
-                          />
                         </div>
+                      )}
+
+                      {/* Linha 3: Tempo (compacto) + Grupos como chips */}
+                      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '140px 1fr', gap: isMobile ? '0.75rem' : '1rem', alignItems: 'start' }}>
                         <div>
-                          <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', fontWeight: '500', color: colors.text }}>
-                            Tempo (minutos)
-                          </label>
+                          <label style={labelStyle}>Tempo (min)</label>
                           <input
                             type="number"
                             min="0"
                             step="1"
                             value={blockData[blockKey]?.durationMinutes || ''}
                             onChange={(e) => handleFieldChange(blockKey, 'durationMinutes', e.target.value)}
-                            placeholder="Ex: 30"
+                            placeholder="30"
                             style={{
                               width: '100%',
                               padding: '0.5rem 0.75rem',
@@ -739,17 +796,80 @@ export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initial
                             }}
                           />
                         </div>
+
+                        <div>
+                          <label style={labelStyle}>Grupos</label>
+                          <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                            {groupOptions.map((g) => {
+                              const isSelected = (blockData[blockKey]?.selectedGroups || []).includes(g.value);
+                              return (
+                                <button
+                                  key={g.value}
+                                  type="button"
+                                  onClick={() => {
+                                    const cur = blockData[blockKey]?.selectedGroups || [];
+                                    const next = isSelected ? cur.filter(x => x !== g.value) : [...cur, g.value];
+                                    handleFieldChange(blockKey, 'selectedGroups', next);
+                                  }}
+                                  style={{
+                                    padding: '0.35rem 0.7rem',
+                                    borderRadius: '999px',
+                                    border: `1.5px solid ${isSelected ? colors.primary : colors.border}`,
+                                    backgroundColor: isSelected ? `${colors.primary}1A` : 'transparent',
+                                    color: isSelected ? colors.primary : colors.text,
+                                    fontSize: '0.8rem',
+                                    fontWeight: isSelected ? 600 : 500,
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s',
+                                  }}
+                                >
+                                  {g.label}
+                                </button>
+                              );
+                            })}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const all = groupOptions.map(g => g.value);
+                                const cur = blockData[blockKey]?.selectedGroups || [];
+                                const allSelected = all.every(g => cur.includes(g));
+                                handleFieldChange(blockKey, 'selectedGroups', allSelected ? [] : all);
+                              }}
+                              style={{
+                                marginLeft: '0.25rem',
+                                padding: '0.3rem 0.65rem',
+                                fontSize: '0.7rem',
+                                fontWeight: 600,
+                                color: colors.textSecondary,
+                                backgroundColor: 'transparent',
+                                border: `1px dashed ${colors.border}`,
+                                borderRadius: '999px',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              {(() => {
+                                const all = groupOptions.map(g => g.value);
+                                const cur = blockData[blockKey]?.selectedGroups || [];
+                                return all.every(g => cur.includes(g)) ? 'Limpar' : 'Todos';
+                              })()}
+                            </button>
+                          </div>
+                        </div>
                       </div>
 
-                      {/* Linha 3: Descrição */}
-                      <Textarea
-                        label="Descrição"
-                        fullWidth
-                        rows={4}
-                        value={blockData[blockKey]?.description || ''}
-                        onChange={(e) => handleFieldChange(blockKey, 'description', e.target.value)}
-                        placeholder="Adicione uma descrição sobre esta atividade..."
-                      />
+                      {/* Linha 4: Descrição */}
+                      <div>
+                        <label style={labelStyle}>
+                          Descrição <span style={hintStyle}>opcional</span>
+                        </label>
+                        <Textarea
+                          fullWidth
+                          rows={3}
+                          value={blockData[blockKey]?.description || ''}
+                          onChange={(e) => handleFieldChange(blockKey, 'description', e.target.value)}
+                          placeholder="Detalhes sobre a atividade..."
+                        />
+                      </div>
                     </div>
                   );
                 })()}

@@ -1,7 +1,9 @@
 import { useRef } from 'react';
-import { X, FileDown } from 'lucide-react';
+import { X } from 'lucide-react';
 import { useTheme } from '../../contexts/ThemeContext';
 import html2pdf from 'html2pdf.js';
+import { newWorkbook, addSheet, saveWorkbook, addMetaSheet, formatMinutes } from '../../utils/excelTheme';
+import { ExportMenu } from '../common/ExportMenu';
 
 export function TrainingSummaryModal({ isOpen, onClose, session }) {
   const { colors } = useTheme();
@@ -19,6 +21,39 @@ export function TrainingSummaryModal({ isOpen, onClose, session }) {
 
   // Filter blocks with activities
   const activeBlocks = session.blocks?.filter(block => block.activity) || [];
+
+  const handleDownloadExcel = () => {
+    if (activeBlocks.length === 0) {
+      alert('Nenhuma atividade pra exportar.');
+      return;
+    }
+    const wb = newWorkbook({ title: `Treino - ${session.day_name}` });
+    const dateStr = session.date || '';
+    const total = getTotalDuration();
+    addMetaSheet(wb, {
+      title: `Treino - ${session.day_name}`,
+      period: dateStr,
+      totals: [
+        ['Atividades', activeBlocks.length],
+        ['Tempo total', formatMinutes(total)],
+      ],
+    });
+    const rows = [['Bloco', 'Atividade', 'Conteúdos', 'Submomentos', 'Grupos', 'Tempo (min)', 'Descrição']];
+    activeBlocks.forEach((b) => {
+      const a = b.activity;
+      rows.push([
+        b.name || '',
+        a?.title?.title || '',
+        (a?.contents || []).map(c => c.name).join(', '),
+        (a?.stages || []).map(s => s.stage_name).join(', '),
+        (a?.groups || []).join(', '),
+        a?.duration_minutes || '',
+        a?.description || '',
+      ]);
+    });
+    addSheet(wb, 'Atividades', rows, { widths: [18, 30, 30, 30, 14, 12, 50], freezeHeader: true });
+    saveWorkbook(wb, `treino-${session.day_name}-${dateStr}.xlsx`);
+  };
 
   const handleDownloadPDF = async () => {
     try {
@@ -131,42 +166,40 @@ export function TrainingSummaryModal({ isOpen, onClose, session }) {
     fontSize: '24px',
     fontWeight: '700',
     marginBottom: '4px',
-    color: '#1a1a1a',
-    textAlign: 'center',
-    borderBottom: '3px solid #2563eb',
-    paddingBottom: '8px',
+    color: '#0f172a',
+    textAlign: 'left',
+    paddingBottom: '4px',
   };
 
   const subtitleStyle = {
     fontSize: '13px',
     fontWeight: '500',
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: '12px',
+    color: '#64748b',
+    textAlign: 'left',
+    marginBottom: '14px',
   };
 
   const blockContainerStyle = {
     marginBottom: '8px',
-    border: '2px solid #d1d5db',
-    borderRadius: '8px',
+    border: '1px solid #e2e8f0',
+    borderRadius: '6px',
     overflow: 'hidden',
     backgroundColor: '#ffffff',
-    boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
   };
 
   const blockTitleRowStyle = {
     fontSize: '13px',
     fontWeight: '700',
     color: '#ffffff',
-    backgroundColor: '#3b82f6',
-    padding: '8px 12px',
+    backgroundColor: '#1f2937',
+    padding: '7px 12px',
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
   };
 
   const durationBadgeStyle = {
-    backgroundColor: '#1e40af',
+    backgroundColor: 'rgba(255,255,255,0.15)',
     color: '#ffffff',
     padding: '3px 10px',
     borderRadius: '12px',
@@ -231,15 +264,15 @@ export function TrainingSummaryModal({ isOpen, onClose, session }) {
   };
 
   const totalDurationBoxStyle = {
-    backgroundColor: '#f0f9ff',
-    border: '2px solid #2563eb',
-    borderRadius: '8px',
+    backgroundColor: '#f8fafc',
+    border: '1px solid #e2e8f0',
+    borderRadius: '6px',
     padding: '10px',
     textAlign: 'center',
     marginTop: '15px',
-    fontSize: '15px',
+    fontSize: '14px',
     fontWeight: '700',
-    color: '#1e40af',
+    color: '#0f172a',
   };
 
   return (
@@ -247,21 +280,12 @@ export function TrainingSummaryModal({ isOpen, onClose, session }) {
       <div style={modalStyle} onClick={(e) => e.stopPropagation()}>
         {/* Action Buttons */}
         <div style={headerStyle} className="no-print">
-          <button
-            onClick={handleDownloadPDF}
-            style={buttonStyle}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = '#dbeafe';
-              e.currentTarget.style.transform = 'scale(1.05)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.95)';
-              e.currentTarget.style.transform = 'scale(1)';
-            }}
-            title="Baixar PDF"
-          >
-            <FileDown size={22} strokeWidth={1.5} />
-          </button>
+          <ExportMenu
+            size="sm"
+            variant="floating"
+            onExportPDF={handleDownloadPDF}
+            onExportExcel={handleDownloadExcel}
+          />
           <button
             onClick={onClose}
             style={buttonStyle}
@@ -284,6 +308,18 @@ export function TrainingSummaryModal({ isOpen, onClose, session }) {
           <div ref={contentRef}>
             {/* Single Page: Training Summary */}
             <div style={pageStyle}>
+              {/* Brand discreto + linha fina azul (acento único) */}
+              <div style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                marginBottom: '6px', fontSize: '9px', fontWeight: 600,
+                color: '#64748b', letterSpacing: '0.05em',
+              }}>
+                <span>TACTIPLAN</span>
+                <span style={{ fontWeight: 400 }}>
+                  Gerado em {new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
+                </span>
+              </div>
+              <div style={{ height: '2px', backgroundColor: '#1d4ed8', marginBottom: '10px' }} />
               <h1 style={titleStyle}>Treino - {session.day_name}</h1>
               <p style={subtitleStyle}>
                 {(() => { const [y,m,d] = (session.date||'').split('-'); return d ? new Date(+y, +m-1, +d).toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' }) : ''; })()}
@@ -318,17 +354,17 @@ export function TrainingSummaryModal({ isOpen, onClose, session }) {
                             </div>
                           )}
 
-                          {/* DEPOIS TEMA */}
+                          {/* Atividade */}
                           {activity.title?.title && (
                             <div style={fieldRowStyle}>
-                              <span style={labelStyle}>Tema:</span>
+                              <span style={labelStyle}>Atividade:</span>
                               <span style={valueStyle}>{activity.title.title}</span>
                             </div>
                           )}
 
                           {activity.stages && activity.stages.length > 0 && (
                             <div style={fieldRowStyle}>
-                              <span style={labelStyle}>Etapas:</span>
+                              <span style={labelStyle}>Submomentos:</span>
                               <span style={valueStyle}>{activity.stages.map(s => s.stage_name).join(', ')}</span>
                             </div>
                           )}

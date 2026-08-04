@@ -13,15 +13,104 @@ import { CreateTitleModal } from '../components/training/CreateTitleModal';
 import { SessionTypeModal } from '../components/training/SessionTypeModal';
 import { GameModal } from '../components/training/GameModal';
 import { WeekSelector } from '../components/stats/WeekSelector';
-import { ClubSelector } from '../components/club/ClubSelector';
 import { trainingService } from '../services/trainingService';
 import { MonthlyThemeBanner } from '../components/training/MonthlyThemeBanner';
 import { themeService } from '../services/themeService';
+import { usePreference } from '../hooks/usePreference';
+import { usePlanFeatures } from '../hooks/usePlanFeatures';
+import { TourGuide } from '../components/common/TourGuide';
+import { useTour, useTourReplayListener } from '../hooks/useTour';
 
 export function TrainingPage() {
   const { colors } = useTheme();
   const { selectedClub } = useClub();
   const isMobile = useIsMobile();
+  const [monthlyThemePref] = usePreference('pref_monthly_theme', 'disabled');
+  const plan = usePlanFeatures();
+  const showMonthlyTheme = monthlyThemePref === 'enabled' && plan.monthly_theme;
+  const tour = useTour('training');
+  useTourReplayListener('training', () => tour.setIsOpen(true));
+
+  const isMobileDevice = typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches;
+  const tourSteps = [
+    {
+      title: 'Bem-vindo ao TactiPlan!',
+      content: 'Vamos te mostrar rapidinho como funciona a tela de treinos. Você pode pular a qualquer momento usando ESC, ou navegar com as setas do teclado.',
+    },
+    {
+      selector: '[data-tour="week-selector"]',
+      title: 'Seletor de microciclo',
+      content: 'Aqui você navega entre semanas. Cada microciclo tem 7 sessões — uma por dia. Use as setas para ir pra semanas anteriores ou futuras.',
+      placement: 'bottom',
+    },
+    ...(showMonthlyTheme ? [{
+      selector: '[data-tour="monthly-theme"]',
+      title: 'Tema do mês',
+      content: 'Defina um foco tático para o mês (ex: "Saída de bola"). A plataforma acompanha automaticamente quanto dos seus treinos estão aderindo ao tema. Você pode desligar essa feature em Configurações → Preferências.',
+      placement: 'bottom',
+    }] : []),
+    {
+      selector: '[data-tour="calendar"]',
+      title: 'Calendário da semana',
+      content: isMobileDevice
+        ? 'Cada coluna é um dia. Toque num dia pra abrir as atividades. Pressione e segure (long-press) um dia pra mudar o tipo de sessão (Treino, Jogo, Descanso).'
+        : 'Cada coluna é um dia. Clique em um dia pra abrir as atividades. Clique direito num dia pra trocar o tipo de sessão (Treino, Jogo, Descanso).',
+      placement: 'top',
+    },
+    {
+      title: 'Cadastrando uma atividade',
+      content: 'Vou abrir o modal de uma sessão pra você ver como funciona. Clique em "Próximo".',
+      beforeEnter: () => {
+        // Pega primeira sessão de treino do microcycle atual (com fallback pra primeira sessão)
+        const firstTraining = microcycle?.sessions?.find((s) => s.session_type === 'training' || !s.session_type);
+        const targetSession = firstTraining || microcycle?.sessions?.[0];
+        if (targetSession) {
+          setSelectedSession(targetSession);
+          setShowUnifiedModal(true);
+        }
+      },
+      waitForSelector: '[data-tour="unified-modal-body"]',
+      waitMs: 250,
+    },
+    {
+      selector: '[data-tour="unified-modal-body"]',
+      title: 'Estrutura do dia',
+      content: 'Aqui dentro você vê os blocos da sessão (Aquecimento, Preparatório, Atividade 1, 2, 3, Complementar). Clique nas abas pra trocar entre blocos.',
+      placement: 'auto',
+    },
+    {
+      title: 'Pilar + Conteúdo + Submomentos',
+      content: 'Em cada bloco escolha o Pilar (Tático/Físico/Técnico/Mental), depois o Conteúdo daquele pilar. Se for Tático, aparecem também os Submomentos (OO, OD, TO, TD, BPO, BPD). Em seguida selecione a Atividade.',
+      placement: 'auto',
+    },
+    {
+      title: 'Fechando o modal',
+      content: 'Vou fechar pra continuar com o calendário. Próximo →',
+      afterLeave: () => setShowUnifiedModal(false),
+    },
+    {
+      title: 'Trocando treino por jogo',
+      content: isMobileDevice
+        ? 'Pressione e segure (long-press) um dia → "Mudar tipo de sessão" → escolha Jogo. Aí você define adversário, escala titulares/reservas e registra eventos em tempo real.'
+        : 'Clique direito num dia → "Mudar tipo de sessão" → Jogo. Você define adversário, escala titulares/reservas e registra eventos. A convocação sai em PDF/Excel pelo botão Exportar do modal.',
+    },
+    {
+      title: 'Detalhes do jogo: campeonato, rodada, local e vídeo',
+      content: 'Dentro do modal de Jogo você pode marcar de qual campeonato é o jogo (cadastre os campeonatos antes em Minha Equipe → Campeonatos), informar a rodada, se foi em Casa, Fora ou Neutro, e colar a URL de vídeo do jogo. Esses dados aparecem depois em Estatísticas → Jogos, com cálculo automático de aproveitamento, sequência de vitórias e invicta — estilo PDF de desempenho de clube profissional.',
+    },
+    {
+      title: 'Escalação no campo (Lineup)',
+      content: 'No modal de Jogo, na coluna de jogadores, há um toggle "Lista / Campo". O modo Campo desenha os titulares nas posições que estão cadastradas no plantel (futebol 11/7 ou quadra de futsal). Útil pra revisar a escalação visualmente antes de salvar.',
+    },
+    {
+      title: 'Exportações',
+      content: 'Em vários lugares (Plantel, Convocação, Resumo do dia, Estatísticas) você verá o botão "Exportar" — escolha entre PDF (pra imprimir/compartilhar) ou Excel (pra editar/filtrar). Os PDFs seguem layout padronizado TactiPlan.',
+    },
+    {
+      title: 'Próximos passos',
+      content: 'Explore o menu: Estatísticas (gráficos por pilar/conteúdo), Cadastros (Plantel, Conteúdos, Atividades) e Quadro Tático. Pra revisitar este tour, vá em Configurações → Preferências → Ver tutorial.',
+    },
+  ];
   const [selectedDayIndex, setSelectedDayIndex] = useState(() => {
     // Default to today's day index (0=Mon, 6=Sun)
     const today = new Date().getDay();
@@ -130,7 +219,7 @@ export function TrainingPage() {
       return;
     }
 
-    console.log('Loading from Supabase:', cacheKey);
+    console.log('Loading microcycle:', cacheKey);
     setLoading(true);
     try {
       const response = await trainingService.getMicrocycle(currentWeek.identifier, selectedClub.id);
@@ -220,25 +309,31 @@ export function TrainingPage() {
   function getDayContentsSummary(session) {
     if (!session?.blocks) return [];
 
-    // Count occurrences of each content
+    // Conta ocorrências de cada conteúdo nas atividades do dia
     const contentCounts = {};
-    session.blocks.forEach(block => {
+    const contentDims = {};
+    session.blocks.forEach((block) => {
       if (block.activity?.contents) {
-        block.activity.contents.forEach(content => {
-          // Ignore "Físico" and "Todos"
-          if (content.name !== 'Físico' && content.name !== 'Todos') {
-            contentCounts[content.name] = (contentCounts[content.name] || 0) + 1;
-          }
+        block.activity.contents.forEach((content) => {
+          contentCounts[content.name] = (contentCounts[content.name] || 0) + 1;
+          contentDims[content.name] = content.dimension;
         });
       }
     });
 
-    // Sort by frequency (descending) and return objects with abbreviation and full name
-    return Object.entries(contentCounts)
-      .sort((a, b) => b[1] - a[1])
+    if (Object.keys(contentCounts).length === 0) return [];
+
+    // Prioriza táticos: se houver algum tático no dia, predominância olha só pra eles.
+    // Caso contrário, considera todos os pilares disponíveis.
+    const taticoEntries = Object.entries(contentCounts).filter(([name]) => contentDims[name] === 'tatico');
+    const eligible = taticoEntries.length > 0 ? taticoEntries : Object.entries(contentCounts);
+
+    const max = Math.max(...eligible.map(([, cnt]) => cnt));
+    return eligible
+      .filter(([, cnt]) => cnt === max)
       .map(([name]) => ({
         abbreviated: abbreviateContent(name),
-        full: name
+        full: name,
       }));
   }
 
@@ -414,11 +509,11 @@ export function TrainingPage() {
 
   return (
     <div style={{ position: 'relative', height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <TourGuide isOpen={tour.isOpen} onClose={tour.stop} steps={tourSteps} storageKey={tour.storageKey} />
       {/* Loading overlay - only shows when reloading with existing data */}
       <LoadingOverlay isLoading={loading && !initialLoad} message="Atualizando..." />
       <div style={headerStyle}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '0.5rem' : '1rem', flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
-          <ClubSelector />
+        <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '0.5rem' : '1rem', flexWrap: isMobile ? 'wrap' : 'nowrap' }} data-tour="week-selector">
           <WeekSelector
             value={currentWeek.identifier}
             onChange={(newIdentifier) => {
@@ -436,17 +531,12 @@ export function TrainingPage() {
           />
         </div>
 
-        {themeContentIds.length === 0 && (
-          <Button variant="secondary" size={isMobile ? 'sm' : 'md'} icon={<Plus size={isMobile ? 16 : 18} strokeWidth={1.5} />} onClick={() => setShowCreateTitle(true)}>
-            {isMobile ? 'Novo Tema' : 'Cadastrar Novo Tema'}
-          </Button>
+        {showMonthlyTheme && selectedClub?.id && (
+          <div data-tour="monthly-theme">
+            <MonthlyThemeBanner clubId={selectedClub.id} currentMonth={currentMonth} inline />
+          </div>
         )}
       </div>
-
-      {/* Monthly Theme Banner */}
-      {selectedClub?.id && (
-        <MonthlyThemeBanner clubId={selectedClub.id} currentMonth={currentMonth} />
-      )}
 
       {/* Mobile Day Selector */}
       {isMobile && microcycle?.sessions && (
@@ -469,7 +559,7 @@ export function TrainingPage() {
         </div>
       )}
 
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }} data-tour="calendar">
         <div style={calendarStyle}>
           {(isMobile
             ? microcycle?.sessions?.filter((_, idx) => idx === selectedDayIndex)
@@ -553,7 +643,14 @@ export function TrainingPage() {
                       e.currentTarget.style.boxShadow = 'none';
                     }}
                   >
-                    {getDayContentsSummary(session).map(c => c.abbreviated).join(' | ') || '\u00A0'}
+                    {(() => {
+                      const items = getDayContentsSummary(session);
+                      if (items.length === 0) return '\u00A0';
+                      // Limita a 3 vis\u00EDveis; em empates grandes mostra "+N"
+                      if (items.length <= 3) return items.map(c => c.abbreviated).join(' | ');
+                      const visible = items.slice(0, 2).map(c => c.abbreviated).join(' | ');
+                      return `${visible} +${items.length - 2}`;
+                    })()}
                   </div>
                 </Tooltip>
 
@@ -782,6 +879,11 @@ export function TrainingPage() {
           try {
             // FIRST: Ensure database structure exists (microcycle, sessions, blocks)
             // This is called ONLY when actually saving data
+            // IMPORTANTE: usamos as variáveis locais (freshMicrocycle/freshSession) abaixo
+            // em vez de ler do state — setSelectedSession/setMicrocycle são assíncronos.
+            let freshMicrocycle = microcycle;
+            let freshSession = selectedSession;
+
             if (!selectedSession?.id) {
               console.log('No session ID - ensuring database structure exists...');
               const response = await trainingService.ensureMicrocycleStructure(currentWeek.identifier, selectedClub.id);
@@ -798,11 +900,13 @@ export function TrainingPage() {
 
               console.log('Database structure created. Session ID:', realSession.id);
 
-              // Update selectedSession with the real session from database
+              // Atualiza state pra próximo render (assíncrono)
               setSelectedSession(realSession);
-
-              // Also update microcycle state
               setMicrocycle(microcycleData);
+
+              // Mas USA imediatamente as versões locais (síncronas) pra continuar o save
+              freshMicrocycle = microcycleData;
+              freshSession = realSession;
 
               // Cache the new microcycle (include club in cache key)
               const cacheKey = `${selectedClub.id}-${currentWeek.identifier}`;
@@ -812,12 +916,11 @@ export function TrainingPage() {
               }));
             }
 
-            // Get the current session with real IDs from database
-            // If we just created the structure, use the realSession from microcycleData
-            // Otherwise use the existing selectedSession
-            const currentSession = microcycle?.sessions?.find(s =>
-              s.day_of_week === selectedSession?.day_of_week
-            ) || selectedSession;
+            // Get the current session with real IDs — sempre do snapshot fresh,
+            // não do state (que pode estar stale após o setMicrocycle assíncrono).
+            const currentSession = freshMicrocycle?.sessions?.find(s =>
+              s.day_of_week === freshSession?.day_of_week
+            ) || freshSession;
 
             console.log('Current session for saving:', currentSession?.id, 'blocks:', currentSession?.blocks?.length);
 

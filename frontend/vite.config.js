@@ -8,7 +8,7 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      registerType: 'prompt',
       includeAssets: ['pwa-192.svg', 'pwa-512.svg', 'pwa-192.png', 'pwa-512.png', 'apple-touch-icon-180.png'],
       manifest: {
         name: 'TactiPlan - Gestao de Treinos',
@@ -40,6 +40,7 @@ export default defineConfig({
         ]
       },
       workbox: {
+        maximumFileSizeToCacheInBytes: 6 * 1024 * 1024, // 6 MiB — comporta exceljs (~2.7MB)
         runtimeCaching: [
           {
             urlPattern: /\/api\/.*/i,

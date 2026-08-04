@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { Mail, Lock } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { Input } from '../components/common/Input';
 import { Button } from '../components/common/Button';
+import { GoogleSignInButton } from '../components/auth/GoogleSignInButton';
 
 export function LoginPage() {
   const [email, setEmail] = useState('');
@@ -22,7 +23,7 @@ export function LoginPage() {
 
     try {
       await login(email, password);
-      navigate('/training');
+      navigate('/home');
     } catch (err) {
       setError(err.message || 'Falha ao fazer login');
     } finally {
@@ -87,6 +88,19 @@ export function LoginPage() {
         <h1 style={titleStyle}>TactiPlan</h1>
         <p style={subtitleStyle}>Faça login para continuar</p>
 
+        {import.meta.env.VITE_GOOGLE_CLIENT_ID && (
+          <>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1rem' }}>
+              <GoogleSignInButton />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: '1rem', color: colors.textSecondary, fontSize: '0.75rem' }}>
+              <div style={{ flex: 1, height: 1, backgroundColor: colors.border }} />
+              <span>ou</span>
+              <div style={{ flex: 1, height: 1, backgroundColor: colors.border }} />
+            </div>
+          </>
+        )}
+
         <form onSubmit={handleSubmit} style={formStyle}>
           {error && <div style={errorStyle}>{error}</div>}
 
@@ -117,6 +131,15 @@ export function LoginPage() {
           >
             {loading ? 'Entrando...' : 'Entrar'}
           </Button>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.5rem' }}>
+            <Link to="/forgot-password" style={{ fontSize: '0.8125rem', color: colors.textSecondary, textDecoration: 'none' }}>
+              Esqueci minha senha
+            </Link>
+            <Link to="/register" style={{ fontSize: '0.8125rem', color: colors.primary, textDecoration: 'none', fontWeight: 600 }}>
+              Criar conta
+            </Link>
+          </div>
         </form>
       </div>
     </div>

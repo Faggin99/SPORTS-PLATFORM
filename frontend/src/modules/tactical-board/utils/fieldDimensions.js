@@ -3,6 +3,7 @@
 
 export const FIELD_TYPES = {
   FOOTBALL_11: 'football_11',
+  FOOTBALL_7: 'football_7',
   FUTSAL: 'futsal',
 };
 
@@ -15,20 +16,23 @@ export const FIELD_VIEWS = {
 };
 
 // Aspect ratios (width:height)
+// Futebol 7 oficial CBF: 55x35m (~1.571)
 export const FIELD_ASPECT_RATIOS = {
   [FIELD_TYPES.FOOTBALL_11]: 105 / 68, // ~1.544
-  [FIELD_TYPES.FUTSAL]: 40 / 20,       // 2.0
+  [FIELD_TYPES.FOOTBALL_7]:  55 / 35,  // ~1.571
+  [FIELD_TYPES.FUTSAL]:      40 / 20,  // 2.0
 };
 
-// Half-field aspect ratios
 export const HALF_FIELD_ASPECT_RATIOS = {
-  [FIELD_TYPES.FOOTBALL_11]: (105 / 2) / 68, // ~0.772
-  [FIELD_TYPES.FUTSAL]: (40 / 2) / 20,       // 1.0
+  [FIELD_TYPES.FOOTBALL_11]: (105 / 2) / 68,
+  [FIELD_TYPES.FOOTBALL_7]:  (55 / 2) / 35,
+  [FIELD_TYPES.FUTSAL]:      (40 / 2) / 20,
 };
 
 export const THIRD_FIELD_ASPECT_RATIOS = {
   [FIELD_TYPES.FOOTBALL_11]: (105 / 3) / 68,
-  [FIELD_TYPES.FUTSAL]: (40 / 3) / 20,
+  [FIELD_TYPES.FOOTBALL_7]:  (55 / 3) / 35,
+  [FIELD_TYPES.FUTSAL]:      (40 / 3) / 20,
 };
 
 // Football 11 field markings (all in percentage 0-100)
@@ -46,8 +50,25 @@ export const FOOTBALL_11_FIELD = {
   leftPenaltyArc: { cx: 10.5, cy: 50, radius: 14.3, startAngle: -53, endAngle: 53 },
   rightPenaltyArc: { cx: 89.5, cy: 50, radius: 14.3, startAngle: 127, endAngle: 233 },
   cornerRadius: 1.5,
-  leftGoal: { x: -2, y: 44.6, width: 2, height: 10.8 },
-  rightGoal: { x: 100, y: 44.6, width: 2, height: 10.8 },
+  leftGoal: { x: 0, y: 44.6, width: 2.2, height: 10.8 },
+  rightGoal: { x: 97.8, y: 44.6, width: 2.2, height: 10.8 },
+};
+
+// Football 7 field markings (versão reduzida do F11; mantém área retangular)
+export const FOOTBALL_7_FIELD = {
+  boundary: { x: 0, y: 0, width: 100, height: 100 },
+  centerCircle: { cx: 50, cy: 50, radius: 12 },
+  centerLine: { x1: 50, y1: 0, x2: 50, y2: 100 },
+  centerSpot: { cx: 50, cy: 50 },
+  leftPenaltyArea:  { x: 0,  y: 22, width: 17, height: 56 },
+  rightPenaltyArea: { x: 83, y: 22, width: 17, height: 56 },
+  leftGoalArea:  { x: 0,  y: 38, width: 6, height: 24 },
+  rightGoalArea: { x: 94, y: 38, width: 6, height: 24 },
+  leftPenaltySpot:  { cx: 12, cy: 50 },
+  rightPenaltySpot: { cx: 88, cy: 50 },
+  cornerRadius: 1.5,
+  leftGoal:  { x: 0,    y: 43.5, width: 2.5, height: 13 },
+  rightGoal: { x: 97.5, y: 43.5, width: 2.5, height: 13 },
 };
 
 // Futsal court markings (all in percentage 0-100)
@@ -64,8 +85,8 @@ export const FUTSAL_FIELD = {
   rightSecondPenaltySpot: { cx: 75, cy: 50 },
   cornerRadius: 1.25,
   leftSubZone: { y1: -2, y2: -2, x: 50 },
-  leftGoal: { x: -2.5, y: 42.5, width: 2.5, height: 15 },
-  rightGoal: { x: 100, y: 42.5, width: 2.5, height: 15 },
+  leftGoal: { x: 0, y: 42.5, width: 2.6, height: 15 },
+  rightGoal: { x: 97.4, y: 42.5, width: 2.6, height: 15 },
 };
 
 // Convert percentage position to pixel position
@@ -92,7 +113,7 @@ export function getAspectRatio(fieldType, fieldView = FIELD_VIEWS.FULL) {
 // Calculate canvas dimensions that fit a container while maintaining aspect ratio
 export function calculateCanvasDimensions(containerWidth, containerHeight, fieldType, fieldView = FIELD_VIEWS.FULL) {
   const aspectRatio = getAspectRatio(fieldType, fieldView);
-  const padding = 4;
+  const padding = 0;
 
   const availableWidth = containerWidth - padding * 2;
   const availableHeight = containerHeight - padding * 2;

@@ -95,11 +95,8 @@ export function Select({ label, options = [], value, onChange, placeholder = 'Se
     width: `${dropdownPosition.width}px`,
     backgroundColor: colors.background,
     border: `1px solid ${colors.border}`,
-    borderRadius: '0.375rem',
-    boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
-    maxHeight: '280px',
-    overflowY: 'auto',
-    overflowX: 'hidden',
+    borderRadius: '0.5rem',
+    overflow: 'hidden',
     zIndex: 10000,
   };
 
@@ -165,7 +162,7 @@ export function Select({ label, options = [], value, onChange, placeholder = 'Se
               />
             </div>
           </div>
-          <div style={{ maxHeight: '200px', overflowY: 'auto', overflowX: 'hidden' }}>
+          <div className="select-options-scroll" style={{ maxHeight: '240px', overflowY: 'auto', overflowX: 'hidden' }}>
             {filteredOptions.length === 0 ? (
               <div style={{ padding: '0.75rem', textAlign: 'center', color: colors.textSecondary }}>
                 Nenhum item encontrado

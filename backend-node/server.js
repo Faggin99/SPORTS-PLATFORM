@@ -1,5 +1,15 @@
 require('dotenv').config();
 
+// Sentry: opcional. Se SENTRY_DSN não estiver setado, vira no-op.
+const Sentry = require('@sentry/node');
+if (process.env.SENTRY_DSN) {
+  Sentry.init({
+    dsn: process.env.SENTRY_DSN,
+    environment: process.env.NODE_ENV || 'production',
+    tracesSampleRate: 0.1,
+  });
+}
+
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -19,11 +29,30 @@ const statsRoutes = require('./src/routes/stats');
 const playsRoutes = require('./src/routes/plays');
 const themesRoutes = require('./src/routes/themes');
 const filesRoutes = require('./src/routes/files');
+const billingRoutes = require('./src/routes/billing');
+const adminRoutes = require('./src/routes/admin');
+const injuriesRoutes = require('./src/routes/injuries');
+const announcementsRoutes = require('./src/routes/announcements');
+const homeRoutes = require('./src/routes/home');
+const categoriesRoutes = require('./src/routes/categories');
+const clubMembersRoutes = require('./src/routes/clubMembers');
+const workspacesRoutes = require('./src/routes/workspaces');
+const competitionsRoutes = require('./src/routes/competitions');
+const externalCompetitionsRoutes = require('./src/routes/externalCompetitions');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Confia no nginx (rate limiter, IP correto)
+app.set('trust proxy', 1);
+
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+
+const { generalLimiter } = require('./src/middleware/rateLimit');
+app.use('/api/', generalLimiter);
+
+const requireActiveSubscription = require('./src/middleware/requireActiveSubscription');
+app.use(requireActiveSubscription);
 const allowedOrigins = (process.env.CORS_ORIGIN || '*').split(',').map(s => s.trim());
 app.use(cors({
   origin: (origin, callback) => {
@@ -41,23 +70,40 @@ app.use(express.urlencoded({ extended: true }));
 const uploadDir = path.resolve(process.env.UPLOAD_DIR || '../uploads');
 app.use('/uploads', express.static(uploadDir));
 
+// IMPORTANTE: rotas com prefix específico DEVEM vir antes de qualquer mount em '/api'
+// (contentsRoutes usa app.use('/api', ...) e tem authMiddleware global no router —
+//  se vier antes, intercepta TUDO que começa com /api e quebra outras rotas)
+app.use('/api/admin', adminRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/clubs', clubsRoutes);
 app.use('/api/athletes', athletesRoutes);
 app.use('/api/microcycles', microcyclesRoutes);
 app.use('/api/sessions', sessionsRoutes);
 app.use('/api/activities', activitiesRoutes);
-app.use('/api', contentsRoutes);
 app.use('/api/titles', titlesRoutes);
 app.use('/api/games', gamesRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/plays', playsRoutes);
 app.use('/api/themes', themesRoutes);
 app.use('/api/files', filesRoutes);
+app.use('/api/billing', billingRoutes);
+app.use('/api/workspaces', workspacesRoutes);
+app.use('/api/competitions', competitionsRoutes);
+app.use('/api/external', externalCompetitionsRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
+
+app.use('/api', injuriesRoutes);
+app.use('/api', announcementsRoutes);
+app.use('/api', homeRoutes);
+app.use('/api', categoriesRoutes);
+app.use('/api', clubMembersRoutes);
+
+// Último: pega /contents e /stages, mas tem authMiddleware global no router
+// (precisa ficar depois de todas as outras rotas e do /api/health)
+app.use('/api', contentsRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });
@@ -65,6 +111,9 @@ app.use((req, res) => {
 
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
+  if (process.env.SENTRY_DSN) {
+    try { Sentry.captureException(err); } catch (_) {}
+  }
   res.status(500).json({
     error: process.env.NODE_ENV === 'production'
       ? 'Internal server error'

@@ -31,7 +31,7 @@ export function ThemeSelectionModal({ isOpen, onClose, onSave, onDelete, current
     if (isOpen) {
       trainingService.getContents().then((data) => {
         const list = Array.isArray(data) ? data : data?.data || [];
-        setContents(list);
+        setContents(list.filter(c => c.active !== false));
       }).catch((err) => {
         console.error('Error loading contents:', err);
       });

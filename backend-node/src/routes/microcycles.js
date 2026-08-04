@@ -10,30 +10,30 @@ const BLOCK_NAMES = ['Aquecimento', 'Preparatório', 'Atividade 1', 'Atividade 2
 const DAY_NAMES = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'];
 
 function getWeekDates(weekIdentifier) {
-  // Support both "2026-W15" and "2026-15" formats
   const parts = weekIdentifier.includes('-W')
     ? weekIdentifier.split('-W')
     : weekIdentifier.split('-');
   const [year, week] = parts.map(Number);
-
-  // ISO 8601: week 1 contains January 4th
   const jan4 = new Date(Date.UTC(year, 0, 4));
-  const dayOfWeek = jan4.getUTCDay() || 7; // Monday = 1, Sunday = 7
+  const dayOfWeek = jan4.getUTCDay() || 7;
   const monday = new Date(jan4);
   monday.setUTCDate(jan4.getUTCDate() - dayOfWeek + 1 + (week - 1) * 7);
-
   const sunday = new Date(monday);
   sunday.setUTCDate(monday.getUTCDate() + 6);
-
   return { startDate: monday, endDate: sunday };
 }
 
-async function getFullMicrocycle(microcycleId, tenantId) {
+async function getFullMicrocycle(microcycleId, workspaceIds, allowedCategoryIds = null) {
+  const wsIds = Array.isArray(workspaceIds) ? workspaceIds : [workspaceIds];
   const microcycleResult = await query(
-    'SELECT * FROM training_microcycles WHERE id = $1 AND tenant_id = $2',
-    [microcycleId, tenantId]
+    'SELECT * FROM training_microcycles WHERE id = $1 AND workspace_id = ANY($2)',
+    [microcycleId, wsIds]
   );
   if (microcycleResult.rows.length === 0) return null;
+  if (Array.isArray(allowedCategoryIds)) {
+    const cat = microcycleResult.rows[0].category_id;
+    if (cat && !allowedCategoryIds.includes(cat)) return null;
+  }
 
   const microcycle = microcycleResult.rows[0];
 
@@ -63,7 +63,7 @@ async function getFullMicrocycle(microcycleId, tenantId) {
       const activities = [];
       for (const activity of activitiesResult.rows) {
         const contentsResult = await query(
-          `SELECT c.id, c.name, c.abbreviation, tac.content_id
+          `SELECT c.id, c.name, c.abbreviation, c.dimension, tac.content_id
            FROM training_activity_contents tac
            LEFT JOIN contents c ON tac.content_id = c.id
            WHERE tac.activity_id = $1`,
@@ -77,14 +77,12 @@ async function getFullMicrocycle(microcycleId, tenantId) {
 
         activity.contents = contentsResult.rows;
         activity.stages = stagesResult.rows;
-        // Frontend expects activity.title as object {title: "name"} not flat title_name
         if (activity.title_name) {
           activity.title = { title: activity.title_name, description: activity.title_description };
         }
         activities.push(activity);
       }
 
-      // Frontend expects `activity` (singular) - each block has at most 1 activity
       block.activity = activities.length > 0 ? activities[0] : null;
       blocks.push(block);
     }
@@ -97,24 +95,38 @@ async function getFullMicrocycle(microcycleId, tenantId) {
   return microcycle;
 }
 
-// GET /api/microcycles?week=YYYY-WW&club_id=X
+// GET /api/microcycles?week=YYYY-WW&club_id=X[&category_id=Y]
 router.get('/', async (req, res) => {
   try {
-    const { week, club_id } = req.query;
+    if (!req.user.can('training:view')) return res.status(403).json({ error: 'Sem permissão' });
+    const { week, club_id, category_id } = req.query;
     if (!week || !club_id) {
       return res.status(400).json({ error: 'week and club_id are required' });
     }
 
-    const microcycleResult = await query(
-      'SELECT * FROM training_microcycles WHERE tenant_id = $1 AND week_identifier = $2 AND club_id = $3',
-      [req.user.id, week, club_id]
-    );
+    const wsId = req.user.readableWorkspaceForClub(club_id);
+    if (!wsId) return res.status(403).json({ error: 'Sem acesso a esse clube' });
 
-    if (microcycleResult.rows.length === 0) {
-      return res.json(null);
+    let sql = 'SELECT * FROM training_microcycles WHERE workspace_id = $1 AND week_identifier = $2 AND club_id = $3';
+    const params = [wsId, week, club_id];
+    let idx = 4;
+
+    if (category_id) {
+      if (!req.user.assertCanAccessCategory(category_id)) {
+        return res.status(403).json({ error: 'Sem acesso a essa categoria' });
+      }
+      sql += ` AND category_id = $${idx++}`;
+      params.push(category_id);
+    } else if (Array.isArray(req.user.allowedCategoryIds)) {
+      if (req.user.allowedCategoryIds.length === 0) return res.json(null);
+      sql += ` AND (category_id IS NULL OR category_id = ANY($${idx++}))`;
+      params.push(req.user.allowedCategoryIds);
     }
 
-    const microcycle = await getFullMicrocycle(microcycleResult.rows[0].id, req.user.id);
+    const microcycleResult = await query(sql, params);
+    if (microcycleResult.rows.length === 0) return res.json(null);
+
+    const microcycle = await getFullMicrocycle(microcycleResult.rows[0].id, req.user.workspaceIds || [], req.user.allowedCategoryIds);
     res.json(microcycle);
   } catch (err) {
     console.error('Get microcycle error:', err);
@@ -126,34 +138,41 @@ router.get('/', async (req, res) => {
 router.post('/ensure', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { week, club_id } = req.body;
+    if (!req.user.can('training:edit')) {
+      client.release();
+      return res.status(403).json({ error: 'Sem permissão pra editar treinos' });
+    }
+    const { week, club_id, category_id } = req.body;
     if (!week || !club_id) {
       return res.status(400).json({ error: 'week and club_id are required' });
+    }
+    const wsId = req.user.writableWorkspaceForClub(club_id);
+    if (!wsId) return res.status(403).json({ error: 'Sem permissão de escrita nesse clube' });
+    if (category_id && !req.user.assertCanAccessCategory(category_id)) {
+      return res.status(403).json({ error: 'Sem acesso a essa categoria' });
     }
 
     await client.query('BEGIN');
 
-    // Check if microcycle exists
     let microcycleResult = await client.query(
-      'SELECT * FROM training_microcycles WHERE tenant_id = $1 AND week_identifier = $2 AND club_id = $3',
-      [req.user.id, week, club_id]
+      'SELECT * FROM training_microcycles WHERE workspace_id = $1 AND week_identifier = $2 AND club_id = $3',
+      [wsId, week, club_id]
     );
 
     let microcycleId;
     if (microcycleResult.rows.length === 0) {
       const { startDate, endDate } = getWeekDates(week);
       const createResult = await client.query(
-        `INSERT INTO training_microcycles (week_identifier, start_date, end_date, club_id, tenant_id)
+        `INSERT INTO training_microcycles (week_identifier, start_date, end_date, club_id, workspace_id)
          VALUES ($1, $2, $3, $4, $5)
          RETURNING id`,
-        [week, startDate.toISOString().split('T')[0], endDate.toISOString().split('T')[0], club_id, req.user.id]
+        [week, startDate.toISOString().split('T')[0], endDate.toISOString().split('T')[0], club_id, wsId]
       );
       microcycleId = createResult.rows[0].id;
     } else {
       microcycleId = microcycleResult.rows[0].id;
     }
 
-    // Ensure 7 sessions exist
     const existingSessions = await client.query(
       'SELECT * FROM training_sessions WHERE microcycle_id = $1',
       [microcycleId]
@@ -169,21 +188,19 @@ router.post('/ensure', async (req, res) => {
 
       if (!existingDates.has(dateStr)) {
         await client.query(
-          `INSERT INTO training_sessions (microcycle_id, date, day_name, day_of_week, tenant_id, club_id)
+          `INSERT INTO training_sessions (microcycle_id, date, day_name, day_of_week, workspace_id, club_id)
            VALUES ($1, $2, $3, $4, $5, $6)
-           ON CONFLICT (tenant_id, date, club_id) DO NOTHING`,
-          [microcycleId, dateStr, DAY_NAMES[i], i + 1, req.user.id, club_id]
+           ON CONFLICT (workspace_id, date, club_id) DO NOTHING`,
+          [microcycleId, dateStr, DAY_NAMES[i], i + 1, wsId, club_id]
         );
       }
     }
 
-    // Get all sessions now
     const allSessions = await client.query(
       'SELECT * FROM training_sessions WHERE microcycle_id = $1 ORDER BY date ASC',
       [microcycleId]
     );
 
-    // Ensure 6 blocks per session
     for (const session of allSessions.rows) {
       const existingBlocks = await client.query(
         'SELECT * FROM training_activity_blocks WHERE session_id = $1',
@@ -205,8 +222,7 @@ router.post('/ensure', async (req, res) => {
 
     await client.query('COMMIT');
 
-    // Return full structure
-    const microcycle = await getFullMicrocycle(microcycleId, req.user.id);
+    const microcycle = await getFullMicrocycle(microcycleId, req.user.workspaceIds || [], req.user.allowedCategoryIds);
     res.json(microcycle);
   } catch (err) {
     await client.query('ROLLBACK');

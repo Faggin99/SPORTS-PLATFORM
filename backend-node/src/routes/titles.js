@@ -10,8 +10,8 @@ router.use(authMiddleware);
 router.get('/', async (req, res) => {
   try {
     const { includeArchived } = req.query;
-    let sql = 'SELECT * FROM activity_titles WHERE (tenant_id = $1 OR tenant_id IS NULL)';
-    const params = [req.user.id];
+    let sql = 'SELECT * FROM activity_titles WHERE (workspace_id = ANY($1) OR workspace_id IS NULL)';
+    const params = [req.user.workspaceIds || []];
 
     if (includeArchived !== 'true') {
       sql += ' AND (is_archived = false OR is_archived IS NULL)';
@@ -34,8 +34,8 @@ router.get('/with-content', async (req, res) => {
     let sql = `SELECT at.*, c.name as content_name
                FROM activity_titles at
                LEFT JOIN contents c ON at.content_id = c.id
-               WHERE (at.tenant_id = $1 OR at.tenant_id IS NULL)`;
-    const params = [req.user.id];
+               WHERE (at.workspace_id = ANY($1) OR at.workspace_id IS NULL)`;
+    const params = [req.user.workspaceIds || []];
 
     if (includeArchived !== 'true') {
       sql += ' AND (at.is_archived = false OR at.is_archived IS NULL)';
@@ -54,16 +54,20 @@ router.get('/with-content', async (req, res) => {
 // POST /api/titles
 router.post('/', async (req, res) => {
   try {
+    if (!req.user.can('library:edit')) return res.status(403).json({ error: 'Sem permissão' });
     const { title, content_id, description } = req.body;
     if (!title) {
       return res.status(400).json({ error: 'Title is required' });
     }
 
+    const wsId = req.user.workspaceId;
+    if (!wsId) return res.status(400).json({ error: 'Nenhuma workspace ativa' });
+
     const result = await query(
-      `INSERT INTO activity_titles (title, content_id, description, tenant_id)
+      `INSERT INTO activity_titles (title, content_id, description, workspace_id)
        VALUES ($1, $2, $3, $4)
        RETURNING *`,
-      [title, content_id || null, description || null, req.user.id]
+      [title, content_id || null, description || null, wsId]
     );
 
     res.status(201).json(result.rows[0]);
@@ -76,13 +80,14 @@ router.post('/', async (req, res) => {
 // PUT /api/titles/:id
 router.put('/:id', async (req, res) => {
   try {
+    if (!req.user.can('library:edit')) return res.status(403).json({ error: 'Sem permissão' });
     const { title, content_id, description } = req.body;
 
     const result = await query(
       `UPDATE activity_titles SET title = $1, content_id = $2, description = $3, updated_at = NOW()
-       WHERE id = $4 AND tenant_id = $5
+       WHERE id = $4 AND workspace_id = ANY($5)
        RETURNING *`,
-      [title, content_id || null, description || null, req.params.id, req.user.id]
+      [title, content_id || null, description || null, req.params.id, req.user.workspaceIds || []]
     );
 
     if (result.rows.length === 0) {
@@ -99,11 +104,12 @@ router.put('/:id', async (req, res) => {
 // PUT /api/titles/:id/archive
 router.put('/:id/archive', async (req, res) => {
   try {
+    if (!req.user.can('library:edit')) return res.status(403).json({ error: 'Sem permissão' });
     const result = await query(
       `UPDATE activity_titles SET is_archived = true, updated_at = NOW()
-       WHERE id = $1 AND tenant_id = $2
+       WHERE id = $1 AND workspace_id = ANY($2)
        RETURNING *`,
-      [req.params.id, req.user.id]
+      [req.params.id, req.user.workspaceIds || []]
     );
 
     if (result.rows.length === 0) {
@@ -120,11 +126,12 @@ router.put('/:id/archive', async (req, res) => {
 // PUT /api/titles/:id/unarchive
 router.put('/:id/unarchive', async (req, res) => {
   try {
+    if (!req.user.can('library:edit')) return res.status(403).json({ error: 'Sem permissão' });
     const result = await query(
       `UPDATE activity_titles SET is_archived = false, updated_at = NOW()
-       WHERE id = $1 AND tenant_id = $2
+       WHERE id = $1 AND workspace_id = ANY($2)
        RETURNING *`,
-      [req.params.id, req.user.id]
+      [req.params.id, req.user.workspaceIds || []]
     );
 
     if (result.rows.length === 0) {
@@ -142,8 +149,8 @@ router.put('/:id/unarchive', async (req, res) => {
 router.get('/:id/usage-count', async (req, res) => {
   try {
     const result = await query(
-      'SELECT COUNT(*) as count FROM training_activities WHERE title_id = $1 AND tenant_id = $2',
-      [req.params.id, req.user.id]
+      'SELECT COUNT(*) as count FROM training_activities WHERE title_id = $1 AND workspace_id = ANY($2)',
+      [req.params.id, req.user.workspaceIds || []]
     );
 
     res.json({ count: parseInt(result.rows[0].count, 10) });

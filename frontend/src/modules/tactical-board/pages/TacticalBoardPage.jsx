@@ -1,7 +1,14 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
-import { Maximize2, Minimize2, Plus, X } from 'lucide-react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import {
+  Users, UserPlus, ArrowRight, Pencil, LayoutGrid,
+  Save, FolderOpen, Film, Undo2, Redo2, Trash2, Eye, Maximize2, Minimize2,
+  Keyboard, Pause, Plus, X, Cone, Smartphone,
+  PenLine, Square as SquareIcon, Circle as CircleIcon, Type,
+} from 'lucide-react';
 import { useTheme } from '../../../contexts/ThemeContext';
 import { useClub } from '../../../contexts/ClubContext';
+import { useIsMobile } from '../../../hooks/useIsMobile';
+import { useSportConfig } from '../../../hooks/useSportConfig';
 import TacticalCanvas from '../components/canvas/TacticalCanvas';
 import FrameControls from '../components/toolbar/FrameControls';
 import PlaybackControls from '../components/toolbar/PlaybackControls';
@@ -12,158 +19,152 @@ import { useTacticalBoard } from '../hooks/useTacticalBoard';
 import { usePlayback } from '../hooks/usePlayback';
 import { useVideoExport } from '../hooks/useVideoExport';
 import { usePlays } from '../hooks/usePlays';
+import { TourGuide } from '../../../components/common/TourGuide';
+import { useTour, useTourReplayListener } from '../../../hooks/useTour';
 import { getFormationsForFieldType } from '../utils/defaultFormations';
 import { FIELD_VIEWS } from '../utils/fieldDimensions';
 
-// Drawing tool configurations
+// ─────────────────────────────────────────────────────────────────
+// Catálogos
+// ─────────────────────────────────────────────────────────────────
 const ARROW_TOOLS = [
-  { id: 'arrow_run', mode: 'arrow_straight', dash: [], label: '→', title: 'Corrida (seta contínua)', color: '#ffffff' },
-  { id: 'arrow_pass', mode: 'arrow_straight', dash: [8, 5], label: '⇢', title: 'Passe (seta tracejada)', color: '#fbbf24' },
-  { id: 'arrow_dribble', mode: 'arrow_straight', dash: [3, 3], label: '⋯→', title: 'Drible (seta pontilhada)', color: '#22c55e' },
-  { id: 'arrow_curved', mode: 'arrow_curved', dash: [], label: '↝', title: 'Seta curva', color: '#ffffff' },
+  { id: 'arrow_run',     mode: 'arrow_straight', dash: [],     label: 'Corrida',  desc: 'Seta contínua',  color: '#ffffff' },
+  { id: 'arrow_pass',    mode: 'arrow_straight', dash: [8, 5], label: 'Passe',    desc: 'Seta tracejada', color: '#fbbf24' },
+  { id: 'arrow_dribble', mode: 'arrow_straight', dash: [3, 3], label: 'Drible',   desc: 'Seta pontilhada', color: '#22c55e' },
+  { id: 'arrow_curved',  mode: 'arrow_curved',   dash: [],     label: 'Curva',    desc: 'Seta curva',     color: '#ffffff' },
 ];
 
 const MARKER_TYPES = [
-  { type: 'cone', label: '▲', title: 'Cone baixo', color: '#f97316' },
-  { type: 'cone_tall', label: '⧋', title: 'Cone alto', color: '#f97316' },
-  { type: 'disc', label: '●', title: 'Disco marcador', color: '#22c55e' },
-  { type: 'barrier', label: '▬', title: 'Barreira', color: '#a855f7' },
-  { type: 'pole', label: '│', title: 'Estaca', color: '#f59e0b' },
-  { type: 'flag', label: '⚑', title: 'Bandeira', color: '#ef4444' },
-  { type: 'ladder', label: '☰', title: 'Escada agilidade', color: '#facc15' },
-  { type: 'mannequin', label: '♟', title: 'Manequim', color: '#3b82f6' },
-  { type: 'hoop', label: '○', title: 'Arco', color: '#f97316' },
-  { type: 'mini_goal', label: '⊓', title: 'Mini gol', color: '#ffffff' },
+  { type: 'cone',       label: 'Cone baixo',   icon: '▲' },
+  { type: 'cone_tall',  label: 'Cone alto',    icon: '⧋' },
+  { type: 'disc',       label: 'Disco',        icon: '●' },
+  { type: 'barrier',    label: 'Barreira',     icon: '▬' },
+  { type: 'pole',       label: 'Estaca',       icon: '│' },
+  { type: 'flag',       label: 'Bandeira',     icon: '⚑' },
+  { type: 'ladder',     label: 'Escada',       icon: '☰' },
+  { type: 'mannequin',  label: 'Manequim',     icon: '♟' },
+  { type: 'hoop',       label: 'Arco',         icon: '○' },
+  { type: 'mini_goal',  label: 'Mini gol',     icon: '⊓' },
 ];
 
 const FIELD_VIEW_OPTIONS = [
-  { view: FIELD_VIEWS.FULL, label: 'Campo inteiro' },
-  { view: FIELD_VIEWS.LEFT_HALF, label: 'Meio esquerdo' },
-  { view: FIELD_VIEWS.RIGHT_HALF, label: 'Meio direito' },
-  { view: FIELD_VIEWS.THIRD_LEFT, label: '⅓ esquerdo' },
-  { view: FIELD_VIEWS.THIRD_RIGHT, label: '⅓ direito' },
+  { view: FIELD_VIEWS.FULL,        label: 'Campo inteiro' },
+  { view: FIELD_VIEWS.LEFT_HALF,   label: 'Metade esquerda' },
+  { view: FIELD_VIEWS.RIGHT_HALF,  label: 'Metade direita' },
+  { view: FIELD_VIEWS.THIRD_LEFT,  label: 'Terço esquerdo' },
+  { view: FIELD_VIEWS.THIRD_RIGHT, label: 'Terço direito' },
 ];
 
-const ZONE_TOOLS = [
-  { id: 'zone_rect', mode: 'zone_rect', label: '▭', title: 'Zona retangular' },
-  { id: 'zone_circle', mode: 'zone_circle', label: '◯', title: 'Zona circular' },
+const DRAWING_COLORS = ['#ffffff', '#fbbf24', '#ef4444', '#22c55e', '#3b82f6', '#a855f7', '#f97316', '#ec4899'];
+
+const SHORTCUTS = [
+  ['Espaço',          'Play / Pause'],
+  ['← / →',           'Frame anterior / próximo'],
+  ['Ctrl+Z / Ctrl+Y', 'Desfazer / Refazer'],
+  ['Delete',          'Remover seleção'],
+  ['Esc',             'Cancelar / fechar painéis'],
+  ['F11',             'Tela cheia'],
 ];
 
-const DRAWING_COLORS = [
-  '#ffffff', '#fbbf24', '#ef4444', '#22c55e', '#3b82f6', '#a855f7', '#f97316', '#ec4899',
-];
-
+// ─────────────────────────────────────────────────────────────────
+// Componente principal
+// ─────────────────────────────────────────────────────────────────
 export default function TacticalBoardPage() {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const { selectedClub } = useClub();
+  const isMobile = useIsMobile();
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
 
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [toolbarOpen, setToolbarOpen] = useState(false);
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [loadModalOpen, setLoadModalOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [currentPlayId, setCurrentPlayId] = useState(null);
+  const [currentPlayName, setCurrentPlayName] = useState('');
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // Drawing mode state
+  // Drawing mode
   const [drawingMode, setDrawingMode] = useState(null);
   const [activeToolId, setActiveToolId] = useState(null);
   const [drawingColor, setDrawingColor] = useState('#ffffff');
   const [drawingDash, setDrawingDash] = useState([]);
-  const [drawingStrokeWidth, setDrawingStrokeWidth] = useState(2.5);
+  const [drawingStrokeWidth] = useState(2.5);
 
-  // Toolbar section toggles
-  const [expandedSection, setExpandedSection] = useState(null);
+  // Sidebar flyout
+  const [openSection, setOpenSection] = useState(null); // 'players' | 'arrows' | 'draw' | 'objects' | 'formations' | 'view'
 
   const [athletes, setAthletes] = useState([]);
   useEffect(() => {
     import('../../training-management/services/athleteService').then((mod) => {
       const service = mod.athleteService || mod.default;
-      if (service?.getAll) {
-        service.getAll().then(setAthletes).catch(() => {});
-      }
+      if (service?.getAll) service.getAll().then(setAthletes).catch(() => {});
     }).catch(() => {});
   }, [selectedClub]);
 
-  const board = useTacticalBoard();
+  const sport = useSportConfig();
+  const board = useTacticalBoard({ initialFieldType: sport.defaultFieldType });
   const playback = usePlayback(board.frames, board.currentFrameIndex, board.goToFrame);
   const videoExport = useVideoExport(canvasRef, board.frames, board.fieldType);
   const plays = usePlays();
 
-  const displayElements = videoExport.exportElements
-    ? videoExport.exportElements
-    : playback.isPlaying && playback.interpolatedElements
-      ? playback.interpolatedElements
-      : board.currentFrame.elements;
+  const tour = useTour('tactical-board');
+  useTourReplayListener('tactical-board', () => tour.setIsOpen(true));
+  const tourSteps = useMemo(() => [
+    { title: 'Quadro Tático', content: 'Aqui você cria jogadas animadas pra mostrar ao time. Sidebar à esquerda agrupa todas as ferramentas.' },
+    { title: 'Adicionar peças', content: 'Clique em "Peças" na sidebar pra adicionar jogadores das duas equipes, goleiros e bola.' },
+    { title: 'Animação', content: 'Use a barra inferior pra criar frames. Em cada frame, mova as peças onde quiser. O play interpola entre frames.' },
+    { title: 'Salvar/Exportar', content: 'Salve sua jogada pra reusar depois ou exporte como vídeo .mp4 pra mandar pro grupo do clube.' },
+    { title: 'Atalhos', content: 'Espaço pra play, ← → pra frames, Del pra remover, Ctrl+Z pra desfazer. Veja todos no botão "?" no canto.' },
+  ], []);
 
-  const displayDrawings = board.currentFrame.drawings || [];
-  const nextFrameElements = board.nextFrame?.elements || null;
   const playerCountRef = useRef({ A: 0, B: 0 });
 
-  // Toggle fullscreen
-  const toggleFullscreen = useCallback(() => {
-    if (!document.fullscreenElement) {
-      containerRef.current?.requestFullscreen?.().then(() => setIsFullscreen(true)).catch(() => {});
-    } else {
-      document.exitFullscreen?.().then(() => setIsFullscreen(false)).catch(() => {});
-    }
-  }, []);
+  const displayElements = videoExport.exportElements
+    ? videoExport.exportElements
+    : (playback.isPlaying && playback.interpolatedElements)
+      ? playback.interpolatedElements
+      : board.currentFrame.elements;
+  const displayDrawings = board.currentFrame.drawings || [];
+  const nextFrameElements = board.nextFrame?.elements || null;
 
+  // ── Fullscreen ──
+  const toggleFullscreen = useCallback(() => {
+    if (!document.fullscreenElement) containerRef.current?.requestFullscreen?.().then(() => setIsFullscreen(true)).catch(() => {});
+    else document.exitFullscreen?.().then(() => setIsFullscreen(false)).catch(() => {});
+  }, []);
   useEffect(() => {
     const handler = () => setIsFullscreen(!!document.fullscreenElement);
     document.addEventListener('fullscreenchange', handler);
     return () => document.removeEventListener('fullscreenchange', handler);
   }, []);
 
-  // Activate a drawing tool
+  // ── Drawing helpers ──
   const activateDrawingTool = useCallback((toolId, mode, dash = [], color = null) => {
     if (activeToolId === toolId) {
-      // Toggle off
-      setDrawingMode(null);
-      setActiveToolId(null);
-      setDrawingDash([]);
-      return;
+      setDrawingMode(null); setActiveToolId(null); setDrawingDash([]); return;
     }
-    setDrawingMode(mode);
-    setActiveToolId(toolId);
-    setDrawingDash(dash);
+    setDrawingMode(mode); setActiveToolId(toolId); setDrawingDash(dash);
     if (color) setDrawingColor(color);
     board.setSelectedElementId(null);
     board.setSelectedDrawingId(null);
   }, [activeToolId, board]);
+  const clearDrawingMode = useCallback(() => { setDrawingMode(null); setActiveToolId(null); setDrawingDash([]); }, []);
+  const handleDrawingComplete = useCallback((d) => board.addDrawing(d), [board]);
 
-  const clearDrawingMode = useCallback(() => {
-    setDrawingMode(null);
-    setActiveToolId(null);
-    setDrawingDash([]);
-  }, []);
-
-  const handleDrawingComplete = useCallback((drawingData) => {
-    board.addDrawing(drawingData);
-  }, [board]);
-
+  // ── Elementos ──
   const handleAddPlayer = useCallback((teamOrData) => {
     clearDrawingMode();
     let team, jerseyNumber, name, athleteId, isGoalkeeper;
     if (typeof teamOrData === 'string') {
-      team = teamOrData;
-      playerCountRef.current[team]++;
-      jerseyNumber = playerCountRef.current[team];
-      name = '';
-      athleteId = null;
-      isGoalkeeper = false;
+      team = teamOrData; playerCountRef.current[team]++;
+      jerseyNumber = playerCountRef.current[team]; name = ''; athleteId = null; isGoalkeeper = false;
     } else {
-      team = teamOrData.team;
-      jerseyNumber = teamOrData.jerseyNumber;
-      name = teamOrData.name;
-      athleteId = teamOrData.athleteId;
-      isGoalkeeper = teamOrData.isGoalkeeper || false;
+      ({ team, jerseyNumber, name, athleteId } = teamOrData); isGoalkeeper = teamOrData.isGoalkeeper || false;
     }
     board.addElement({
       type: 'player', team, jerseyNumber, name, athleteId, isGoalkeeper,
-      x: 50 + (Math.random() - 0.5) * 20,
-      y: 50 + (Math.random() - 0.5) * 20,
+      x: 50 + (Math.random() - 0.5) * 20, y: 50 + (Math.random() - 0.5) * 20,
     });
   }, [board, clearDrawingMode]);
 
@@ -172,8 +173,7 @@ export default function TacticalBoardPage() {
     playerCountRef.current[team]++;
     board.addElement({
       type: 'player', team, jerseyNumber: 1, name: 'GK', athleteId: null, isGoalkeeper: true,
-      x: team === 'A' ? 5 : 95,
-      y: 50,
+      x: team === 'A' ? 5 : 95, y: 50,
     });
   }, [board, clearDrawingMode]);
 
@@ -186,8 +186,7 @@ export default function TacticalBoardPage() {
     clearDrawingMode();
     board.addElement({
       type: 'marker', team: null, markerType,
-      x: 50 + (Math.random() - 0.5) * 30,
-      y: 50 + (Math.random() - 0.5) * 30,
+      x: 50 + (Math.random() - 0.5) * 30, y: 50 + (Math.random() - 0.5) * 30,
     });
   }, [board, clearDrawingMode]);
 
@@ -198,25 +197,28 @@ export default function TacticalBoardPage() {
 
   const handleSave = useCallback(async ({ name, description }) => {
     const playData = { ...board.getPlayData(), name, description, club_id: selectedClub?.id || null };
-    if (currentPlayId) {
-      await plays.updatePlay(currentPlayId, playData);
-    } else {
+    if (currentPlayId) await plays.updatePlay(currentPlayId, playData);
+    else {
       const created = await plays.createPlay(playData);
       setCurrentPlayId(created.id);
     }
+    setCurrentPlayName(name);
   }, [board, currentPlayId, plays, selectedClub]);
 
   const handleLoad = useCallback((play) => {
     board.loadPlay(play);
     setCurrentPlayId(play.id);
+    setCurrentPlayName(play.name || '');
     playerCountRef.current = { A: 0, B: 0 };
     clearDrawingMode();
+    setOpenSection(null);
   }, [board, clearDrawingMode]);
 
   const handleReset = useCallback(() => {
     if (window.confirm('Limpar todo o quadro tático?')) {
       board.resetBoard();
       setCurrentPlayId(null);
+      setCurrentPlayName('');
       playerCountRef.current = { A: 0, B: 0 };
       clearDrawingMode();
     }
@@ -232,340 +234,226 @@ export default function TacticalBoardPage() {
     formation.positions.forEach((pos) => {
       playerCountRef.current.A++;
       board.addElement({
-        type: 'player', team: 'A',
-        jerseyNumber: pos.jerseyNumber, name: pos.name, athleteId: null,
+        type: 'player', team: 'A', jerseyNumber: pos.jerseyNumber, name: pos.name, athleteId: null,
         isGoalkeeper: pos.jerseyNumber === 1 && (pos.name === 'GK' || pos.name === 'GOL'),
         x: pos.x, y: pos.y,
       });
     });
+    setOpenSection(null);
   }, [board, clearDrawingMode]);
 
-  // Keyboard shortcuts
+  // ── Atalhos ──
   useEffect(() => {
-    const handleKeyDown = (e) => {
+    const onKey = (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
       if (e.key === 'Delete' || e.key === 'Backspace') handleRemoveSelected();
       else if (e.key === 'z' && (e.ctrlKey || e.metaKey) && !e.shiftKey) { e.preventDefault(); board.undo(); }
       else if ((e.key === 'y' && (e.ctrlKey || e.metaKey)) || (e.key === 'z' && (e.ctrlKey || e.metaKey) && e.shiftKey)) { e.preventDefault(); board.redo(); }
       else if (e.key === ' ') { e.preventDefault(); playback.isPlaying ? playback.pause() : playback.play(); }
       else if (e.key === 'ArrowRight') board.goToNextFrame();
-      else if (e.key === 'ArrowLeft') board.goToPrevFrame();
-      else if (e.key === 'Escape') { setToolbarOpen(false); setPaletteOpen(false); clearDrawingMode(); setExpandedSection(null); }
+      else if (e.key === 'ArrowLeft')  board.goToPrevFrame();
+      else if (e.key === 'Escape') { setPaletteOpen(false); setOpenSection(null); clearDrawingMode(); setShortcutsOpen(false); }
       else if (e.key === 'F11') { e.preventDefault(); toggleFullscreen(); }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, [board, playback, handleRemoveSelected, toggleFullscreen, clearDrawingMode]);
 
   const formations = getFormationsForFieldType(board.fieldType);
-
-  // --- Toolbar button helper ---
-  const ToolBtn = ({ onClick, active, color, title, children, style = {} }) => (
-    <button
-      onClick={onClick}
-      title={title}
-      style={{
-        padding: '0.2rem 0.4rem',
-        borderRadius: '0.25rem',
-        border: active ? `1px solid ${color || 'rgba(255,255,255,0.5)'}` : '1px solid transparent',
-        backgroundColor: active ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.05)',
-        color: color || 'rgba(255,255,255,0.85)',
-        cursor: 'pointer',
-        fontSize: '0.75rem',
-        fontWeight: '500',
-        lineHeight: 1.2,
-        transition: 'all 0.1s',
-        minWidth: 26,
-        textAlign: 'center',
-        ...style,
-      }}
-    >
-      {children}
-    </button>
+  const selectedElement = useMemo(
+    () => board.currentFrame.elements.find(el => el.id === board.selectedElementId) || null,
+    [board.currentFrame.elements, board.selectedElementId]
   );
 
-  const SectionBtn = ({ id, label }) => (
-    <button
-      onClick={() => setExpandedSection(expandedSection === id ? null : id)}
-      style={{
-        padding: '0.2rem 0.5rem',
-        borderRadius: '0.25rem',
-        border: expandedSection === id ? '1px solid rgba(255,255,255,0.3)' : '1px solid transparent',
-        backgroundColor: expandedSection === id ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.05)',
-        color: expandedSection === id ? 'white' : 'rgba(255,255,255,0.7)',
-        cursor: 'pointer',
-        fontSize: '0.7rem',
-        fontWeight: '600',
-        transition: 'all 0.1s',
-      }}
-    >
-      {label} {expandedSection === id ? '▾' : '▸'}
-    </button>
-  );
-
-  const Sep = () => <div style={{ width: 1, height: 22, backgroundColor: 'rgba(255,255,255,0.12)', flexShrink: 0 }} />;
-
-  const fabStyle = {
-    position: 'absolute',
-    width: 40,
-    height: 40,
-    borderRadius: '50%',
-    border: 'none',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-    boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
-    transition: 'transform 0.15s, background-color 0.15s',
-    zIndex: 20,
-  };
+  // ─────────────────── Renderização ───────────────────
+  // Detecta navegador mobile — bloqueia edição e mostra aviso do app oficial
+  if (isMobile && !isFullscreen) {
+    return <MobileBlockScreen colors={colors} />;
+  }
 
   return (
-    <div
-      ref={containerRef}
-      style={{
-        position: 'relative',
-        width: '100%',
-        height: isFullscreen ? '100vh' : 'calc(100vh - 64px)',
-        margin: '-1.5rem',
-        backgroundColor: '#0f0f1e',
-        overflow: 'hidden',
-        display: 'flex',
-      }}
-    >
-      {/* === CANVAS === */}
-      <div style={{ flex: 1, position: 'relative' }}>
-        <TacticalCanvas
-          ref={canvasRef}
-          fieldType={board.fieldType}
-          fieldView={board.fieldView}
-          elements={displayElements}
-          drawings={displayDrawings}
-          nextFrameElements={nextFrameElements}
-          teamAColor={board.teamAColor}
-          teamBColor={board.teamBColor}
-          isPlaying={playback.isPlaying}
-          drawingMode={drawingMode}
-          drawingColor={drawingColor}
-          drawingDash={drawingDash}
-          drawingStrokeWidth={drawingStrokeWidth}
-          onElementMove={board.updateElementPosition}
-          onElementSelect={board.setSelectedElementId}
-          onDrawingSelect={board.setSelectedDrawingId}
-          onDrawingComplete={handleDrawingComplete}
-          selectedElementId={board.selectedElementId}
-          selectedDrawingId={board.selectedDrawingId}
-        />
+    <div ref={containerRef} style={{
+      position: 'relative', width: '100%',
+      height: isFullscreen ? '100vh' : 'calc(100vh - 64px)',
+      margin: '-1.5rem',
+      backgroundColor: 'transparent', // herda o fundo do estádio do Layout
+      overflow: 'hidden',
+      display: 'flex',
+      color: colors.text,
+    }}>
+      <TourGuide isOpen={tour.isOpen} onClose={tour.stop} steps={tourSteps} storageKey={tour.storageKey} />
 
-        {/* FAB: Toggle toolbar */}
-        <button
-          style={{ ...fabStyle, top: 10, left: 10, backgroundColor: toolbarOpen ? '#ef4444' : colors.primary, color: 'white' }}
-          onClick={() => setToolbarOpen(!toolbarOpen)}
-          title={toolbarOpen ? 'Fechar (Esc)' : 'Menu de ferramentas'}
+      {/* ─── SIDEBAR ─── */}
+      <Sidebar
+        openSection={openSection}
+        setOpenSection={(s) => { setOpenSection(s); clearDrawingMode(); }}
+        canUndo={board.canUndo}
+        canRedo={board.canRedo}
+        onUndo={board.undo}
+        onRedo={board.redo}
+        onSave={() => setSaveModalOpen(true)}
+        onLoad={() => setLoadModalOpen(true)}
+        onExport={() => board.totalFrames > 1 && videoExport.startExport()}
+        canExport={board.totalFrames > 1}
+        exporting={videoExport.isExporting}
+        onReset={handleReset}
+        primary={colors.primary}
+      />
+
+      {/* ─── FLYOUT (painel da seção aberta) ─── */}
+      {openSection && (
+        <Flyout
+          title={SECTIONS_TITLES[openSection]}
+          onClose={() => setOpenSection(null)}
         >
-          {toolbarOpen ? <X size={20} /> : <Plus size={20} />}
-        </button>
+          {openSection === 'players' && (
+            <PlayersFlyout
+              teamAColor={board.teamAColor} teamBColor={board.teamBColor}
+              setTeamAColor={board.setTeamAColor} setTeamBColor={board.setTeamBColor}
+              onAddA={() => handleAddPlayer('A')} onAddB={() => handleAddPlayer('B')}
+              onAddGKA={() => handleAddGoalkeeper('A')} onAddGKB={() => handleAddGoalkeeper('B')}
+              onAddBall={handleAddBall}
+              onOpenPalette={() => { setPaletteOpen(true); setOpenSection(null); }}
+            />
+          )}
+          {openSection === 'arrows' && (
+            <ArrowsFlyout
+              activeToolId={activeToolId}
+              onActivate={(t) => activateDrawingTool(t.id, t.mode, t.dash, t.color)}
+              drawingColor={drawingColor}
+              setDrawingColor={setDrawingColor}
+            />
+          )}
+          {openSection === 'draw' && (
+            <DrawFlyout
+              activeToolId={activeToolId}
+              onActivate={activateDrawingTool}
+              drawingColor={drawingColor}
+              setDrawingColor={setDrawingColor}
+            />
+          )}
+          {openSection === 'objects' && (
+            <ObjectsFlyout onAdd={handleAddMarker} />
+          )}
+          {openSection === 'formations' && (
+            <FormationsFlyout formations={formations} onLoad={handleLoadFormation} />
+          )}
+          {openSection === 'view' && (
+            <ViewFlyout
+              fieldType={board.fieldType} setFieldType={board.setFieldType}
+              fieldView={board.fieldView} setFieldView={board.setFieldView}
+            />
+          )}
+        </Flyout>
+      )}
 
-        {/* FAB: Fullscreen */}
-        <button
-          style={{ ...fabStyle, top: 10, right: 10, backgroundColor: 'rgba(255,255,255,0.12)', color: 'white', backdropFilter: 'blur(8px)' }}
-          onClick={toggleFullscreen}
-          title={isFullscreen ? 'Sair tela cheia (F11)' : 'Tela cheia (F11)'}
-        >
-          {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
-        </button>
-
-        {/* Drawing mode indicator */}
-        {drawingMode && (
-          <div style={{
-            position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 25,
-            backgroundColor: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)', borderRadius: '0.5rem',
-            padding: '0.25rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem',
-            border: '1px solid rgba(255,255,255,0.15)', fontSize: '0.7rem', color: 'white',
-          }}>
-            <span style={{ opacity: 0.7 }}>Modo:</span>
-            <span style={{ fontWeight: '600' }}>
-              {drawingMode === 'arrow_straight' ? 'Seta reta' :
-               drawingMode === 'arrow_curved' ? 'Seta curva' :
-               drawingMode === 'free_draw' ? 'Desenho livre' :
-               drawingMode === 'zone_rect' ? 'Zona retangular' :
-               drawingMode === 'zone_circle' ? 'Zona circular' :
-               drawingMode === 'text' ? 'Texto' : drawingMode}
-            </span>
-            <button onClick={clearDrawingMode}
-              style={{ border: 'none', background: 'rgba(239,68,68,0.3)', color: '#ef4444', borderRadius: '0.25rem', cursor: 'pointer', padding: '0.1rem 0.3rem', fontSize: '0.65rem' }}>
-              Sair
-            </button>
-          </div>
-        )}
-
-        {/* === FLOATING TOOLBAR === */}
-        {toolbarOpen && (
-          <div style={{
-            position: 'absolute', top: 10, left: 56, right: 56, zIndex: 30,
-            backgroundColor: 'rgba(12, 12, 28, 0.8)', backdropFilter: 'blur(14px)',
-            borderRadius: '0.625rem', border: '1px solid rgba(255,255,255,0.08)',
-            boxShadow: '0 4px 24px rgba(0,0,0,0.5)',
-            display: 'flex', flexDirection: 'column', gap: 0,
-          }}>
-            {/* Main row */}
-            <div style={{
-              padding: '0.3rem 0.5rem',
-              display: 'flex', alignItems: 'center', gap: '0.3rem', flexWrap: 'wrap',
-            }}>
-              {/* Field type */}
-              {['football_11', 'futsal'].map((t) => (
-                <ToolBtn key={t} onClick={() => board.setFieldType(t)} active={board.fieldType === t}
-                  color={board.fieldType === t ? colors.primary : null}
-                  title={t === 'football_11' ? 'Futebol 11' : 'Futsal'}>
-                  {t === 'football_11' ? 'F11' : 'Futsal'}
-                </ToolBtn>
-              ))}
-
-              <Sep />
-
-              {/* Field view */}
-              <SectionBtn id="field_view" label="Vista" />
-
-              <Sep />
-
-              {/* Players */}
-              <ToolBtn onClick={() => handleAddPlayer('A')} title="Jogador Time A" color={board.teamAColor}>
-                <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', backgroundColor: board.teamAColor, marginRight: 3, verticalAlign: 'middle' }} />+
-              </ToolBtn>
-              <ToolBtn onClick={() => handleAddPlayer('B')} title="Jogador Time B" color={board.teamBColor}>
-                <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', backgroundColor: board.teamBColor, marginRight: 3, verticalAlign: 'middle' }} />+
-              </ToolBtn>
-              <ToolBtn onClick={() => handleAddGoalkeeper('A')} title="Goleiro Time A" color={board.teamAColor}
-                style={{ fontSize: '0.65rem' }}>
-                GK<span style={{ fontSize: '0.5rem' }}>A</span>
-              </ToolBtn>
-              <ToolBtn onClick={() => handleAddGoalkeeper('B')} title="Goleiro Time B" color={board.teamBColor}
-                style={{ fontSize: '0.65rem' }}>
-                GK<span style={{ fontSize: '0.5rem' }}>B</span>
-              </ToolBtn>
-              <ToolBtn onClick={handleAddBall} title="Bola">⚽</ToolBtn>
-
-              <Sep />
-
-              {/* Tool sections */}
-              <SectionBtn id="markers" label="Objetos" />
-              <SectionBtn id="arrows" label="Setas" />
-              <SectionBtn id="drawing" label="Desenho" />
-              <SectionBtn id="formations" label="Formações" />
-
-              <Sep />
-
-              {/* Actions */}
-              <ToolBtn onClick={() => setPaletteOpen(!paletteOpen)} active={paletteOpen}
-                title="Plantel" color={paletteOpen ? colors.primary : null}>Plantel</ToolBtn>
-              <ToolBtn onClick={() => setSaveModalOpen(true)} title="Salvar">💾</ToolBtn>
-              <ToolBtn onClick={() => setLoadModalOpen(true)} title="Carregar">📂</ToolBtn>
-              <ToolBtn onClick={() => videoExport.startExport()}
-                active={false}
-                title="Exportar vídeo"
-                color={board.totalFrames > 1 ? colors.primary : 'rgba(255,255,255,0.25)'}
-                style={{ cursor: board.totalFrames > 1 ? 'pointer' : 'default' }}>
-                {videoExport.isExporting ? '⏳' : '🎬'}
-              </ToolBtn>
-
-              <div style={{ flex: 1 }} />
-
-              {/* Undo/redo */}
-              <ToolBtn onClick={board.undo} title="Desfazer (Ctrl+Z)"
-                color={board.canUndo ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.2)'}
-                style={{ cursor: board.canUndo ? 'pointer' : 'default' }}>↩</ToolBtn>
-              <ToolBtn onClick={board.redo} title="Refazer (Ctrl+Y)"
-                color={board.canRedo ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.2)'}
-                style={{ cursor: board.canRedo ? 'pointer' : 'default' }}>↪</ToolBtn>
-              {(board.selectedElementId || board.selectedDrawingId) && (
-                <ToolBtn onClick={handleRemoveSelected} title="Remover (Del)" color="#ef4444">🗑</ToolBtn>
-              )}
-              <ToolBtn onClick={handleReset} title="Limpar tudo" color="#ef4444"
-                style={{ fontSize: '0.65rem' }}>Limpar</ToolBtn>
-            </div>
-
-            {/* Expanded sections */}
-            {expandedSection === 'field_view' && (
-              <div style={{ padding: '0.25rem 0.5rem 0.35rem', borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', gap: '0.3rem', flexWrap: 'wrap' }}>
-                {FIELD_VIEW_OPTIONS.map(({ view, label }) => (
-                  <ToolBtn key={view} onClick={() => board.setFieldView(view)} active={board.fieldView === view}
-                    color={board.fieldView === view ? colors.primary : null}>{label}</ToolBtn>
-                ))}
-              </div>
-            )}
-
-            {expandedSection === 'markers' && (
-              <div style={{ padding: '0.25rem 0.5rem 0.35rem', borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', gap: '0.3rem', flexWrap: 'wrap' }}>
-                {MARKER_TYPES.map(({ type, label, title, color }) => (
-                  <ToolBtn key={type} onClick={() => handleAddMarker(type)} title={title} color={color}>{label}</ToolBtn>
-                ))}
-              </div>
-            )}
-
-            {expandedSection === 'arrows' && (
-              <div style={{ padding: '0.25rem 0.5rem 0.35rem', borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', gap: '0.3rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                {ARROW_TOOLS.map((tool) => (
-                  <ToolBtn key={tool.id} onClick={() => activateDrawingTool(tool.id, tool.mode, tool.dash, tool.color)}
-                    active={activeToolId === tool.id} title={tool.title} color={tool.color}>
-                    {tool.label}
-                  </ToolBtn>
-                ))}
-                <Sep />
-                {/* Color picker for arrows */}
-                {DRAWING_COLORS.map((c) => (
-                  <button key={c} onClick={() => setDrawingColor(c)} title={c}
-                    style={{
-                      width: 16, height: 16, borderRadius: '50%', border: drawingColor === c ? '2px solid white' : '1px solid rgba(255,255,255,0.2)',
-                      backgroundColor: c, cursor: 'pointer', padding: 0,
-                    }} />
-                ))}
-              </div>
-            )}
-
-            {expandedSection === 'drawing' && (
-              <div style={{ padding: '0.25rem 0.5rem 0.35rem', borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', gap: '0.3rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                <ToolBtn onClick={() => activateDrawingTool('free_draw', 'free_draw')}
-                  active={activeToolId === 'free_draw'} title="Desenho livre" color="#fbbf24">✏️ Livre</ToolBtn>
-                {ZONE_TOOLS.map((tool) => (
-                  <ToolBtn key={tool.id} onClick={() => activateDrawingTool(tool.id, tool.mode)}
-                    active={activeToolId === tool.id} title={tool.title}>
-                    {tool.label} {tool.title.split(' ')[1]}
-                  </ToolBtn>
-                ))}
-                <ToolBtn onClick={() => activateDrawingTool('text', 'text')}
-                  active={activeToolId === 'text'} title="Texto">📝 Texto</ToolBtn>
-                <Sep />
-                {DRAWING_COLORS.map((c) => (
-                  <button key={c} onClick={() => setDrawingColor(c)} title={c}
-                    style={{
-                      width: 16, height: 16, borderRadius: '50%', border: drawingColor === c ? '2px solid white' : '1px solid rgba(255,255,255,0.2)',
-                      backgroundColor: c, cursor: 'pointer', padding: 0,
-                    }} />
-                ))}
-              </div>
-            )}
-
-            {expandedSection === 'formations' && (
-              <div style={{ padding: '0.25rem 0.5rem 0.35rem', borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', gap: '0.3rem', flexWrap: 'wrap' }}>
-                {Object.entries(formations).map(([key, f]) => (
-                  <ToolBtn key={key} onClick={() => handleLoadFormation(key)} title={`Formação ${f.label}`}>{f.label}</ToolBtn>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* === PLAYBACK (floating center-bottom, only pill captures clicks) === */}
+      {/* ─── ÁREA PRINCIPAL ─── */}
+      <div style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column', minWidth: 0, zIndex: 1 }}>
+        {/* TOP BAR — compacto pra dar espaço ao campo */}
         <div style={{
-          position: 'absolute', bottom: 36, left: 0, right: 0, zIndex: 15,
-          display: 'flex', justifyContent: 'center', pointerEvents: 'none',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0.3rem 0.65rem',
+          backgroundColor: 'rgba(15,23,42,0.5)',
+          backdropFilter: 'blur(8px)',
+          borderBottom: '1px solid rgba(255,255,255,0.08)',
+          gap: '0.5rem',
+          minHeight: 36,
+          flexShrink: 0,
         }}>
-          <div style={{
-            backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: '1.5rem',
-            backdropFilter: 'blur(8px)', padding: '0.125rem 0.5rem',
-            pointerEvents: 'auto',
-          }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
+            <span style={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.55)', fontWeight: 600 }}>Jogada:</span>
+            <span style={{ fontSize: '0.9rem', color: '#fff', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 280 }}>
+              {currentPlayName || 'Sem nome'}
+            </span>
+            {board.totalFrames > 1 && (
+              <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.45)', padding: '0.1rem 0.4rem', backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 999 }}>
+                {board.totalFrames} frames
+              </span>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+            <TopBtn onClick={() => setOpenSection('view')} title="Vista / tipo de campo" active={openSection === 'view'}>
+              <Eye size={16} />
+            </TopBtn>
+            <TopBtn onClick={() => setShortcutsOpen(true)} title="Atalhos de teclado">
+              <Keyboard size={16} />
+            </TopBtn>
+            <TopBtn onClick={toggleFullscreen} title={isFullscreen ? 'Sair tela cheia (F11)' : 'Tela cheia (F11)'}>
+              {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+            </TopBtn>
+          </div>
+        </div>
+
+        {/* CANVAS */}
+        <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
+          <TacticalCanvas
+            ref={canvasRef}
+            fieldType={board.fieldType}
+            fieldView={board.fieldView}
+            elements={displayElements}
+            drawings={displayDrawings}
+            nextFrameElements={nextFrameElements}
+            teamAColor={board.teamAColor}
+            teamBColor={board.teamBColor}
+            isPlaying={playback.isPlaying}
+            drawingMode={drawingMode}
+            drawingColor={drawingColor}
+            drawingDash={drawingDash}
+            drawingStrokeWidth={drawingStrokeWidth}
+            onElementMove={board.updateElementPosition}
+            onElementSelect={board.setSelectedElementId}
+            onDrawingSelect={board.setSelectedDrawingId}
+            onDrawingComplete={handleDrawingComplete}
+            selectedElementId={board.selectedElementId}
+            selectedDrawingId={board.selectedDrawingId}
+          />
+
+          {/* Indicador de modo de desenho */}
+          {drawingMode && (
+            <div style={{
+              position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 25,
+              backgroundColor: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)', borderRadius: '0.5rem',
+              padding: '0.3rem 0.8rem', display: 'flex', alignItems: 'center', gap: '0.5rem',
+              border: '1px solid rgba(255,255,255,0.15)', fontSize: '0.75rem', color: 'white',
+            }}>
+              <PenLine size={13} style={{ opacity: 0.7 }} />
+              <span style={{ fontWeight: 600 }}>{describeMode(drawingMode)}</span>
+              <button onClick={clearDrawingMode}
+                style={{ border: 'none', background: 'rgba(239,68,68,0.3)', color: '#fca5a5', borderRadius: '0.25rem', cursor: 'pointer', padding: '0.15rem 0.4rem', fontSize: '0.7rem' }}>
+                Sair (Esc)
+              </button>
+            </div>
+          )}
+
+          {/* Painel de propriedades flutuante (canto inferior direito) quando há seleção */}
+          {(board.selectedElementId || board.selectedDrawingId) && (
+            <div style={{
+              position: 'absolute', bottom: 110, right: 12, zIndex: 22,
+              backgroundColor: 'rgba(12,12,28,0.92)', backdropFilter: 'blur(14px)',
+              borderRadius: '0.5rem', border: '1px solid rgba(255,255,255,0.1)',
+              padding: '0.55rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
+            }}>
+              <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.6)' }}>
+                {selectedElement ? `${selectedElement.type === 'player' ? `#${selectedElement.jerseyNumber || '—'}` : selectedElement.type === 'ball' ? 'Bola' : 'Objeto'}` : 'Desenho selecionado'}
+              </span>
+              <button onClick={handleRemoveSelected}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '0.3rem 0.55rem', background: 'rgba(239,68,68,0.18)', color: '#fca5a5', border: '1px solid rgba(239,68,68,0.4)', borderRadius: '0.3rem', fontSize: '0.72rem', cursor: 'pointer' }}>
+                <Trash2 size={12} /> Remover
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* BOTTOM BAR — playback + frames */}
+        <div style={{
+          flexShrink: 0,
+          backgroundColor: 'rgba(15,23,42,0.5)',
+          backdropFilter: 'blur(8px)',
+          borderTop: '1px solid rgba(255,255,255,0.08)',
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'center', padding: '0.15rem 0' }}>
             <PlaybackControls
               isPlaying={playback.isPlaying}
               speed={playback.speed}
@@ -577,17 +465,7 @@ export default function TacticalBoardPage() {
               onSpeedChange={playback.setSpeed}
             />
           </div>
-        </div>
-
-        {/* === FRAME STRIP (very bottom, thin bar) === */}
-        <div style={{
-          position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 15,
-          pointerEvents: 'none',
-        }}>
-          <div style={{
-            backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(8px)',
-            pointerEvents: 'auto',
-          }}>
+          <div style={{ borderTop: '1px solid rgba(255,255,255,0.04)' }}>
             <FrameControls
               currentFrameIndex={board.currentFrameIndex}
               totalFrames={board.totalFrames}
@@ -601,7 +479,7 @@ export default function TacticalBoardPage() {
         </div>
       </div>
 
-      {/* === PLAYER PALETTE === */}
+      {/* PALETTE (drawer direito) */}
       {paletteOpen && (
         <div style={{
           position: 'absolute', top: 0, right: 0, bottom: 0, zIndex: 25,
@@ -618,12 +496,12 @@ export default function TacticalBoardPage() {
         </div>
       )}
 
-      {/* Modals */}
+      {/* Modais */}
       <SavePlayModal
         isOpen={saveModalOpen}
         onClose={() => setSaveModalOpen(false)}
         onSave={handleSave}
-        initialData={{}}
+        initialData={{ name: currentPlayName }}
       />
       <LoadPlayModal
         isOpen={loadModalOpen}
@@ -634,6 +512,435 @@ export default function TacticalBoardPage() {
         loading={plays.loading}
         onFetch={() => plays.fetchPlays(selectedClub?.id)}
       />
+
+      {shortcutsOpen && (
+        <ShortcutsModal onClose={() => setShortcutsOpen(false)} />
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Auxiliares
+// ─────────────────────────────────────────────────────────────────
+const SECTIONS_TITLES = {
+  players:    'Peças',
+  arrows:     'Setas',
+  draw:       'Desenho',
+  objects:    'Objetos',
+  formations: 'Formações',
+  view:       'Vista do campo',
+};
+
+function describeMode(m) {
+  switch (m) {
+    case 'arrow_straight': return 'Seta reta';
+    case 'arrow_curved':   return 'Seta curva';
+    case 'free_draw':      return 'Desenho livre';
+    case 'zone_rect':      return 'Zona retangular';
+    case 'zone_circle':    return 'Zona circular';
+    case 'text':           return 'Texto';
+    default: return m;
+  }
+}
+
+// ── Sidebar (compacta, só ícones com tooltip) ──
+function Sidebar({ openSection, setOpenSection, canUndo, canRedo, onUndo, onRedo, onSave, onLoad, onExport, canExport, exporting, onReset, primary }) {
+  const item = (key, Icon, label, onClick, opts = {}) => {
+    const active = openSection === key;
+    const disabled = opts.disabled;
+    return (
+      <button
+        key={key || label}
+        onClick={() => { if (disabled) return; onClick ? onClick() : setOpenSection(active ? null : key); }}
+        title={label}
+        aria-label={label}
+        style={{
+          width: 44, height: 44,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: active ? `${primary}30` : 'transparent',
+          border: 'none',
+          borderLeft: active ? `2px solid ${primary}` : '2px solid transparent',
+          color: disabled ? 'rgba(255,255,255,0.25)' : (active ? primary : 'rgba(255,255,255,0.85)'),
+          cursor: disabled ? 'default' : 'pointer',
+          transition: 'all 0.12s',
+        }}
+        onMouseEnter={(e) => { if (!disabled && !active) e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
+        onMouseLeave={(e) => { if (!disabled && !active) e.currentTarget.style.background = 'transparent'; }}
+      >
+        <Icon size={19} strokeWidth={1.85} />
+      </button>
+    );
+  };
+  const divider = (
+    <div style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.08)', margin: '0.3rem 0.5rem' }} />
+  );
+
+  return (
+    <div style={{
+      width: 44,
+      flexShrink: 0,
+      backgroundColor: 'rgba(15,23,42,0.55)',
+      backdropFilter: 'blur(10px)',
+      borderRight: '1px solid rgba(255,255,255,0.08)',
+      display: 'flex',
+      flexDirection: 'column',
+      paddingTop: '0.3rem',
+      paddingBottom: '0.3rem',
+      zIndex: 30,
+    }}>
+      {item('players',    UserPlus,   'Peças')}
+      {item('formations', LayoutGrid, 'Formações')}
+      {item('arrows',     ArrowRight, 'Setas')}
+      {item('draw',       Pencil,     'Desenho')}
+      {item('objects',    Cone,       'Objetos')}
+      {divider}
+      {item(null, Save,       'Salvar jogada',   onSave)}
+      {item(null, FolderOpen, 'Abrir jogada',    onLoad)}
+      {item(null, exporting ? Pause : Film, 'Exportar vídeo', onExport, { disabled: !canExport })}
+      {divider}
+      {item(null, Undo2, 'Desfazer (Ctrl+Z)', onUndo, { disabled: !canUndo })}
+      {item(null, Redo2, 'Refazer (Ctrl+Y)',  onRedo, { disabled: !canRedo })}
+      <div style={{ flex: 1 }} />
+      {item(null, Trash2, 'Limpar tudo', onReset)}
+    </div>
+  );
+}
+
+// ── Flyout (painel ao lado da sidebar) ──
+function Flyout({ title, onClose, children }) {
+  return (
+    <div style={{
+      width: 230, flexShrink: 0,
+      backgroundColor: 'rgba(15,23,42,0.82)',
+      backdropFilter: 'blur(14px)',
+      borderRight: '1px solid rgba(255,255,255,0.08)',
+      boxShadow: '4px 0 20px rgba(0,0,0,0.3)',
+      display: 'flex', flexDirection: 'column',
+      zIndex: 29,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.55rem 0.75rem', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#fff', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{title}</span>
+        <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.5)', cursor: 'pointer', padding: 2 }}>
+          <X size={15} />
+        </button>
+      </div>
+      <div style={{ padding: '0.65rem 0.7rem', overflowY: 'auto', flex: 1 }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ── Flyouts específicos ──
+function PlayersFlyout({ teamAColor, teamBColor, setTeamAColor, setTeamBColor, onAddA, onAddB, onAddGKA, onAddGKB, onAddBall, onOpenPalette }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+      <div>
+        <FlyoutLabel>Times</FlyoutLabel>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+          <FlyBtn onClick={onAddA} color={teamAColor}><Plus size={11} /> Jogador A</FlyBtn>
+          <FlyBtn onClick={onAddB} color={teamBColor}><Plus size={11} /> Jogador B</FlyBtn>
+          <FlyBtn onClick={onAddGKA} color={teamAColor} small>GK Time A</FlyBtn>
+          <FlyBtn onClick={onAddGKB} color={teamBColor} small>GK Time B</FlyBtn>
+        </div>
+      </div>
+      <div>
+        <FlyoutLabel>Bola e plantel</FlyoutLabel>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+          <FlyBtn onClick={onAddBall}>Bola</FlyBtn>
+          <FlyBtn onClick={onOpenPalette}><Users size={12} /> Plantel</FlyBtn>
+        </div>
+      </div>
+      <div>
+        <FlyoutLabel>Cores das equipes</FlyoutLabel>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <ColorRow label="Time A" color={teamAColor} setColor={setTeamAColor} />
+          <ColorRow label="Time B" color={teamBColor} setColor={setTeamBColor} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ArrowsFlyout({ activeToolId, onActivate, drawingColor, setDrawingColor }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+      <div>
+        <FlyoutLabel>Tipo de seta</FlyoutLabel>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          {ARROW_TOOLS.map((t) => (
+            <FlyBtn key={t.id} onClick={() => onActivate(t)} active={activeToolId === t.id}>
+              <ArrowRight size={13} style={{ color: t.color }} />
+              <span style={{ flex: 1, textAlign: 'left' }}>{t.label}</span>
+              <span style={{ fontSize: '0.65rem', opacity: 0.6 }}>{t.desc}</span>
+            </FlyBtn>
+          ))}
+        </div>
+      </div>
+      <div>
+        <FlyoutLabel>Cor</FlyoutLabel>
+        <ColorPalette current={drawingColor} onPick={setDrawingColor} />
+      </div>
+    </div>
+  );
+}
+
+function DrawFlyout({ activeToolId, onActivate, drawingColor, setDrawingColor }) {
+  const tools = [
+    { id: 'free_draw',   mode: 'free_draw',   icon: PenLine,    label: 'Desenho livre' },
+    { id: 'zone_rect',   mode: 'zone_rect',   icon: SquareIcon, label: 'Zona retangular' },
+    { id: 'zone_circle', mode: 'zone_circle', icon: CircleIcon, label: 'Zona circular' },
+    { id: 'text',        mode: 'text',        icon: Type,       label: 'Texto' },
+  ];
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+      <div>
+        <FlyoutLabel>Ferramenta</FlyoutLabel>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          {tools.map((t) => {
+            const Icon = t.icon;
+            return (
+              <FlyBtn key={t.id} onClick={() => onActivate(t.id, t.mode)} active={activeToolId === t.id}>
+                <Icon size={13} /><span>{t.label}</span>
+              </FlyBtn>
+            );
+          })}
+        </div>
+      </div>
+      <div>
+        <FlyoutLabel>Cor</FlyoutLabel>
+        <ColorPalette current={drawingColor} onPick={setDrawingColor} />
+      </div>
+    </div>
+  );
+}
+
+function ObjectsFlyout({ onAdd }) {
+  return (
+    <div>
+      <FlyoutLabel>Adicionar objeto</FlyoutLabel>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
+        {MARKER_TYPES.map((m) => (
+          <FlyBtn key={m.type} onClick={() => onAdd(m.type)}>
+            <span style={{ width: 14, textAlign: 'center', fontSize: '0.85rem' }}>{m.icon}</span>
+            <span>{m.label}</span>
+          </FlyBtn>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FormationsFlyout({ formations, onLoad }) {
+  const entries = Object.entries(formations || {});
+  if (entries.length === 0) return <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.8rem' }}>Sem formações para esse tipo de campo.</div>;
+  return (
+    <div>
+      <FlyoutLabel>Aplicar formação (Time A)</FlyoutLabel>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+        {entries.map(([key, f]) => (
+          <FlyBtn key={key} onClick={() => onLoad(key)}>
+            <LayoutGrid size={12} /><span>{f.label}</span>
+          </FlyBtn>
+        ))}
+      </div>
+      <div style={{ marginTop: 8, fontSize: '0.65rem', color: 'rgba(255,255,255,0.4)' }}>
+        ⚠ Aplicar uma formação substitui as peças atuais.
+      </div>
+    </div>
+  );
+}
+
+function ViewFlyout({ fieldType, setFieldType, fieldView, setFieldView }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+      <div>
+        <FlyoutLabel>Tipo de campo</FlyoutLabel>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
+          <FlyBtn onClick={() => setFieldType('football_11')} active={fieldType === 'football_11'}>Futebol 11</FlyBtn>
+          <FlyBtn onClick={() => setFieldType('futsal')} active={fieldType === 'futsal'}>Futsal</FlyBtn>
+        </div>
+      </div>
+      <div>
+        <FlyoutLabel>Vista do campo</FlyoutLabel>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          {FIELD_VIEW_OPTIONS.map((v) => (
+            <FlyBtn key={v.view} onClick={() => setFieldView(v.view)} active={fieldView === v.view}>{v.label}</FlyBtn>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Primitivos visuais ──
+function FlyoutLabel({ children }) {
+  return (
+    <div style={{ fontSize: '0.62rem', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700, color: 'rgba(255,255,255,0.45)', marginBottom: 5 }}>
+      {children}
+    </div>
+  );
+}
+
+function FlyBtn({ onClick, active, children, color, small }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        padding: small ? '0.32rem 0.5rem' : '0.42rem 0.55rem',
+        backgroundColor: active ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.04)',
+        border: `1px solid ${active ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.07)'}`,
+        borderRadius: '0.35rem',
+        color: color || 'rgba(255,255,255,0.9)',
+        fontSize: small ? '0.7rem' : '0.74rem',
+        fontWeight: 500,
+        cursor: 'pointer',
+        textAlign: 'left',
+        transition: 'all 0.12s',
+      }}
+      onMouseEnter={(e) => { if (!active) e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.08)'; }}
+      onMouseLeave={(e) => { if (!active) e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.04)'; }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ColorPalette({ current, onPick }) {
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+      {DRAWING_COLORS.map((c) => (
+        <button
+          key={c}
+          onClick={() => onPick(c)}
+          title={c}
+          style={{
+            width: 22, height: 22, borderRadius: '50%',
+            border: current === c ? '2px solid #fff' : '1px solid rgba(255,255,255,0.18)',
+            backgroundColor: c, cursor: 'pointer', padding: 0,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ColorRow({ label, color, setColor }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.65)', width: 50 }}>{label}</span>
+      <input
+        type="color" value={color} onChange={(e) => setColor(e.target.value)}
+        style={{ width: 28, height: 22, border: 'none', borderRadius: 4, backgroundColor: 'transparent', cursor: 'pointer' }}
+      />
+      <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)', fontFamily: 'monospace' }}>{color}</span>
+    </div>
+  );
+}
+
+function TopBtn({ children, onClick, title, active }) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      style={{
+        width: 32, height: 32,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        border: '1px solid rgba(255,255,255,0.08)',
+        background: active ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.04)',
+        color: '#fff', cursor: 'pointer',
+        borderRadius: '0.35rem',
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+// Tela de bloqueio em mobile — Quadro Tático precisa de tela maior pra ser usável
+function MobileBlockScreen({ colors }) {
+  return (
+    <div style={{
+      width: '100%', minHeight: 'calc(100vh - 64px)',
+      margin: '-1.5rem -1.5rem 0',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: '2rem 1.5rem',
+      backgroundColor: 'transparent',
+    }}>
+      <div style={{
+        maxWidth: 360,
+        backgroundColor: colors.surface,
+        border: `1px solid ${colors.border}`,
+        borderRadius: '0.75rem',
+        padding: '1.75rem 1.5rem',
+        textAlign: 'center',
+        boxShadow: '0 10px 30px rgba(0,0,0,0.18)',
+      }}>
+        <div style={{
+          width: 56, height: 56, borderRadius: '50%',
+          backgroundColor: `${colors.primary}1A`, color: colors.primary,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          margin: '0 auto 1rem',
+        }}>
+          <Smartphone size={28} strokeWidth={1.75} />
+        </div>
+        <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: colors.text }}>
+          Quadro Tático no celular
+        </h2>
+        <p style={{ margin: '0.6rem 0 0', fontSize: '0.875rem', color: colors.textSecondary, lineHeight: 1.5 }}>
+          A edição do quadro tático precisa de tela maior pra dar conta dos jogadores, setas e frames.
+          No navegador mobile a experiência fica comprometida.
+        </p>
+        <div style={{
+          marginTop: '1.1rem',
+          padding: '0.75rem 0.9rem',
+          backgroundColor: `${colors.primary}10`,
+          border: `1px solid ${colors.primary}30`,
+          borderRadius: '0.5rem',
+          color: colors.primary,
+          fontSize: '0.825rem',
+          fontWeight: 600,
+        }}>
+          📱 App oficial em desenvolvimento — em breve!
+        </div>
+        <p style={{ margin: '1rem 0 0', fontSize: '0.78rem', color: colors.textSecondary }}>
+          Por enquanto, abra o Quadro Tático em um computador ou tablet em modo paisagem.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function ShortcutsModal({ onClose }) {
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.7)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200, padding: '1rem',
+    }}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        width: '100%', maxWidth: 380,
+        backgroundColor: '#0f0f1e', color: '#fff',
+        borderRadius: '0.6rem', border: '1px solid rgba(255,255,255,0.1)',
+        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+        overflow: 'hidden',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.85rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+          <span style={{ fontSize: '0.92rem', fontWeight: 700 }}>Atalhos de teclado</span>
+          <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.6)', cursor: 'pointer' }}>
+            <X size={18} />
+          </button>
+        </div>
+        <div style={{ padding: '0.85rem 1rem' }}>
+          {SHORTCUTS.map(([keys, desc]) => (
+            <div key={keys} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.4rem 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+              <kbd style={{ fontFamily: 'monospace', fontSize: '0.8rem', backgroundColor: 'rgba(255,255,255,0.08)', padding: '0.2rem 0.45rem', borderRadius: '0.25rem', color: '#fff' }}>{keys}</kbd>
+              <span style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.75)' }}>{desc}</span>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

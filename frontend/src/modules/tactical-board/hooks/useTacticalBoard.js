@@ -13,10 +13,10 @@ function generateId(type) {
   return `${type}-${Date.now()}-${elementCounter}`;
 }
 
-export function useTacticalBoard() {
+export function useTacticalBoard({ initialFieldType } = {}) {
   const [frames, setFrames] = useState([createInitialFrame()]);
   const [currentFrameIndex, setCurrentFrameIndex] = useState(0);
-  const [fieldType, setFieldType] = useState(FIELD_TYPES.FOOTBALL_11);
+  const [fieldType, setFieldType] = useState(initialFieldType || FIELD_TYPES.FOOTBALL_11);
   const [fieldView, setFieldView] = useState(FIELD_VIEWS.FULL);
   const [teamAColor, setTeamAColor] = useState('#3b82f6');
   const [teamBColor, setTeamBColor] = useState('#ef4444');

@@ -1,18 +1,26 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, Save, Users, List, Grid, FileText } from 'lucide-react';
+import { Plus, Save, Users, List, Grid } from 'lucide-react';
 import { useTheme } from '../../../contexts/ThemeContext';
 import { useIsMobile } from '../../../hooks/useIsMobile';
+import { useClub } from '../../../contexts/ClubContext';
 import { Button } from '../../../components/common/Button';
 import { athleteService } from '../services/athleteService';
+import { categoryService } from '../../../services/categoryService';
 import PlayerModal from '../components/plantel/PlayerModal';
 import PlayersTable from '../components/plantel/PlayersTable';
 import GroupColumn from '../components/plantel/GroupColumn';
-import { generatePlantelPDF } from '../utils/pdfGenerator';
+import { generatePlantelPDF, generatePlantelExcel } from '../utils/pdfGenerator';
+import { ExportMenu } from '../../../components/common/ExportMenu';
+import { TourGuide } from '../../../components/common/TourGuide';
+import { useTour, useTourReplayListener } from '../../../hooks/useTour';
 
 export default function PlantelPage() {
   const { colors } = useTheme();
   const isMobile = useIsMobile();
+  const { selectedClub } = useClub();
   const [athletes, setAthletes] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [categoryFilter, setCategoryFilter] = useState('all'); // 'all' | 'none' | <id>
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -25,9 +33,24 @@ export default function PlantelPage() {
   const [sortBy, setSortBy] = useState('name'); // 'name' or 'position'
   const itemsPerPage = 10;
 
+  const tour = useTour('plantel');
+  useTourReplayListener('plantel', () => tour.setIsOpen(true));
+  const tourSteps = [
+    { title: 'Plantel de Atletas', content: 'Aqui você gerencia todos os atletas do clube. Vamos te mostrar rapidinho.' },
+    { selector: '[data-tour="new-athlete"]', title: 'Novo atleta', content: 'Cadastre nome, posição, status, grupo e categoria. Você também pode adicionar dados pessoais (data de nascimento, altura, pé preferencial, último clube) e uma foto que aparecerá no PDF do plantel e nas convocações.', placement: 'bottom' },
+    { selector: '[data-tour="generate-pdf"]', title: 'Exportar plantel', content: 'O PDF do plantel inclui a foto de cada atleta ao lado do nome (quando cadastrada). Excel sai com aba por grupo e filtros automáticos.', placement: 'bottom' },
+    { selector: '[data-tour="plantel-tabs"]', title: 'Lista ou Grupos', content: 'Veja seu plantel em tabela (com mais detalhes) ou agrupado (G1, G2, G3, Transição, DM). Para mover atletas entre grupos use "Grupos de Treino".', placement: 'bottom' },
+    { title: 'Próximos passos', content: 'Edite um atleta clicando na linha pra anexar foto e dados pessoais. Em seguida vá em "Treinos" no menu superior pra montar a semana com esses atletas.' },
+  ];
+
   useEffect(() => {
     loadAthletes();
   }, []);
+
+  useEffect(() => {
+    if (!selectedClub?.id) { setCategories([]); return; }
+    categoryService.listByClub(selectedClub.id).then(setCategories).catch(() => setCategories([]));
+  }, [selectedClub?.id]);
 
   const loadAthletes = async () => {
     try {
@@ -45,10 +68,15 @@ export default function PlantelPage() {
 
   const handleCreatePlayer = async (data) => {
     try {
+      if (!selectedClub?.id) {
+        alert('Selecione um clube antes de cadastrar atletas.');
+        return;
+      }
       await athleteService.create({
         ...data,
-        status: 'active',
-        group: null,
+        club_id: selectedClub.id,
+        status: data.status || 'active',
+        group: data.group ?? null,
       });
       await loadAthletes();
       setIsModalOpen(false);
@@ -75,7 +103,11 @@ export default function PlantelPage() {
 
   const handleSaveEditedPlayer = async (data) => {
     if (editingPlayer) {
-      await handleUpdatePlayer(editingPlayer.id, data);
+      // Preserva o club_id atual do atleta para o PUT não setar NULL na coluna.
+      await handleUpdatePlayer(editingPlayer.id, {
+        ...data,
+        club_id: editingPlayer.club_id || selectedClub?.id,
+      });
       setEditingPlayer(null);
       setIsModalOpen(false);
     }
@@ -134,9 +166,12 @@ export default function PlantelPage() {
     }
   };
 
-  const handleGeneratePDF = () => {
+  const handleGeneratePDF = async () => {
     try {
-      generatePlantelPDF(athletes);
+      await generatePlantelPDF(athletes, {
+        clubName: selectedClub?.name || '',
+        primaryColor: selectedClub?.primary_color || null,
+      });
     } catch (err) {
       console.error('Error generating PDF:', err);
       alert('Erro ao gerar PDF do plantel');
@@ -156,10 +191,16 @@ export default function PlantelPage() {
     'PL': 11, 'SA': 12
   };
 
-  // Athletes ordenados e paginados
+  // Filtrar por categoria + ordenar
   const sortedAthletes = useMemo(() => {
-    let sorted = [...athletes];
+    let list = athletes;
+    if (categoryFilter === 'none') {
+      list = list.filter(a => !a.category_id);
+    } else if (categoryFilter !== 'all') {
+      list = list.filter(a => a.category_id === categoryFilter);
+    }
 
+    let sorted = [...list];
     if (sortBy === 'position') {
       sorted.sort((a, b) => {
         const orderA = positionOrder[a.position] || 999;
@@ -172,7 +213,7 @@ export default function PlantelPage() {
     }
 
     return sorted;
-  }, [athletes, sortBy]);
+  }, [athletes, sortBy, categoryFilter]);
 
   const paginatedAthletes = useMemo(() => {
     const startIndex = (currentPage - 1) * itemsPerPage;
@@ -182,10 +223,9 @@ export default function PlantelPage() {
   const totalPages = Math.ceil(sortedAthletes.length / itemsPerPage);
 
   const pageStyle = {
-    height: '100%',
+    minHeight: '100%',
     display: 'flex',
     flexDirection: 'column',
-    overflow: 'hidden',
   };
 
   const headerStyle = {
@@ -257,7 +297,6 @@ export default function PlantelPage() {
     display: 'flex',
     flexDirection: 'column',
     minHeight: 0,
-    overflow: 'hidden',
   };
 
   const groupsContainerStyle = {
@@ -329,6 +368,7 @@ export default function PlantelPage() {
 
   return (
     <div style={pageStyle}>
+      <TourGuide isOpen={tour.isOpen} onClose={tour.stop} steps={tourSteps} storageKey={tour.storageKey} />
       {error && <div style={errorStyle}>{error}</div>}
 
       <div style={headerStyle}>
@@ -337,26 +377,28 @@ export default function PlantelPage() {
           Plantel de Atletas
         </h1>
         <div style={actionsStyle}>
-          <Button
-            icon={<FileText size={22} strokeWidth={1.5} />}
-            onClick={handleGeneratePDF}
-            variant="secondary"
-          >
-            Gerar PDF
-          </Button>
-          <Button
-            icon={<Plus size={22} strokeWidth={1.5} />}
-            onClick={() => {
-              setEditingPlayer(null);
-              setIsModalOpen(true);
-            }}
-          >
-            Novo Atleta
-          </Button>
+          <div data-tour="generate-pdf">
+            <ExportMenu
+              variant="outline"
+              onExportPDF={handleGeneratePDF}
+              onExportExcel={() => generatePlantelExcel(athletes)}
+            />
+          </div>
+          <div data-tour="new-athlete">
+            <Button
+              icon={<Plus size={22} strokeWidth={1.5} />}
+              onClick={() => {
+                setEditingPlayer(null);
+                setIsModalOpen(true);
+              }}
+            >
+              Novo Atleta
+            </Button>
+          </div>
         </div>
       </div>
 
-      <div style={tabsContainerStyle}>
+      <div style={tabsContainerStyle} data-tour="plantel-tabs">
         <button
           style={tabStyle(activeTab === 'table')}
           onClick={() => setActiveTab('table')}
@@ -376,82 +418,58 @@ export default function PlantelPage() {
       <div style={contentSectionStyle}>
         {activeTab === 'table' ? (
           <>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexShrink: 0 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexShrink: 0, flexWrap: 'wrap', gap: '0.5rem' }}>
               <h2 style={sectionTitleStyle}>Lista de Atletas</h2>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <label style={{ fontSize: '0.875rem', color: colors.text }}>Ordenar por:</label>
-                <select
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value)}
-                  style={{
-                    padding: '0.4rem 0.75rem',
-                    fontSize: '0.875rem',
-                    border: `1px solid ${colors.border}`,
-                    borderRadius: '0.375rem',
-                    backgroundColor: colors.background,
-                    color: colors.text,
-                    cursor: 'pointer',
-                  }}
-                >
-                  <option value="name">Nome</option>
-                  <option value="position">Posição</option>
-                </select>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                {categories.length > 0 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <label style={{ fontSize: '0.875rem', color: colors.text }}>Categoria:</label>
+                    <select
+                      value={categoryFilter}
+                      onChange={(e) => setCategoryFilter(e.target.value)}
+                      style={{
+                        padding: '0.4rem 0.75rem', fontSize: '0.875rem',
+                        border: `1px solid ${colors.border}`, borderRadius: '0.375rem',
+                        backgroundColor: colors.background, color: colors.text, cursor: 'pointer',
+                      }}
+                    >
+                      <option value="all">Todas</option>
+                      <option value="none">Sem categoria</option>
+                      {categories.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}{c.age_group ? ` (${c.age_group})` : ''}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <label style={{ fontSize: '0.875rem', color: colors.text }}>Ordenar por:</label>
+                  <select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value)}
+                    style={{
+                      padding: '0.4rem 0.75rem',
+                      fontSize: '0.875rem',
+                      border: `1px solid ${colors.border}`,
+                      borderRadius: '0.375rem',
+                      backgroundColor: colors.background,
+                      color: colors.text,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <option value="name">Nome</option>
+                    <option value="position">Posição</option>
+                  </select>
+                </div>
               </div>
             </div>
 
-            <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
+            <div>
               <PlayersTable
-                players={paginatedAthletes}
+                players={sortedAthletes}
                 onEdit={handleEditPlayer}
                 onDelete={handleDeletePlayer}
               />
             </div>
-
-            {totalPages > 1 && (
-              <div style={paginationStyle}>
-                <button
-                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                  disabled={currentPage === 1}
-                  style={{
-                    padding: '0.4rem 0.75rem',
-                    fontSize: '0.875rem',
-                    color: currentPage === 1 ? colors.textMuted : colors.text,
-                    backgroundColor: 'transparent',
-                    border: `1px solid ${colors.border}`,
-                    borderRadius: '0.25rem',
-                    cursor: currentPage === 1 ? 'default' : 'pointer',
-                  }}
-                >
-                  Anterior
-                </button>
-
-                {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
-                  <button
-                    key={page}
-                    onClick={() => setCurrentPage(page)}
-                    style={pageButtonStyle(currentPage === page)}
-                  >
-                    {page}
-                  </button>
-                ))}
-
-                <button
-                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                  disabled={currentPage === totalPages}
-                  style={{
-                    padding: '0.4rem 0.75rem',
-                    fontSize: '0.875rem',
-                    color: currentPage === totalPages ? colors.textMuted : colors.text,
-                    backgroundColor: 'transparent',
-                    border: `1px solid ${colors.border}`,
-                    borderRadius: '0.25rem',
-                    cursor: currentPage === totalPages ? 'default' : 'pointer',
-                  }}
-                >
-                  Próximo
-                </button>
-              </div>
-            )}
           </>
         ) : (
           <>

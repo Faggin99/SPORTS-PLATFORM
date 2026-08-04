@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { Building2, ArrowRight } from 'lucide-react';
 import { useTheme } from '../../contexts/ThemeContext';
+import { MODALITIES, MODALITY_LABELS, MODALITY_DESCRIPTIONS } from '../../lib/sportConfig';
 
 export function ClubOnboardingModal({ onCreateClub }) {
   const { colors } = useTheme();
   const [clubName, setClubName] = useState('');
+  const [modality, setModality] = useState('football_11');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -20,7 +22,7 @@ export function ClubOnboardingModal({ onCreateClub }) {
     setError('');
 
     try {
-      await onCreateClub({ name: clubName.trim() });
+      await onCreateClub({ name: clubName.trim(), modality });
     } catch (err) {
       setError(err.message || 'Erro ao criar clube');
       setLoading(false);
@@ -164,13 +166,49 @@ export function ClubOnboardingModal({ onCreateClub }) {
                 setClubName(e.target.value);
                 setError('');
               }}
-              placeholder="Ex: Clube de Futebol ABC"
+              placeholder="Ex: Atlético Bola Pra Frente"
               style={inputStyle}
               autoFocus
               disabled={loading}
               required
             />
             {error && <div style={errorStyle}>{error}</div>}
+          </div>
+
+          <div style={{ marginTop: '1.25rem' }}>
+            <label style={labelStyle}>Modalidade *</label>
+            <div style={{ display: 'grid', gap: '0.5rem' }}>
+              {MODALITIES.map((m) => {
+                const active = modality === m;
+                return (
+                  <label
+                    key={m}
+                    style={{
+                      display: 'flex', alignItems: 'flex-start', gap: '0.6rem',
+                      padding: '0.75rem 0.875rem',
+                      backgroundColor: active ? `${colors.primary}15` : colors.surface,
+                      border: `2px solid ${active ? colors.primary : colors.border}`,
+                      borderRadius: '0.5rem',
+                      cursor: loading ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="modality"
+                      value={m}
+                      checked={active}
+                      onChange={() => setModality(m)}
+                      disabled={loading}
+                      style={{ marginTop: 3 }}
+                    />
+                    <div>
+                      <div style={{ fontSize: '0.95rem', fontWeight: 600, color: colors.text }}>{MODALITY_LABELS[m]}</div>
+                      <div style={{ fontSize: '0.78rem', color: colors.textSecondary, marginTop: 2 }}>{MODALITY_DESCRIPTIONS[m]}</div>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
           </div>
 
           <button

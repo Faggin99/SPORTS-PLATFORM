@@ -9,9 +9,11 @@ router.use(authMiddleware);
 // GET /api/plays
 router.get('/', async (req, res) => {
   try {
+    if (!req.user.can('tactical:view')) return res.status(403).json({ error: 'Sem permissão' });
     const { club_id } = req.query;
-    let sql = 'SELECT * FROM tactical_plays WHERE tenant_id = $1';
-    const params = [req.user.id];
+    const tenantIds = req.user.workspaceIds || [];
+    let sql = 'SELECT * FROM tactical_plays WHERE workspace_id = ANY($1)';
+    const params = [tenantIds];
     let paramIdx = 2;
 
     if (club_id) {
@@ -32,9 +34,10 @@ router.get('/', async (req, res) => {
 // GET /api/plays/:id
 router.get('/:id', async (req, res) => {
   try {
+    if (!req.user.can('tactical:view')) return res.status(403).json({ error: 'Sem permissão' });
     const result = await query(
-      'SELECT * FROM tactical_plays WHERE id = $1 AND tenant_id = $2',
-      [req.params.id, req.user.id]
+      'SELECT * FROM tactical_plays WHERE id = $1 AND workspace_id = ANY($2)',
+      [req.params.id, req.user.workspaceIds || []]
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Play not found' });
@@ -49,16 +52,20 @@ router.get('/:id', async (req, res) => {
 // POST /api/plays
 router.post('/', async (req, res) => {
   try {
+    if (!req.user.can('tactical:edit')) return res.status(403).json({ error: 'Sem permissão pra editar quadro tático' });
     const { name, description, field_type, field_view, team_a_color, team_b_color, keyframes, animation_speed, club_id } = req.body;
     if (!name) {
       return res.status(400).json({ error: 'Play name is required' });
     }
 
+    const wsId = club_id ? req.user.writableWorkspaceForClub(club_id) : req.user.workspaceId;
+    if (!wsId) return res.status(403).json({ error: 'Sem permissão de escrita' });
+
     const result = await query(
-      `INSERT INTO tactical_plays (name, description, field_type, field_view, team_a_color, team_b_color, keyframes, animation_speed, club_id, tenant_id)
+      `INSERT INTO tactical_plays (name, description, field_type, field_view, team_a_color, team_b_color, keyframes, animation_speed, club_id, workspace_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
-      [name, description || null, field_type || null, field_view || null, team_a_color || null, team_b_color || null, keyframes ? JSON.stringify(keyframes) : null, animation_speed || null, club_id || null, req.user.id]
+      [name, description || null, field_type || null, field_view || null, team_a_color || null, team_b_color || null, keyframes ? JSON.stringify(keyframes) : null, animation_speed || null, club_id || null, wsId]
     );
 
     res.status(201).json(result.rows[0]);
@@ -71,15 +78,16 @@ router.post('/', async (req, res) => {
 // PUT /api/plays/:id
 router.put('/:id', async (req, res) => {
   try {
+    if (!req.user.can('tactical:edit')) return res.status(403).json({ error: 'Sem permissão' });
     const { name, description, field_type, field_view, team_a_color, team_b_color, keyframes, animation_speed, club_id } = req.body;
 
     const result = await query(
       `UPDATE tactical_plays SET name = $1, description = $2, field_type = $3, field_view = $4,
        team_a_color = $5, team_b_color = $6, keyframes = $7, animation_speed = $8,
        club_id = $9, updated_at = NOW()
-       WHERE id = $10 AND tenant_id = $11
+       WHERE id = $10 AND workspace_id = ANY($11)
        RETURNING *`,
-      [name, description || null, field_type || null, field_view || null, team_a_color || null, team_b_color || null, keyframes ? JSON.stringify(keyframes) : null, animation_speed || null, club_id || null, req.params.id, req.user.id]
+      [name, description || null, field_type || null, field_view || null, team_a_color || null, team_b_color || null, keyframes ? JSON.stringify(keyframes) : null, animation_speed || null, club_id || null, req.params.id, req.user.workspaceIds || []]
     );
 
     if (result.rows.length === 0) {
@@ -96,9 +104,10 @@ router.put('/:id', async (req, res) => {
 // DELETE /api/plays/:id
 router.delete('/:id', async (req, res) => {
   try {
+    if (!req.user.can('tactical:edit')) return res.status(403).json({ error: 'Sem permissão' });
     const result = await query(
-      'DELETE FROM tactical_plays WHERE id = $1 AND tenant_id = $2 RETURNING id',
-      [req.params.id, req.user.id]
+      'DELETE FROM tactical_plays WHERE id = $1 AND workspace_id = ANY($2) RETURNING id',
+      [req.params.id, req.user.workspaceIds || []]
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Play not found' });

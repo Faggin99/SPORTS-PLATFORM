@@ -1,277 +1,289 @@
-import { useState, useEffect } from 'react';
-import { X, Goal, Shield, AlertTriangle, Clock, Plus, Target } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { X, Goal, Shield, AlertTriangle, Clock, Plus, Target, ArrowLeftRight, Square } from 'lucide-react';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useSportConfig } from '../../hooks/useSportConfig';
 import { Button } from '../common/Button';
 
-export function EventModal({ isOpen, onClose, onAdd, matchDuration = 90, editingEvent = null }) {
+// ───────────────────────────────────────────────────────────────
+// Helpers de goal_type — momento do jogo + subtipo de bola parada.
+// Valores armazenados: 'org_off'|'trans_off'|'bp_off_falta'|'bp_off_corner'|'bp_off_lateral'|'bp_off_penalty'
+//                      'org_def'|'trans_def'|'bp_def_falta'|'bp_def_corner'|'bp_def_lateral'|'bp_def_penalty'
+// Compat: aceita também os valores antigos: 'offensive_org','offensive_transition','free_kick','corner','penalty'
+// ───────────────────────────────────────────────────────────────
+function parseGoalType(gt) {
+  if (!gt) return { moment: 'org', bpSubtype: 'falta' };
+  const legacy = {
+    offensive_org:        { moment: 'org',   bpSubtype: 'falta' },
+    offensive_transition: { moment: 'trans', bpSubtype: 'falta' },
+    free_kick:            { moment: 'bp',    bpSubtype: 'falta' },
+    corner:               { moment: 'bp',    bpSubtype: 'corner' },
+    penalty:              { moment: 'bp',    bpSubtype: 'penalty' },
+  };
+  if (legacy[gt]) return legacy[gt];
+  if (gt.startsWith('org_'))   return { moment: 'org',   bpSubtype: 'falta' };
+  if (gt.startsWith('trans_')) return { moment: 'trans', bpSubtype: 'falta' };
+  if (gt.startsWith('bp_')) {
+    const sub = gt.split('_').slice(2).join('_') || 'falta';
+    return { moment: 'bp', bpSubtype: sub };
+  }
+  return { moment: 'org', bpSubtype: 'falta' };
+}
+
+function serializeGoalType(moment, bpSubtype, eventType) {
+  // Sufixo of/def conforme tipo do gol
+  const orient = eventType === 'goal_conceded' ? 'def' : 'off';
+  if (moment === 'org')   return `org_${orient}`;
+  if (moment === 'trans') return `trans_${orient}`;
+  if (moment === 'bp')    return `bp_${orient}_${bpSubtype || 'falta'}`;
+  return `org_${orient}`;
+}
+
+// Subtipos de bola parada por modalidade — substitui a constante antiga.
+// Mapeia os values do sportConfig.bolaParadaSubtypes pros values usados no goal_type.
+const SUBTYPE_KEY_MAP = {
+  falta_frontal: 'falta_frontal',
+  falta_lateral: 'falta_lateral',
+  falta: 'falta',
+  escanteio: 'corner',
+  lateral: 'lateral',
+  penalti: 'penalty',
+  shootout: 'shootout',
+  tiro_livre: 'tiro_livre',
+  falta_acumulada: 'falta_acumulada',
+};
+
+export function EventModal({ isOpen, onClose, onAdd, matchDuration = 90, editingEvent = null, selectedPlayers = [] }) {
   const { colors } = useTheme();
+  const sport = useSportConfig();
+  const BP_SUBTYPES = sport.bolaParadaSubtypes.map(b => ({
+    value: SUBTYPE_KEY_MAP[b.value] || b.value,
+    label: b.label,
+  }));
   const [eventType, setEventType] = useState('goal_scored');
   const [team, setTeam] = useState('own');
-  const [goalType, setGoalType] = useState('offensive_org');
-  const [half, setHalf] = useState(1); // 1 ou 2
-  const [minuteInHalf, setMinuteInHalf] = useState(1); // minuto dentro do tempo
-  const [stoppageTime, setStoppageTime] = useState(0); // acréscimo
+  // Estrutura nova: momento do jogo + (opcional) subtipo de bola parada
+  // momento: 'org' | 'trans' | 'bp'  — orientação derivada do eventType (gol feito=of, tomado=def)
+  const [moment, setMoment] = useState('org');
+  const [bpSubtype, setBpSubtype] = useState('falta'); // só usado se moment === 'bp'
+  const [half, setHalf] = useState(1);
+  const [minuteInHalf, setMinuteInHalf] = useState(1);
+  const [stoppageTime, setStoppageTime] = useState(0);
+  const [playerId, setPlayerId] = useState('');           // protagonista (gol, cartão, quem entrou)
+  const [secondaryPlayerId, setSecondaryPlayerId] = useState(''); // assist OU quem saiu
 
-  // Calcula o minuto total baseado no tempo e acréscimo
+  // half-time math
+  const half1Max = Math.floor(matchDuration / 2);
+  const half2Max = matchDuration - half1Max;
+
   const calculateTotalMinute = () => {
-    if (half === 1) {
-      return stoppageTime > 0 ? 45 + stoppageTime : minuteInHalf;
-    } else {
-      return stoppageTime > 0 ? 90 + stoppageTime : 45 + minuteInHalf;
-    }
+    if (half === 1) return stoppageTime > 0 ? half1Max + stoppageTime : minuteInHalf;
+    return stoppageTime > 0 ? matchDuration + stoppageTime : half1Max + minuteInHalf;
   };
 
-  // Converte minuto total para half/minuteInHalf/stoppageTime
   const parseMinute = (totalMin) => {
-    if (totalMin <= 45) {
-      return { half: 1, minuteInHalf: totalMin, stoppageTime: 0 };
-    } else if (totalMin <= 52) { // 45+1 até 45+7 (acréscimo 1º tempo)
-      return { half: 1, minuteInHalf: 45, stoppageTime: totalMin - 45 };
-    } else if (totalMin <= 90) {
-      return { half: 2, minuteInHalf: totalMin - 45, stoppageTime: 0 };
-    } else { // 90+ (acréscimo 2º tempo)
-      return { half: 2, minuteInHalf: 45, stoppageTime: totalMin - 90 };
-    }
+    if (totalMin <= half1Max) return { half: 1, minuteInHalf: totalMin, stoppageTime: 0 };
+    if (totalMin <= half1Max + 7) return { half: 1, minuteInHalf: half1Max, stoppageTime: totalMin - half1Max };
+    if (totalMin <= matchDuration) return { half: 2, minuteInHalf: totalMin - half1Max, stoppageTime: 0 };
+    return { half: 2, minuteInHalf: half2Max, stoppageTime: totalMin - matchDuration };
   };
 
   useEffect(() => {
-    if (isOpen) {
-      if (editingEvent) {
-        setEventType(editingEvent.event_type);
-        setTeam(editingEvent.team);
-        setGoalType(editingEvent.goal_type || 'offensive_org');
-        const parsed = parseMinute(editingEvent.minute);
-        setHalf(parsed.half);
-        setMinuteInHalf(parsed.minuteInHalf);
-        setStoppageTime(parsed.stoppageTime);
-      } else {
-        setEventType('goal_scored');
-        setTeam('own');
-        setGoalType('offensive_org');
-        setHalf(1);
-        setMinuteInHalf(1);
-        setStoppageTime(0);
-      }
+    if (!isOpen) return;
+    if (editingEvent) {
+      setEventType(editingEvent.event_type || 'goal_scored');
+      setTeam(editingEvent.team || 'own');
+      const parsedGoal = parseGoalType(editingEvent.goal_type);
+      setMoment(parsedGoal.moment);
+      setBpSubtype(parsedGoal.bpSubtype);
+      const parsed = parseMinute(editingEvent.minute || 0);
+      setHalf(parsed.half);
+      setMinuteInHalf(parsed.minuteInHalf);
+      setStoppageTime(parsed.stoppageTime);
+      setPlayerId(editingEvent.player_id || editingEvent.player?.id || '');
+      setSecondaryPlayerId(editingEvent.secondary_player_id || editingEvent.secondary_player?.id || '');
+    } else {
+      setEventType('goal_scored');
+      setTeam('own');
+      setMoment('org');
+      setBpSubtype(BP_SUBTYPES[0]?.value || 'falta');
+      setHalf(1);
+      setMinuteInHalf(1);
+      setStoppageTime(0);
+      setPlayerId('');
+      setSecondaryPlayerId('');
     }
-  }, [isOpen, editingEvent]);
+  }, [isOpen, editingEvent, matchDuration]);
+
+  // Lista de jogadores ordenada por nome — useMemo PRECISA vir antes de qualquer
+  // return condicional pra manter ordem estável dos hooks entre renders.
+  const playersList = useMemo(() => {
+    return (selectedPlayers || [])
+      .map(p => ({
+        id: p.athlete_id || p.athlete?.id,
+        name: p.name || p.athlete?.name || '—',
+        jersey_number: p.jersey_number || p.athlete?.jersey_number,
+      }))
+      .filter(p => p.id)
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }, [selectedPlayers]);
 
   if (!isOpen) return null;
 
+  // Tipos de evento por modalidade.
+  // Comuns: gol feito/tomado, amarelo, vermelho, substituição.
+  // Futsal adiciona: falta acumulada e 6ª falta.
+  const baseEventTypes = [
+    { value: 'goal_scored',  label: 'Gol Feito',     icon: Goal,            color: '#22c55e' },
+    { value: 'goal_conceded',label: 'Gol Tomado',    icon: Shield,          color: '#ef4444' },
+    { value: 'yellow_card',  label: 'Amarelo',       icon: Square,          color: '#eab308' },
+    { value: 'red_card',     label: 'Vermelho',      icon: AlertTriangle,   color: '#dc2626' },
+    { value: 'substitution', label: 'Substituição',  icon: ArrowLeftRight,  color: '#3b82f6' },
+  ];
+  const futsalExtras = [
+    { value: 'accumulated_foul', label: 'Falta Acum.',  icon: AlertTriangle, color: '#f59e0b' },
+    { value: 'sixth_foul',       label: '6ª Falta',     icon: AlertTriangle, color: '#b91c1c' },
+  ];
+  const eventTypes = sport.modality === 'futsal'
+    ? [...baseEventTypes, ...futsalExtras]
+    : baseEventTypes;
+
+  const isGoal = eventType === 'goal_scored' || eventType === 'goal_conceded';
+  const isCard = eventType === 'yellow_card' || eventType === 'red_card';
+  const isSub  = eventType === 'substitution';
+  const showGoalType = isGoal;
+  const showTeamOption = isCard;
+  const forcedTeam = eventType === 'goal_scored' ? 'own'
+                    : eventType === 'goal_conceded' ? 'opponent'
+                    : eventType === 'substitution' ? 'own'
+                    : team;
+
+  // Momentos disponíveis dependem do tipo de gol (ofensivo vs defensivo)
+  const orient = eventType === 'goal_conceded' ? 'def' : 'off';
+  const momentOptions = orient === 'off'
+    ? [
+        { value: 'org',   label: 'Organização Ofensiva',   short: 'Org. Of.' },
+        { value: 'trans', label: 'Transição Ofensiva',     short: 'Trans. Of.' },
+        { value: 'bp',    label: 'Bola Parada Ofensiva',   short: 'BP Of.' },
+      ]
+    : [
+        { value: 'org',   label: 'Organização Defensiva',  short: 'Org. Def.' },
+        { value: 'trans', label: 'Transição Defensiva',    short: 'Trans. Def.' },
+        { value: 'bp',    label: 'Bola Parada Defensiva',  short: 'BP Def.' },
+      ];
+
+  // Pra substituição, restringe selects: quem entrou vs quem saiu (sem o mesmo)
+  const inOptions  = playersList.filter(p => p.id !== secondaryPlayerId);
+  const outOptions = playersList.filter(p => p.id !== playerId);
+
   const handleAdd = () => {
-    const isGoal = eventType === 'goal_scored' || eventType === 'goal_conceded';
+    // Validações simples por tipo
+    if (isCard && !playerId) { alert('Selecione o atleta que recebeu o cartão.'); return; }
+    if (isSub && (!playerId || !secondaryPlayerId)) { alert('Selecione quem entrou e quem saiu.'); return; }
+    if (isGoal && eventType === 'goal_scored' && !playerId) {
+      if (!confirm('Salvar gol sem atribuir ao atleta?')) return;
+    }
     onAdd({
       event_type: eventType,
-      team: team,
-      goal_type: isGoal ? goalType : null,
+      team: forcedTeam,
+      goal_type: isGoal ? serializeGoalType(moment, bpSubtype, eventType) : null,
       minute: calculateTotalMinute(),
+      player_id: playerId || null,
+      secondary_player_id: isGoal || isSub ? (secondaryPlayerId || null) : null,
     });
   };
 
-  // Formata o minuto para exibição (ex: "45+2'" ou "78'")
   const formatMinuteDisplay = () => {
-    if (half === 1) {
-      if (stoppageTime > 0) {
-        return `45+${stoppageTime}'`;
-      }
-      return `${minuteInHalf}'`;
-    } else {
-      if (stoppageTime > 0) {
-        return `90+${stoppageTime}'`;
-      }
-      return `${45 + minuteInHalf}'`;
-    }
+    if (half === 1) return stoppageTime > 0 ? `${half1Max}+${stoppageTime}'` : `${minuteInHalf}'`;
+    return stoppageTime > 0 ? `${matchDuration}+${stoppageTime}'` : `${half1Max + minuteInHalf}'`;
   };
-
-  const eventTypes = [
-    {
-      value: 'goal_scored',
-      label: 'Gol Feito',
-      icon: Goal,
-      color: '#22c55e',
-      bgColor: '#22c55e20',
-    },
-    {
-      value: 'goal_conceded',
-      label: 'Gol Tomado',
-      icon: Shield,
-      color: '#ef4444',
-      bgColor: '#ef444420',
-    },
-    {
-      value: 'red_card',
-      label: 'Expulsão',
-      icon: AlertTriangle,
-      color: '#dc2626',
-      bgColor: '#dc262620',
-    },
-  ];
-
-  const goalTypes = [
-    { value: 'offensive_org', label: 'Org. Ofensiva', shortLabel: 'Org. Of.' },
-    { value: 'offensive_transition', label: 'Transição Of.', shortLabel: 'Trans.' },
-    { value: 'free_kick', label: 'Falta', shortLabel: 'Falta' },
-    { value: 'corner', label: 'Escanteio', shortLabel: 'Escant.' },
-    { value: 'penalty', label: 'Pênalti', shortLabel: 'Pênalti' },
-  ];
-
-  const teamOptions = [
-    { value: 'own', label: 'Nosso Time' },
-    { value: 'opponent', label: 'Adversário' },
-  ];
 
   const overlayStyle = {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    position: 'fixed', inset: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 1100,
-    padding: '1rem',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    zIndex: 1100, padding: '1rem',
   };
-
   const modalStyle = {
-    backgroundColor: colors.background,
-    borderRadius: '0.75rem',
-    width: '100%',
-    maxWidth: '500px',
-    maxHeight: '90vh',
-    overflow: 'auto',
-    boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+    backgroundColor: colors.background, borderRadius: '0.75rem',
+    width: '100%', maxWidth: '500px', maxHeight: '90vh',
+    overflow: 'auto', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
     border: `1px solid ${colors.border}`,
   };
-
   const headerStyle = {
-    padding: '1rem 1.5rem',
-    borderBottom: `1px solid ${colors.border}`,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    padding: '1rem 1.5rem', borderBottom: `1px solid ${colors.border}`,
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
   };
-
-  const contentStyle = {
-    padding: '1.25rem',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '1.25rem',
-  };
-
+  const contentStyle = { padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1.1rem' };
   const footerStyle = {
-    padding: '1rem 1.5rem',
-    borderTop: `1px solid ${colors.border}`,
-    display: 'flex',
-    justifyContent: 'flex-end',
-    gap: '0.5rem',
+    padding: '1rem 1.5rem', borderTop: `1px solid ${colors.border}`,
+    display: 'flex', justifyContent: 'flex-end', gap: '0.5rem',
   };
+  const labelStyle = { display: 'block', marginBottom: '0.4rem', fontSize: '0.85rem', fontWeight: 500, color: colors.text };
 
-  const labelStyle = {
-    display: 'block',
-    marginBottom: '0.5rem',
-    fontSize: '0.875rem',
-    fontWeight: '500',
-    color: colors.text,
-  };
-
-  const eventTypeStyle = (type, isSelected) => ({
-    display: 'flex',
-    alignItems: 'center',
-    gap: '0.5rem',
-    padding: '0.75rem',
-    borderRadius: '0.5rem',
+  const eventTypeBtn = (type, isSelected) => ({
+    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+    gap: '0.3rem',
+    padding: '0.6rem 0.4rem',
+    borderRadius: '0.45rem',
     border: `2px solid ${isSelected ? type.color : colors.border}`,
-    backgroundColor: isSelected ? type.bgColor : colors.surface,
-    cursor: 'pointer',
-    transition: 'all 0.15s ease',
-    flex: 1,
-    justifyContent: 'center',
+    backgroundColor: isSelected ? `${type.color}20` : colors.surface,
+    cursor: 'pointer', transition: 'all 0.15s ease',
+    flex: 1, minWidth: 0,
   });
 
   const goalTypeBtnStyle = (isSelected) => ({
-    padding: '0.5rem 0.75rem',
-    borderRadius: '0.375rem',
+    padding: '0.45rem 0.65rem', borderRadius: '0.375rem',
     border: `2px solid ${isSelected ? colors.primary : colors.border}`,
     backgroundColor: isSelected ? `${colors.primary}15` : colors.surface,
     color: isSelected ? colors.primary : colors.text,
-    fontWeight: '500',
-    fontSize: '0.8rem',
-    cursor: 'pointer',
-    transition: 'all 0.15s ease',
-    flex: '1 1 auto',
-    textAlign: 'center',
-    minWidth: '70px',
+    fontWeight: 500, fontSize: '0.78rem',
+    cursor: 'pointer', transition: 'all 0.15s ease',
+    flex: '1 1 auto', textAlign: 'center', minWidth: 70,
   });
 
   const teamBtnStyle = (isSelected) => ({
-    flex: 1,
-    padding: '0.75rem',
-    borderRadius: '0.5rem',
+    flex: 1, padding: '0.65rem', borderRadius: '0.5rem',
     border: `2px solid ${isSelected ? colors.primary : colors.border}`,
     backgroundColor: isSelected ? `${colors.primary}15` : colors.surface,
     color: isSelected ? colors.primary : colors.text,
-    fontWeight: '500',
-    cursor: 'pointer',
-    transition: 'all 0.15s ease',
+    fontWeight: 500, cursor: 'pointer', transition: 'all 0.15s ease',
   });
 
-  // Mostrar opção de time apenas para expulsão
-  const showTeamOption = eventType === 'red_card';
-  // Mostrar tipo de gol para gols feitos ou tomados
-  const showGoalType = eventType === 'goal_scored' || eventType === 'goal_conceded';
-
-  const getGoalTypeLabel = (value) => {
-    const type = goalTypes.find(t => t.value === value);
-    return type ? type.label : '';
+  const selectStyle = {
+    width: '100%', padding: '0.55rem 0.7rem',
+    borderRadius: '0.4rem',
+    border: `1px solid ${colors.border}`,
+    backgroundColor: colors.surface, color: colors.text,
+    fontSize: '0.875rem', outline: 'none',
   };
 
   return (
     <div style={overlayStyle} onClick={onClose}>
       <div style={modalStyle} onClick={(e) => e.stopPropagation()}>
-        {/* Header */}
         <div style={headerStyle}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <Plus size={22} style={{ color: colors.primary }} />
-            <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '600', color: colors.text }}>
+            <Plus size={20} style={{ color: colors.primary }} />
+            <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 600, color: colors.text }}>
               {editingEvent ? 'Editar Evento' : 'Adicionar Evento'}
             </h3>
           </div>
-          <button
-            onClick={onClose}
-            style={{
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              padding: '0.25rem',
-              color: colors.textSecondary,
-            }}
-          >
-            <X size={22} />
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0.25rem', color: colors.textSecondary }}>
+            <X size={20} />
           </button>
         </div>
 
-        {/* Content */}
         <div style={contentStyle}>
           {/* Tipo de Evento */}
           <div>
             <label style={labelStyle}>Tipo de Evento</label>
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '0.4rem' }}>
               {eventTypes.map((type) => {
                 const Icon = type.icon;
                 const isSelected = eventType === type.value;
                 return (
-                  <div
-                    key={type.value}
-                    style={eventTypeStyle(type, isSelected)}
-                    onClick={() => setEventType(type.value)}
-                  >
+                  <div key={type.value} style={eventTypeBtn(type, isSelected)} onClick={() => { setEventType(type.value); setPlayerId(''); setSecondaryPlayerId(''); }}>
                     <Icon size={18} color={isSelected ? type.color : colors.textSecondary} />
-                    <span style={{
-                      fontSize: '0.75rem',
-                      fontWeight: '500',
-                      color: isSelected ? type.color : colors.text,
-                    }}>
+                    <span style={{ fontSize: '0.66rem', fontWeight: 500, color: isSelected ? type.color : colors.text, textAlign: 'center', lineHeight: 1.1 }}>
                       {type.label}
                     </span>
                   </div>
@@ -280,178 +292,128 @@ export function EventModal({ isOpen, onClose, onAdd, matchDuration = 90, editing
             </div>
           </div>
 
-          {/* Tipo de Gol (para gols feitos ou tomados) */}
+          {/* Momento do jogo (depende se gol feito ou tomado) */}
           {showGoalType && (
             <div>
               <label style={labelStyle}>
-                <Target size={16} style={{ display: 'inline', marginRight: '0.5rem', verticalAlign: 'middle' }} />
-                Como foi o gol?
+                <Target size={15} style={{ display: 'inline', marginRight: '0.4rem', verticalAlign: 'middle' }} />
+                {eventType === 'goal_conceded' ? 'Em qual momento sofremos?' : 'Em qual momento marcamos?'}
               </label>
-              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                {goalTypes.map((type) => (
+              <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                {momentOptions.map((m) => (
                   <button
-                    key={type.value}
-                    style={goalTypeBtnStyle(goalType === type.value)}
-                    onClick={() => setGoalType(type.value)}
+                    key={m.value}
+                    style={goalTypeBtnStyle(moment === m.value)}
+                    onClick={() => setMoment(m.value)}
+                    title={m.label}
                   >
-                    {type.shortLabel}
+                    {m.short}
                   </button>
                 ))}
+              </div>
+              {/* Subtipo de Bola Parada */}
+              {moment === 'bp' && (
+                <div style={{ marginTop: '0.65rem' }}>
+                  <div style={{ fontSize: '0.72rem', color: colors.textSecondary, marginBottom: '0.35rem' }}>
+                    Tipo de bola parada
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                    {BP_SUBTYPES.map((s) => (
+                      <button
+                        key={s.value}
+                        style={goalTypeBtnStyle(bpSubtype === s.value)}
+                        onClick={() => setBpSubtype(s.value)}
+                      >
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Time (cartões) */}
+          {showTeamOption && (
+            <div>
+              <label style={labelStyle}>De qual time?</label>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button style={teamBtnStyle(team === 'own')} onClick={() => setTeam('own')}>Nosso Time</button>
+                <button style={teamBtnStyle(team === 'opponent')} onClick={() => setTeam('opponent')}>Adversário</button>
               </div>
             </div>
           )}
 
-          {/* Time (apenas para expulsão) */}
-          {showTeamOption && (
+          {/* Jogador — gol nosso, cartão nosso (não pra adversário), substituição */}
+          {((eventType === 'goal_scored') || (isCard && team === 'own') || isSub) && (
             <div>
-              <label style={labelStyle}>De qual time?</label>
-              <div style={{ display: 'flex', gap: '0.75rem' }}>
-                {teamOptions.map((option) => (
-                  <button
-                    key={option.value}
-                    style={teamBtnStyle(team === option.value)}
-                    onClick={() => setTeam(option.value)}
-                  >
-                    {option.label}
-                  </button>
+              <label style={labelStyle}>{isSub ? 'Quem entrou' : 'Atleta'}</label>
+              <select style={selectStyle} value={playerId} onChange={(e) => setPlayerId(e.target.value)}>
+                <option value="">{playersList.length ? 'Selecione um atleta…' : 'Nenhum jogador na escalação'}</option>
+                {inOptions.map(p => (
+                  <option key={p.id} value={p.id}>{p.jersey_number ? `#${p.jersey_number} — ` : ''}{p.name}</option>
                 ))}
-              </div>
+              </select>
+            </div>
+          )}
+
+          {/* Assistência (gol) ou Quem saiu (substituição) */}
+          {(eventType === 'goal_scored' || isSub) && (
+            <div>
+              <label style={labelStyle}>{isSub ? 'Quem saiu' : 'Assistência (opcional)'}</label>
+              <select style={selectStyle} value={secondaryPlayerId} onChange={(e) => setSecondaryPlayerId(e.target.value)}>
+                <option value="">{isSub ? 'Selecione quem saiu…' : 'Sem assistência'}</option>
+                {outOptions.map(p => (
+                  <option key={p.id} value={p.id}>{p.jersey_number ? `#${p.jersey_number} — ` : ''}{p.name}</option>
+                ))}
+              </select>
             </div>
           )}
 
           {/* Tempo do Jogo */}
           <div>
             <label style={labelStyle}>
-              <Clock size={16} style={{ display: 'inline', marginRight: '0.5rem', verticalAlign: 'middle' }} />
+              <Clock size={15} style={{ display: 'inline', marginRight: '0.4rem', verticalAlign: 'middle' }} />
               Tempo do Jogo
             </label>
-            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem' }}>
-              <button
-                style={{
-                  flex: 1,
-                  padding: '0.6rem',
-                  borderRadius: '0.375rem',
-                  border: `2px solid ${half === 1 ? colors.primary : colors.border}`,
-                  backgroundColor: half === 1 ? `${colors.primary}15` : colors.surface,
-                  color: half === 1 ? colors.primary : colors.text,
-                  fontWeight: '600',
-                  fontSize: '0.85rem',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                }}
-                onClick={() => {
-                  setHalf(1);
-                  setStoppageTime(0);
-                  if (minuteInHalf > 45) setMinuteInHalf(45);
-                }}
-              >
-                1º Tempo
-              </button>
-              <button
-                style={{
-                  flex: 1,
-                  padding: '0.6rem',
-                  borderRadius: '0.375rem',
-                  border: `2px solid ${half === 2 ? colors.primary : colors.border}`,
-                  backgroundColor: half === 2 ? `${colors.primary}15` : colors.surface,
-                  color: half === 2 ? colors.primary : colors.text,
-                  fontWeight: '600',
-                  fontSize: '0.85rem',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                }}
-                onClick={() => {
-                  setHalf(2);
-                  setStoppageTime(0);
-                  if (minuteInHalf > 45) setMinuteInHalf(45);
-                }}
-              >
-                2º Tempo
-              </button>
+            <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.6rem' }}>
+              <button style={teamBtnStyle(half === 1)} onClick={() => { setHalf(1); setStoppageTime(0); if (minuteInHalf > half1Max) setMinuteInHalf(half1Max); }}>1º Tempo</button>
+              <button style={teamBtnStyle(half === 2)} onClick={() => { setHalf(2); setStoppageTime(0); if (minuteInHalf > half2Max) setMinuteInHalf(half2Max); }}>2º Tempo</button>
             </div>
 
-            {/* Minuto dentro do tempo */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: '0.75rem', color: colors.textSecondary, marginBottom: '0.35rem' }}>
-                  Minuto ({half === 1 ? '0-45' : '46-90'})
+                <div style={{ fontSize: '0.72rem', color: colors.textSecondary, marginBottom: '0.3rem' }}>
+                  Minuto ({half === 1 ? `0-${half1Max}` : `${half1Max + 1}-${matchDuration}`})
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   <input
-                    type="range"
-                    min="1"
-                    max="45"
-                    value={minuteInHalf}
-                    onChange={(e) => {
-                      setMinuteInHalf(parseInt(e.target.value));
-                      setStoppageTime(0);
-                    }}
+                    type="range" min="1" max={half === 1 ? half1Max : half2Max} value={minuteInHalf}
+                    onChange={(e) => { setMinuteInHalf(parseInt(e.target.value, 10) || 1); setStoppageTime(0); }}
                     style={{
-                      flex: 1,
-                      height: '6px',
-                      borderRadius: '3px',
-                      appearance: 'none',
-                      background: `linear-gradient(to right, ${colors.primary} 0%, ${colors.primary} ${(minuteInHalf / 45) * 100}%, ${colors.border} ${(minuteInHalf / 45) * 100}%, ${colors.border} 100%)`,
-                      cursor: 'pointer',
+                      flex: 1, height: 6, borderRadius: 3, appearance: 'none', cursor: 'pointer',
+                      background: `linear-gradient(to right, ${colors.primary} 0%, ${colors.primary} ${(minuteInHalf / (half === 1 ? half1Max : half2Max)) * 100}%, ${colors.border} ${(minuteInHalf / (half === 1 ? half1Max : half2Max)) * 100}%, ${colors.border} 100%)`,
                     }}
                   />
                   <input
-                    type="number"
-                    min="1"
-                    max="45"
-                    value={minuteInHalf}
-                    onChange={(e) => {
-                      const val = parseInt(e.target.value) || 1;
-                      setMinuteInHalf(Math.min(Math.max(val, 1), 45));
-                      setStoppageTime(0);
-                    }}
-                    style={{
-                      width: '45px',
-                      padding: '0.35rem',
-                      borderRadius: '0.25rem',
-                      border: `1px solid ${colors.border}`,
-                      backgroundColor: colors.surface,
-                      textAlign: 'center',
-                      fontSize: '0.9rem',
-                      fontWeight: '600',
-                      color: colors.text,
-                      outline: 'none',
-                    }}
+                    type="number" min="1" max={half === 1 ? half1Max : half2Max} value={minuteInHalf}
+                    onChange={(e) => { const v = parseInt(e.target.value, 10) || 1; setMinuteInHalf(Math.min(Math.max(v, 1), half === 1 ? half1Max : half2Max)); setStoppageTime(0); }}
+                    style={{ width: 45, padding: '0.3rem', borderRadius: '0.25rem', border: `1px solid ${colors.border}`, backgroundColor: colors.surface, textAlign: 'center', fontSize: '0.85rem', fontWeight: 600, color: colors.text, outline: 'none' }}
                   />
                 </div>
               </div>
-
-              {/* Acréscimo */}
-              <div style={{ width: '90px' }}>
-                <div style={{ fontSize: '0.75rem', color: colors.textSecondary, marginBottom: '0.35rem' }}>
-                  Acréscimo
-                </div>
+              <div style={{ width: 90 }}>
+                <div style={{ fontSize: '0.72rem', color: colors.textSecondary, marginBottom: '0.3rem' }}>Acréscimo</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                  <span style={{ fontSize: '0.9rem', color: colors.text, fontWeight: '500' }}>+</span>
+                  <span style={{ fontSize: '0.85rem', color: colors.text, fontWeight: 500 }}>+</span>
                   <input
-                    type="number"
-                    min="0"
-                    max="15"
-                    value={stoppageTime}
+                    type="number" min="0" max="15" value={stoppageTime}
                     onChange={(e) => {
-                      const val = parseInt(e.target.value) || 0;
-                      setStoppageTime(Math.min(Math.max(val, 0), 15));
-                      if (val > 0) {
-                        setMinuteInHalf(45);
-                      }
+                      const v = parseInt(e.target.value, 10) || 0;
+                      setStoppageTime(Math.min(Math.max(v, 0), 15));
+                      if (v > 0) setMinuteInHalf(half === 1 ? half1Max : half2Max);
                     }}
-                    style={{
-                      width: '45px',
-                      padding: '0.35rem',
-                      borderRadius: '0.25rem',
-                      border: `1px solid ${stoppageTime > 0 ? colors.primary : colors.border}`,
-                      backgroundColor: stoppageTime > 0 ? `${colors.primary}10` : colors.surface,
-                      textAlign: 'center',
-                      fontSize: '0.9rem',
-                      fontWeight: '600',
-                      color: stoppageTime > 0 ? colors.primary : colors.text,
-                      outline: 'none',
-                    }}
+                    style={{ width: 45, padding: '0.3rem', borderRadius: '0.25rem', border: `1px solid ${stoppageTime > 0 ? colors.primary : colors.border}`, backgroundColor: stoppageTime > 0 ? `${colors.primary}10` : colors.surface, textAlign: 'center', fontSize: '0.85rem', fontWeight: 600, color: stoppageTime > 0 ? colors.primary : colors.text, outline: 'none' }}
                   />
                 </div>
               </div>
@@ -459,31 +421,30 @@ export function EventModal({ isOpen, onClose, onAdd, matchDuration = 90, editing
           </div>
 
           {/* Preview */}
-          <div style={{
-            padding: '1rem',
-            backgroundColor: colors.surface,
-            borderRadius: '0.5rem',
-            border: `1px dashed ${colors.border}`,
-          }}>
-            <div style={{ fontSize: '0.75rem', color: colors.textSecondary, marginBottom: '0.5rem' }}>
-              Resumo do evento:
-            </div>
-            <div style={{ fontSize: '0.9rem', color: colors.text }}>
-              {eventType === 'goal_scored' && `Gol marcado aos ${formatMinuteDisplay()} (${getGoalTypeLabel(goalType)})`}
-              {eventType === 'goal_conceded' && `Gol sofrido aos ${formatMinuteDisplay()} (${getGoalTypeLabel(goalType)})`}
-              {eventType === 'red_card' && `Expulsão (${team === 'own' ? 'nosso time' : 'adversário'}) aos ${formatMinuteDisplay()}`}
+          <div style={{ padding: '0.85rem 1rem', backgroundColor: colors.surface, borderRadius: '0.45rem', border: `1px dashed ${colors.border}` }}>
+            <div style={{ fontSize: '0.72rem', color: colors.textSecondary, marginBottom: '0.35rem' }}>Resumo:</div>
+            <div style={{ fontSize: '0.875rem', color: colors.text, lineHeight: 1.4 }}>
+              {(() => {
+                const min = formatMinuteDisplay();
+                const playerName = playersList.find(p => p.id === playerId)?.name;
+                const secondName = playersList.find(p => p.id === secondaryPlayerId)?.name;
+                const momentLabel = momentOptions.find(m => m.value === moment)?.label || '';
+                const bpLabel = BP_SUBTYPES.find(s => s.value === bpSubtype)?.label || '';
+                const momentText = isGoal ? ` em ${momentLabel}${moment === 'bp' ? ` · ${bpLabel}` : ''}` : '';
+                if (eventType === 'goal_scored')   return `Gol ${playerName ? `de ${playerName}` : ''}${secondName ? ` (assist. ${secondName})` : ''}${momentText} aos ${min}`;
+                if (eventType === 'goal_conceded') return `Gol sofrido${momentText} aos ${min}`;
+                if (eventType === 'yellow_card')   return `Amarelo ${team === 'own' ? `${playerName ? `pra ${playerName}` : '(nosso time)'}` : '(adversário)'} aos ${min}`;
+                if (eventType === 'red_card')      return `Vermelho ${team === 'own' ? `${playerName ? `pra ${playerName}` : '(nosso time)'}` : '(adversário)'} aos ${min}`;
+                if (eventType === 'substitution')  return `Substituição: ${secondName || '—'} sai, ${playerName || '—'} entra aos ${min}`;
+                return '';
+              })()}
             </div>
           </div>
         </div>
 
-        {/* Footer */}
         <div style={footerStyle}>
-          <Button variant="secondary" onClick={onClose}>
-            Cancelar
-          </Button>
-          <Button onClick={handleAdd}>
-            {editingEvent ? 'Salvar' : 'Adicionar'}
-          </Button>
+          <Button variant="secondary" onClick={onClose}>Cancelar</Button>
+          <Button onClick={handleAdd}>{editingEvent ? 'Salvar' : 'Adicionar'}</Button>
         </div>
       </div>
     </div>

@@ -96,15 +96,70 @@ export const trainingService = {
     return result;
   },
 
-  async getStages() {
-    const cacheKey = 'training_stages';
+  async createContent(payload) {
+    const data = await api.post('/contents', payload);
+    cache.clearPattern?.('training_contents');
+    return { data };
+  },
+
+  async updateContent(id, payload) {
+    const data = await api.put(`/contents/${id}`, payload);
+    cache.clearPattern?.('training_contents');
+    return { data };
+  },
+
+  async deleteContent(id) {
+    const data = await api.delete(`/contents/${id}`);
+    cache.clearPattern?.('training_contents');
+    // Subconteúdos do content deletado caíram com cascade
+    cache.clearPattern?.('training_stages');
+    return { data };
+  },
+
+  async toggleContentActive(id, active) {
+    const data = await api.patch(`/contents/${id}/active`, { active });
+    cache.clearPattern?.('training_contents');
+    return { data };
+  },
+
+  async getStages(contentId = null, modality = null) {
+    // Cache inclui modality pra não vazar submomentos de modalidade errada entre trocas de clube
+    const cacheKey = `training_stages_${contentId || 'all'}_${modality || 'any'}`;
     const cached = cache.get(cacheKey);
     if (cached) return cached;
 
-    const data = await api.get('/stages');
+    const params = new URLSearchParams();
+    if (contentId) params.append('content_id', contentId);
+    if (modality)  params.append('modality', modality);
+    const qs = params.toString() ? `?${params}` : '';
+    const data = await api.get(`/stages${qs}`);
     const result = { data: data || [] };
     cache.set(cacheKey, result, 300000);
     return result;
+  },
+
+  async createStage(payload) {
+    const data = await api.post('/stages', payload);
+    cache.clearPattern?.('training_stages');
+    return { data };
+  },
+
+  async updateStage(id, payload) {
+    const data = await api.put(`/stages/${id}`, payload);
+    cache.clearPattern?.('training_stages');
+    return { data };
+  },
+
+  async deleteStage(id) {
+    const data = await api.delete(`/stages/${id}`);
+    cache.clearPattern?.('training_stages');
+    return { data };
+  },
+
+  async toggleStageActive(id, active) {
+    const data = await api.patch(`/stages/${id}/active`, { active });
+    cache.clearPattern?.('training_stages');
+    return { data };
   },
 
   async getTitles(includeArchived = false) {

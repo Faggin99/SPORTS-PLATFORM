@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect } from 'react';
 import { clubService } from '../services/clubService';
 import { api } from '../services/api';
 import { useAuth } from './AuthContext';
+import { useTheme } from './ThemeContext';
 
 const ClubContext = createContext();
 
@@ -9,7 +10,14 @@ export function ClubProvider({ children }) {
   const [clubs, setClubs] = useState([]);
   const [selectedClub, setSelectedClub] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const { isAuthenticated } = useAuth();
+  const { setClubPrimary } = useTheme();
+
+  // Sempre que o clube ativo mudar (ou sua cor primária), injeta a cor no tema.
+  useEffect(() => {
+    setClubPrimary(selectedClub?.primary_color || null);
+  }, [selectedClub?.primary_color, setClubPrimary]);
 
   // Load clubs when auth state changes
   useEffect(() => {
@@ -22,9 +30,22 @@ export function ClubProvider({ children }) {
     }
   }, [isAuthenticated]);
 
+  // Recarrega quando a workspace ativa muda (Slack-style switch)
+  useEffect(() => {
+    function handler() {
+      // Limpa club selecionado pra evitar mostrar de outra workspace por um instante
+      setSelectedClub(null);
+      localStorage.removeItem('selectedClubId');
+      if (isAuthenticated) loadClubs();
+    }
+    window.addEventListener('workspace-changed', handler);
+    return () => window.removeEventListener('workspace-changed', handler);
+  }, [isAuthenticated]);
+
   async function loadClubs() {
     try {
       setLoading(true);
+      setLoadError(null);
       const data = await clubService.getAll();
       setClubs(data);
 
@@ -37,6 +58,8 @@ export function ClubProvider({ children }) {
       }
     } catch (error) {
       console.error('Error loading clubs:', error);
+      // Captura erros de assinatura (402) pra evitar mostrar modal de onboarding indevidamente
+      setLoadError(error?.statusCode === 402 || error?.code ? { kind: 'subscription', code: error.code } : { kind: 'unknown' });
     } finally {
       setLoading(false);
     }
@@ -59,7 +82,7 @@ export function ClubProvider({ children }) {
         throw new Error('Já existe um clube com este nome');
       }
 
-      const newClub = await clubService.create(clubData);
+      const newClub = await clubService.create({ ...clubData, modality: clubData.modality });
 
       // If this is the first club, migrate old data
       const isFirstClub = clubs.length === 0;
@@ -148,6 +171,7 @@ export function ClubProvider({ children }) {
     clubs,
     selectedClub,
     loading,
+    loadError,
     selectClub,
     createClub,
     updateClub,
