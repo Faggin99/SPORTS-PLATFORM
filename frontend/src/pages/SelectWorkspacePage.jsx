@@ -125,7 +125,7 @@ export function SelectWorkspacePage() {
         }
       >
         <p style={{ color: colors.textSecondary, fontSize: '0.875rem', marginTop: 0 }}>
-          Cada conta nova começa com <strong>30 dias grátis do Clube</strong>. Você pode trocar entre suas contas a qualquer momento.
+          Cada conta nova começa com <strong>30 dias grátis no plano Pro</strong>. Você pode trocar entre suas contas a qualquer momento.
         </p>
         <Input
           label="Nome da conta"

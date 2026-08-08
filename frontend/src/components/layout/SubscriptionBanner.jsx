@@ -43,7 +43,7 @@ export function SubscriptionBanner() {
       message = `Você está em período de avaliação — restam ${daysLeft} dias.`;
       level = 'warning';
     } else {
-      message = `Você está testando o plano Clube — restam ${daysLeft} dias grátis.`;
+      message = `Você está no período de avaliação — restam ${daysLeft} dias grátis.`;
       level = 'info';
     }
   }

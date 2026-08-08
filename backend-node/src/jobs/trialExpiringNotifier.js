@@ -30,7 +30,7 @@ async function runTrialExpiringNotifier() {
   try {
     await ensureTrialNotifiedAtColumn();
 
-    // Alvo: subs em trial que acabam entre 2 e 3 dias, do plano Clube (padrão do trial).
+    // Alvo: subs em trial que acabam entre 2 e 3 dias (independente do plano).
     // Envia EXATAMENTE UMA vez por trial: trial_notified_at IS NULL. A janela
     // de aviso tem 24h de largura (2–3 dias antes do fim) e o job roda de hora
     // em hora; a guarda antiga (< NOW()-20h) era menor que a janela, então o

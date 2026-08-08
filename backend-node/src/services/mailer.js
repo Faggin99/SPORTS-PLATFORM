@@ -74,15 +74,15 @@ async function sendPasswordResetEmail({ to, name, resetUrl }) {
   return sendMail({ to, subject, html, text });
 }
 
-// Boas-vindas — disparado logo após signup. Menciona os 30d do plano Clube grátis.
+// Boas-vindas — disparado logo após signup. Menciona os 30d de trial (plano Pro).
 async function sendWelcomeEmail({ to, name, trialDaysLeft, appUrl }) {
   const days = Number.isFinite(trialDaysLeft) ? trialDaysLeft : 30;
   const url = appUrl || 'https://app.tactiplan.faggin.com.br';
   const subject = `Bem-vindo ao TactiPlan, ${name || 'treinador'}!`;
-  const text = `Olá, ${name || ''}.\n\nSua conta no TactiPlan está pronta. Você já começa com ${days} dias grátis do plano Clube — acesso completo a treinos, jogos, plantel e o quadro tático.\n\nComece agora: ${url}\n\nBons treinos!\n— TactiPlan`;
+  const text = `Olá, ${name || ''}.\n\nSua conta no TactiPlan está pronta. Você já começa com ${days} dias grátis pra testar o TactiPlan — treinos, jogos, plantel e o quadro tático.\n\nComece agora: ${url}\n\nBons treinos!\n— TactiPlan`;
   const bodyHtml = `
     <p style="line-height: 1.5;">Olá, <strong>${name || ''}</strong>.</p>
-    <p style="line-height: 1.5;">Sua conta está pronta. Você já começa com <strong>${days} dias grátis do plano Clube</strong> — o pacote completo: treinos semanais, gestão de jogos, plantel e o quadro tático.</p>
+    <p style="line-height: 1.5;">Sua conta está pronta. Você já começa com <strong>${days} dias grátis</strong> pra testar tudo: treinos semanais, gestão de jogos, plantel e o quadro tático.</p>
     ${button(url, 'Abrir o TactiPlan')}
     <p style="line-height: 1.5; color: #64748b; font-size: 13px;">Qualquer dúvida, é só responder este e-mail.</p>
   `;
@@ -95,10 +95,10 @@ async function sendTrialExpiringEmail({ to, name, daysLeft, appUrl, billingUrl }
   const url = appUrl || 'https://app.tactiplan.faggin.com.br';
   const bUrl = billingUrl || `${url.replace(/\/$/, '')}/#/billing`;
   const subject = `Seu teste grátis acaba em ${days} ${days === 1 ? 'dia' : 'dias'} — TactiPlan`;
-  const text = `Olá, ${name || ''}.\n\nSeu teste grátis do plano Clube termina em ${days} ${days === 1 ? 'dia' : 'dias'}. Pra continuar sem interrupção, ative a assinatura:\n\n${bUrl}\n\nSe preferir, é só ignorar — a conta segue disponível, mas os recursos pagos param até você assinar.\n\n— TactiPlan`;
+  const text = `Olá, ${name || ''}.\n\nSeu período de avaliação termina em ${days} ${days === 1 ? 'dia' : 'dias'}. Pra continuar sem interrupção, ative a assinatura:\n\n${bUrl}\n\nSe preferir, é só ignorar — a conta segue disponível, mas os recursos pagos param até você assinar.\n\n— TactiPlan`;
   const bodyHtml = `
     <p style="line-height: 1.5;">Olá, <strong>${name || ''}</strong>.</p>
-    <p style="line-height: 1.5;">Seu teste grátis do <strong>plano Clube</strong> termina em <strong>${days} ${days === 1 ? 'dia' : 'dias'}</strong>. Pra continuar com tudo funcionando (treinos, jogos, plantel, quadro tático), ative sua assinatura:</p>
+    <p style="line-height: 1.5;">Seu período de avaliação termina em <strong>${days} ${days === 1 ? 'dia' : 'dias'}</strong>. Pra continuar com tudo funcionando (treinos, jogos, plantel, quadro tático), ative sua assinatura:</p>
     ${button(bUrl, 'Ativar assinatura')}
     <p style="line-height: 1.5; color: #64748b; font-size: 13px;">Se preferir, é só ignorar — a conta segue disponível, mas os recursos pagos ficam bloqueados até você assinar.</p>
   `;

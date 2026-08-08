@@ -66,11 +66,11 @@ router.post('/', async (req, res) => {
     );
     const workspace = wsRes.rows[0];
 
-    // Trial Clube de 30d pra nova workspace (mesma política do cadastro)
+    // Trial Pro de 30d pra nova workspace (mesma política do cadastro).
     const trialEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
     await query(
       `INSERT INTO subscriptions (user_id, workspace_id, plan_id, status, trial_ends_at, current_period_start, current_period_end)
-       VALUES ($1, $2, 'clube', 'trialing', $3, now(), $3)`,
+       VALUES ($1, $2, 'pro', 'trialing', $3, now(), $3)`,
       [req.user.id, workspace.id, trialEnd]
     );
 

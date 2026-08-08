@@ -65,7 +65,8 @@ router.post('/register', registerLimiter, [
     // Cria assinatura linkada à workspace:
     // - admin: nada (acesso ilimitado via role)
     // - lifetime list: assinatura vitalícia
-    // - demais: trial de 30 dias no plano Clube (cobre tudo, vira gatilho de upsell)
+    // - demais: trial de 30 dias no plano Pro (padrão). O Clube só é liberado
+    //   via pagamento (checkout) ou concessão manual pelo admin (change-plan).
     if (role !== 'admin') {
       if (isLifetime(email)) {
         await query(
@@ -77,7 +78,7 @@ router.post('/register', registerLimiter, [
         const trialEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
         await query(
           `INSERT INTO subscriptions (user_id, workspace_id, plan_id, status, trial_ends_at, current_period_start, current_period_end)
-           VALUES ($1, $2, 'clube', 'trialing', $3, now(), $3)`,
+           VALUES ($1, $2, 'pro', 'trialing', $3, now(), $3)`,
           [user.id, workspaceId, trialEnd]
         );
       }
@@ -491,7 +492,7 @@ router.post('/google', loginLimiter, async (req, res) => {
           const trialEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
           await query(
             `INSERT INTO subscriptions (user_id, workspace_id, plan_id, status, trial_ends_at, current_period_start, current_period_end)
-             VALUES ($1, $2, 'clube', 'trialing', $3, now(), $3)`,
+             VALUES ($1, $2, 'pro', 'trialing', $3, now(), $3)`,
             [user.id, workspaceId, trialEnd]
           );
         }

@@ -263,7 +263,7 @@ function CurrentSubscription({ sub, colors, onCancel }) {
 
       {isTrial && trialDays > 0 && (
         <div style={{ marginTop: 16, padding: 12, backgroundColor: '#f59e0b15', borderRadius: 8, border: '1px solid #f59e0b40', fontSize: '0.8125rem', color: colors.text }}>
-          <strong>Você está testando o plano Clube</strong> — após {trialDays} dia{trialDays === 1 ? '' : 's'} é necessário escolher um plano (Pro ou Clube) pra continuar.
+          <strong>Você está no período de avaliação</strong> — após {trialDays} dia{trialDays === 1 ? '' : 's'} é necessário escolher um plano (Pro ou Clube) pra continuar.
         </div>
       )}
 

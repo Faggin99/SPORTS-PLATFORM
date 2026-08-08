@@ -219,10 +219,11 @@ router.post('/users/:id/extend-trial', async (req, res) => {
       return res.json({ ok: true, action: 'extended', subscription: r.rows[0] });
     }
 
-    // Sem trial ativo — cria novo no plano Clube (default do trial atual)
+    // Sem trial ativo — cria novo no plano Pro (default do trial). Se quiser
+    // conceder Clube, use "Trocar plano" (change-plan) depois.
     const r = await query(`
       INSERT INTO subscriptions (user_id, plan_id, status, trial_ends_at, current_period_start, current_period_end, metadata)
-      VALUES ($1, 'clube', 'trialing', NOW() + ($2 || ' days')::interval, NOW(), NOW() + ($2 || ' days')::interval, '{"grantedBy":"admin"}'::jsonb)
+      VALUES ($1, 'pro', 'trialing', NOW() + ($2 || ' days')::interval, NOW(), NOW() + ($2 || ' days')::interval, '{"grantedBy":"admin"}'::jsonb)
       RETURNING *
     `, [id, days]);
     res.json({ ok: true, action: 'created', subscription: r.rows[0] });
