@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Foreground-only version for Android adaptive icon.
+     Canvas is 1024x1024; content is scaled down and centered so the visible
+     circle (66% inner safe area) contains the T. Android layers this over a
+     background color (splashBackground / #0f172a). -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <g transform="translate(170, 170) scale(0.668)">
+    <rect x="438" y="220" width="148" height="660" rx="20" fill="#ffffff"/>
+    <rect x="196" y="220" width="632" height="140" rx="16" fill="#ffffff"/>
+    <path d="M 828 220 L 828 360 L 940 290 Z" fill="#c8ff00"/>
+  </g>
+</svg>
