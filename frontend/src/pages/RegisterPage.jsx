@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Mail, Lock, User, Phone } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
@@ -14,6 +14,15 @@ export function RegisterPage() {
   const [accept, setAccept] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [highlightAccept, setHighlightAccept] = useState(false);
+  const acceptRef = useRef(null);
+
+  function flashAcceptRequirement() {
+    setHighlightAccept(true);
+    acceptRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // Remove o destaque depois de alguns segundos
+    setTimeout(() => setHighlightAccept(false), 2500);
+  }
 
   function update(k, v) { setForm((f) => ({ ...f, [k]: v })); }
 
@@ -72,10 +81,46 @@ export function RegisterPage() {
           Comece a planejar seus treinos em minutos.
         </p>
 
+        {/* Aceite dos termos — obrigatório antes de qualquer fluxo de cadastro (Google ou email).
+            Fica acima dos botões pra que o usuário nunca clique em "Google" sem consentir. */}
+        <label
+          ref={acceptRef}
+          style={{
+            display: 'flex', alignItems: 'flex-start', gap: '0.5rem',
+            padding: '0.625rem 0.75rem',
+            fontSize: '0.8125rem',
+            color: highlightAccept ? (colors.error || '#ef4444') : colors.textSecondary,
+            cursor: 'pointer',
+            marginBottom: '1rem',
+            borderRadius: '0.5rem',
+            border: `1px solid ${highlightAccept ? (colors.error || '#ef4444') : 'transparent'}`,
+            backgroundColor: highlightAccept ? `${colors.error || '#ef4444'}10` : 'transparent',
+            transition: 'background-color 0.2s, border-color 0.2s, color 0.2s',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={accept}
+            onChange={(e) => { setAccept(e.target.checked); if (e.target.checked) setHighlightAccept(false); }}
+            style={{ marginTop: 3, flexShrink: 0 }}
+            aria-required="true"
+          />
+          <span>
+            Li e concordo com os{' '}
+            <a href="https://tactiplan.faggin.com.br/termos.html" target="_blank" rel="noopener" style={{ color: colors.primary }}>Termos de Uso</a> e a{' '}
+            <a href="https://tactiplan.faggin.com.br/privacidade.html" target="_blank" rel="noopener" style={{ color: colors.primary }}>Política de Privacidade</a>.
+          </span>
+        </label>
+
         {import.meta.env.VITE_GOOGLE_CLIENT_ID && (
           <>
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1rem' }}>
-              <GoogleSignInButton label="signup_with" />
+              <GoogleSignInButton
+                label="signup_with"
+                disabled={!accept}
+                disabledMessage="Aceite os Termos e a Política de Privacidade acima antes de continuar com Google."
+                onDisabledClick={flashAcceptRequirement}
+              />
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: '1rem', color: colors.textSecondary, fontSize: '0.75rem' }}>
               <div style={{ flex: 1, height: 1, backgroundColor: colors.border }} />
@@ -93,16 +138,18 @@ export function RegisterPage() {
           <Input type="password" label="Senha" value={form.password} onChange={(e) => update('password', e.target.value)} icon={<Lock size={18} />} fullWidth required />
           <Input type="password" label="Confirmar senha" value={form.confirm} onChange={(e) => update('confirm', e.target.value)} icon={<Lock size={18} />} fullWidth required />
 
-          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', fontSize: '0.8125rem', color: colors.textSecondary, cursor: 'pointer', marginTop: '0.25rem' }}>
-            <input type="checkbox" checked={accept} onChange={(e) => setAccept(e.target.checked)} style={{ marginTop: 3 }} required />
-            <span>
-              Li e concordo com os{' '}
-              <a href="https://tactiplan.faggin.com.br/termos.html" target="_blank" rel="noopener" style={{ color: colors.primary }}>Termos de Uso</a> e a{' '}
-              <a href="https://tactiplan.faggin.com.br/privacidade.html" target="_blank" rel="noopener" style={{ color: colors.primary }}>Política de Privacidade</a>.
-            </span>
-          </label>
-
-          <Button type="submit" fullWidth disabled={loading}>{loading ? 'Criando…' : 'Criar conta'}</Button>
+          <Button
+            type="submit"
+            fullWidth
+            disabled={loading}
+            onClick={(e) => {
+              // Se o usuário tentar clicar em "Criar conta" sem aceitar, destaca o checkbox
+              // (o handleSubmit já bloqueia com uma mensagem, mas isso guia o olho pro que falta).
+              if (!accept) flashAcceptRequirement();
+            }}
+          >
+            {loading ? 'Criando…' : 'Criar conta'}
+          </Button>
 
           <div style={{ textAlign: 'center', marginTop: '0.5rem', fontSize: '0.8125rem' }}>
             <span style={{ color: colors.textSecondary }}>Já tem conta? </span>

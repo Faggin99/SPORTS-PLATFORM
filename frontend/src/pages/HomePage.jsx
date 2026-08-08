@@ -356,7 +356,7 @@ export function HomePage() {
                   onMouseEnter={(e) => e.currentTarget.style.backgroundColor = colors.background}
                   onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                 >
-                  <Icon size={18} style={{ color: colors.textSecondary, flexShrink: 0 }} />
+                  <Icon size={18} style={{ color: q.color || colors.primary, flexShrink: 0 }} />
                   <span style={{ fontSize: '0.875rem', fontWeight: 500 }}>{q.label}</span>
                 </button>
               );

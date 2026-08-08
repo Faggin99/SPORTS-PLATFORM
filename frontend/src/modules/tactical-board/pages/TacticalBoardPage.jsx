@@ -267,9 +267,9 @@ export default function TacticalBoardPage() {
 
   // ─────────────────── Renderização ───────────────────
   // Detecta navegador mobile — bloqueia edição e mostra aviso do app oficial
-  if (isMobile && !isFullscreen) {
-    return <MobileBlockScreen colors={colors} />;
-  }
+  // Mobile: em vez de bloquear, adaptamos o layout (Flyout vira overlay,
+  // hint discreto se estiver em retrato). Um botão em MobileHint sugere
+  // rotacionar. O usuário PODE editar; só é menos confortável.
 
   return (
     <div ref={containerRef} style={{
@@ -280,8 +280,11 @@ export default function TacticalBoardPage() {
       overflow: 'hidden',
       display: 'flex',
       color: colors.text,
+      // Em mobile: melhor toque, evita scroll acidental
+      touchAction: isMobile ? 'none' : 'auto',
     }}>
       <TourGuide isOpen={tour.isOpen} onClose={tour.stop} steps={tourSteps} storageKey={tour.storageKey} />
+      {isMobile && <MobileRotateHint colors={colors} />}
 
       {/* ─── SIDEBAR ─── */}
       <Sidebar
@@ -609,16 +612,32 @@ function Sidebar({ openSection, setOpenSection, canUndo, canRedo, onUndo, onRedo
 
 // ── Flyout (painel ao lado da sidebar) ──
 function Flyout({ title, onClose, children }) {
+  const isMobile = useIsMobile();
+  // Em mobile o Flyout vira overlay flutuante (position absolute) pra não
+  // empurrar o canvas nem consumir metade da tela. Em desktop segue como
+  // coluna que ocupa espaço no flex do container principal.
+  const containerStyle = isMobile
+    ? {
+        position: 'absolute',
+        top: 0, left: 44, bottom: 0,
+        width: 'min(260px, calc(100vw - 60px))',
+        backgroundColor: 'rgba(15,23,42,0.92)',
+        backdropFilter: 'blur(14px)',
+        boxShadow: '4px 0 20px rgba(0,0,0,0.5)',
+        display: 'flex', flexDirection: 'column',
+        zIndex: 40,
+      }
+    : {
+        width: 230, flexShrink: 0,
+        backgroundColor: 'rgba(15,23,42,0.82)',
+        backdropFilter: 'blur(14px)',
+        borderRight: '1px solid rgba(255,255,255,0.08)',
+        boxShadow: '4px 0 20px rgba(0,0,0,0.3)',
+        display: 'flex', flexDirection: 'column',
+        zIndex: 29,
+      };
   return (
-    <div style={{
-      width: 230, flexShrink: 0,
-      backgroundColor: 'rgba(15,23,42,0.82)',
-      backdropFilter: 'blur(14px)',
-      borderRight: '1px solid rgba(255,255,255,0.08)',
-      boxShadow: '4px 0 20px rgba(0,0,0,0.3)',
-      display: 'flex', flexDirection: 'column',
-      zIndex: 29,
-    }}>
+    <div style={containerStyle}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.55rem 0.75rem', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
         <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#fff', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{title}</span>
         <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.5)', cursor: 'pointer', padding: 2 }}>
@@ -860,6 +879,48 @@ function TopBtn({ children, onClick, title, active }) {
 }
 
 // Tela de bloqueio em mobile — Quadro Tático precisa de tela maior pra ser usável
+// Hint discreto no topo pra sugerir modo paisagem. Some após 5s
+// ou quando o usuário rotaciona pra landscape.
+function MobileRotateHint({ colors }) {
+  const [visible, setVisible] = useState(true);
+  const [isLandscape, setIsLandscape] = useState(
+    typeof window !== 'undefined' && window.innerWidth > window.innerHeight
+  );
+  useEffect(() => {
+    const t = setTimeout(() => setVisible(false), 5000);
+    const onResize = () => setIsLandscape(window.innerWidth > window.innerHeight);
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onResize);
+    };
+  }, []);
+  if (!visible || isLandscape) return null;
+  return (
+    <div style={{
+      position: 'absolute',
+      top: 12, left: '50%', transform: 'translateX(-50%)',
+      zIndex: 90,
+      backgroundColor: 'rgba(15,23,42,0.9)',
+      color: '#fff',
+      padding: '0.5rem 0.9rem',
+      borderRadius: '999px',
+      fontSize: '0.72rem',
+      fontWeight: 600,
+      boxShadow: '0 4px 12px rgba(0,0,0,0.35)',
+      display: 'flex', alignItems: 'center', gap: '0.4rem',
+      pointerEvents: 'none',
+    }}>
+      <Smartphone size={13} />
+      Gire o celular pra paisagem — cabe mais campo
+    </div>
+  );
+}
+
+// Mantido caso volte a fazer sentido bloquear (device muito pequeno, versão
+// legacy, etc.). Hoje NÃO é usado — usuário mobile tem acesso completo.
 function MobileBlockScreen({ colors }) {
   return (
     <div style={{

@@ -124,10 +124,19 @@ router.get('/users/:id', async (req, res) => {
       FROM subscriptions WHERE user_id = $1 ORDER BY created_at DESC
     `, [id]);
 
+    // Schema real de billing_events vem da migration 006: (type, status, raw, mp_resource_id, amount_cents).
+    // Retornamos com os aliases event_type/mp_status/payload pra manter compatibilidade
+    // com o consumidor no admin dashboard, sem quebrar código legado.
     let events = { rows: [] };
     try {
       events = await query(`
-        SELECT id, event_type, mp_status, payload, created_at
+        SELECT id,
+               type          AS event_type,
+               status        AS mp_status,
+               raw           AS payload,
+               mp_resource_id,
+               amount_cents,
+               created_at
         FROM billing_events WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50
       `, [id]);
     } catch (_) { /* tabela pode não existir em ambientes antigos */ }

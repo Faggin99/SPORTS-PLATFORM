@@ -10,6 +10,7 @@ import { useClub } from '../../contexts/ClubContext';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { trainingService } from '../../services/trainingService';
 import { CreateTitleModal } from './CreateTitleModal';
+import { notify } from '../../lib/notify';
 
 export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initialTab = 0, isMatchDay = false }) {
   const { colors } = useTheme();
@@ -238,7 +239,7 @@ export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initial
 
   const confirmFileWithTitle = () => {
     if (!attachmentTitleInput.trim()) {
-      alert('Por favor, insira um título para o anexo.');
+      notify.error('Por favor, insira um título para o anexo.');
       return;
     }
 
@@ -247,7 +248,7 @@ export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initial
     // Check if we already have 5 files
     const totalFiles = existingFiles.length + uploadedFiles.length;
     if (totalFiles >= 5) {
-      alert('Máximo de 5 anexos atingido.');
+      notify.error('Máximo de 5 anexos atingido.');
       setShowTitlePrompt(false);
       setPendingFile(null);
       setAttachmentTitleInput('');
@@ -279,13 +280,17 @@ export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initial
   const handleRemoveFile = async (fileId, isExisting = false) => {
     if (isExisting) {
       // Delete from server
-      if (window.confirm('Tem certeza que deseja excluir este arquivo? Esta ação não pode ser desfeita.')) {
+      const ok = await notify.confirm(
+        'Tem certeza que deseja excluir este arquivo? Esta ação não pode ser desfeita.',
+        { confirmText: 'Excluir', cancelText: 'Cancelar' }
+      );
+      if (ok) {
         try {
           await trainingService.deleteSessionFile(fileId);
           setExistingFiles(existingFiles.filter((f) => f.id !== fileId));
         } catch (error) {
           console.error('Error deleting file:', error);
-          alert('Erro ao excluir arquivo: ' + error.message);
+          notify.error('Erro ao excluir arquivo: ' + error.message);
         }
       }
     } else {
@@ -319,10 +324,11 @@ export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initial
       today.setHours(0, 0, 0, 0);
 
       if (sessionDate < today) {
-        const confirmed = window.confirm(
+        const confirmed = await notify.confirm(
           'Você está alterando um treino de uma data passada.\n\n' +
           'Esta alteração pode indicar que o treino foi realizado de forma diferente do planejado.\n\n' +
-          'Deseja continuar?'
+          'Deseja continuar?',
+          { confirmText: 'Continuar', cancelText: 'Cancelar' }
         );
 
         if (!confirmed) {
@@ -337,7 +343,7 @@ export function UnifiedTrainingModal({ isOpen, onClose, session, onSave, initial
       onClose();
     } catch (error) {
       console.error('Error saving:', error);
-      alert('Erro ao salvar: ' + error.message);
+      notify.error('Erro ao salvar: ' + error.message);
     } finally {
       setLoading(false);
     }

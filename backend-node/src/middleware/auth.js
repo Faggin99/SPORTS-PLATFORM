@@ -69,6 +69,17 @@ const authMiddleware = async (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, jwtSecret);
+
+    // LGPD: rejeita JWT de conta removida (soft-deleted). Também cobre user apagado
+    // manualmente do banco (userCheck vem vazio).
+    const userCheck = await query(
+      'SELECT deleted_at FROM users WHERE id = $1',
+      [decoded.id]
+    );
+    if (userCheck.rows.length === 0 || userCheck.rows[0].deleted_at) {
+      return res.status(401).json({ error: 'Conta removida' });
+    }
+
     req.user = { id: decoded.id, email: decoded.email, role: decoded.role };
 
     let accessible = { workspaces: [], clubs: [] };

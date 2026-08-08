@@ -31,8 +31,22 @@ function loadGoogleIdentity() {
  * Botão "Entrar com Google" usando Google Identity Services oficial.
  * Renderiza o botão do Google diretamente (mais confiável que customizar via popup).
  * O tema (filled_black/outline) acompanha o tema da aplicação.
+ *
+ * Props:
+ *  - onSuccess({ token, user })
+ *  - label: 'signin_with' | 'signup_with' | 'continue_with' (default) — texto do botão do Google
+ *  - disabled: bool — cobre o botão com um overlay bloqueante (o iframe do Google não aceita
+ *      atributo `disabled` nativo, então usamos uma camada por cima que intercepta os cliques).
+ *  - disabledMessage: string — mensagem exibida ao tentar clicar com o botão desabilitado
+ *  - onDisabledClick: função opcional — chamada ao clicar quando `disabled` (ex.: destacar checkbox)
  */
-export function GoogleSignInButton({ onSuccess: onSuccessProp }) {
+export function GoogleSignInButton({
+  onSuccess: onSuccessProp,
+  label = 'continue_with',
+  disabled = false,
+  disabledMessage = 'Aceite os Termos de Uso e a Política de Privacidade para continuar.',
+  onDisabledClick,
+}) {
   const { isDark } = useTheme();
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -82,7 +96,7 @@ export function GoogleSignInButton({ onSuccess: onSuccessProp }) {
             type: 'standard',
             theme: isDark ? 'filled_black' : 'outline',
             size: 'large',
-            text: 'continue_with',
+            text: label,
             shape: 'rectangular',
             locale: 'pt-BR',
             width: containerRef.current.offsetWidth || 320,
@@ -98,15 +112,52 @@ export function GoogleSignInButton({ onSuccess: onSuccessProp }) {
       });
     return () => { mounted = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientId, isDark]);
+  }, [clientId, isDark, label]);
 
   if (!clientId) return null;
 
+  function handleOverlayClick(e) {
+    // Intercepta o clique antes de chegar no iframe do Google.
+    e.preventDefault();
+    e.stopPropagation();
+    onDisabledClick?.();
+    if (disabledMessage) setError(disabledMessage);
+  }
+
   return (
     <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-      <div ref={containerRef} style={{ width: '100%', display: 'flex', justifyContent: 'center', minHeight: 44 }} />
+      <div style={{ position: 'relative', width: '100%', display: 'flex', justifyContent: 'center' }}>
+        <div
+          ref={containerRef}
+          style={{
+            width: '100%',
+            display: 'flex',
+            justifyContent: 'center',
+            minHeight: 44,
+            opacity: disabled ? 0.5 : 1,
+            filter: disabled ? 'grayscale(0.3)' : 'none',
+            transition: 'opacity 0.15s',
+          }}
+          aria-disabled={disabled || undefined}
+        />
+        {disabled && (
+          <div
+            role="button"
+            tabIndex={0}
+            aria-label={disabledMessage}
+            onClick={handleOverlayClick}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleOverlayClick(e); }}
+            style={{
+              position: 'absolute',
+              inset: 0,
+              cursor: 'not-allowed',
+              background: 'transparent',
+            }}
+          />
+        )}
+      </div>
       {loading && <div style={{ fontSize: '0.75rem', color: '#888' }}>Autenticando…</div>}
-      {error && <div style={{ fontSize: '0.75rem', color: '#ef4444' }}>{error}</div>}
+      {error && <div style={{ fontSize: '0.75rem', color: '#ef4444', textAlign: 'center' }}>{error}</div>}
     </div>
   );
 }

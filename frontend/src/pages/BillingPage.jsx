@@ -4,6 +4,8 @@ import { CheckCircle2, AlertTriangle, Crown, CreditCard, Infinity, ShieldCheck, 
 import { useTheme } from '../contexts/ThemeContext';
 import { Button } from '../components/common/Button';
 import { api } from '../services/api';
+import { notify } from '../lib/notify';
+import { openExternalUrl } from '../lib/platform';
 
 function formatPrice(cents, currency = 'BRL') {
   if (!cents) return 'Grátis';
@@ -47,38 +49,45 @@ export function BillingPage() {
     const isTryingClube = sub?.plan_id === 'clube' || sub?.plan_id === 'clube_annual';
     const isPickingPro = planId === 'pro' || planId === 'pro_annual';
     if (isTryingClube && isPickingPro) {
-      const ok = window.confirm(
+      const ok = await notify.confirm(
         'Atenção: você está testando o plano Clube.\n\n' +
         'Ao assinar o Pro, você perderá:\n' +
         '• Convites para outros treinadores (multi-coach)\n' +
         '• Múltiplas categorias por clube (sub-15, sub-17…)\n' +
         '• Permissões por papel (treinador / auxiliar)\n\n' +
         'Recomendado: assine o Clube pra manter tudo que você testou.\n\n' +
-        'Tem certeza que quer assinar o Pro mesmo assim?'
+        'Tem certeza que quer assinar o Pro mesmo assim?',
+        { confirmText: 'Assinar Pro', cancelText: 'Voltar' }
       );
       if (!ok) return;
     }
     setCheckoutLoading(planId);
     try {
       const data = await api.post('/billing/checkout', { plan_id: planId });
-      if (data.init_point) window.location.href = data.init_point;
+      // Em nativo (iOS/Android) abrir no browser embutido evita rejeição
+      // da Apple pela Guideline 3.1.1 (payments) — o pagamento acontece
+      // fora do app e volta pro app via deep link no sucesso.
+      if (data.init_point) await openExternalUrl(data.init_point, { sameTab: true });
     } catch (err) {
-      alert(err.message || 'Erro ao abrir checkout');
+      notify.error(err.message || 'Erro ao abrir checkout');
     } finally {
       setCheckoutLoading(null);
     }
   }
 
   async function cancelSubscription() {
-    const confirm1 = window.confirm('Tem certeza que deseja cancelar sua assinatura?\n\nO acesso pago será encerrado e você perderá os recursos premium.');
-    if (!confirm1) return;
+    const ok = await notify.confirm(
+      'Tem certeza que deseja cancelar sua assinatura?\n\nO acesso pago será encerrado e você perderá os recursos premium.',
+      { confirmText: 'Cancelar assinatura', cancelText: 'Voltar' }
+    );
+    if (!ok) return;
     try {
       await api.post('/billing/cancel', {});
-      alert('Assinatura cancelada.');
+      notify.success('Assinatura cancelada.');
       const s = await api.get('/billing/subscription').catch(() => null);
       setSub(s);
     } catch (err) {
-      alert(err.message || 'Erro ao cancelar');
+      notify.error(err.message || 'Erro ao cancelar');
     }
   }
 
@@ -308,9 +317,19 @@ function InfoItem({ label, value, colors, highlight }) {
   );
 }
 
+// Preço mensal "de referência" pra calcular economia do anual vs 12x mensal.
+// Mantido inline pra não ter que carregar toda a lista de plans no PlanItem.
+const MONTHLY_REF = { pro: 3990, clube: 8900 };
+
 function PlanItem({ plan, colors, onSelect, loading, highlight, isCurrent }) {
   const isYearly = plan.interval === 'yearly';
   const monthlyEquiv = isYearly ? plan.price_cents / 12 : plan.price_cents;
+  // Economia real: (12 × mensal - anual) / (12 × mensal)
+  const baseId = String(plan.id).replace('_annual', '');
+  const monthlyRef = MONTHLY_REF[baseId];
+  const savingsPct = (isYearly && monthlyRef)
+    ? Math.round(((monthlyRef * 12 - plan.price_cents) / (monthlyRef * 12)) * 100)
+    : 0;
   return (
     <div style={{
       padding: 16,
@@ -345,7 +364,7 @@ function PlanItem({ plan, colors, onSelect, loading, highlight, isCurrent }) {
       </div>
       {isYearly ? (
         <div style={{ fontSize: '0.75rem', color: '#22c55e', marginTop: 2 }}>
-          Cobrado anualmente: {formatPrice(plan.price_cents)} · economize ~50%
+          Cobrado anualmente: {formatPrice(plan.price_cents)}{savingsPct > 0 ? ` · economize ${savingsPct}%` : ''}
         </div>
       ) : (
         <div style={{ fontSize: '0.75rem', color: colors.textSecondary, marginTop: 2 }}>

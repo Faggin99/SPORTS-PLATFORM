@@ -18,6 +18,7 @@ import autoTable from 'jspdf-autotable';
 import { PDF_THEME, addTitleStrip, drawCover, paginate, applyClubPrimaryColor, setFillHex, setTextHex, setDrawHex } from '../../utils/pdfTheme';
 import { newWorkbook, addSheet, saveWorkbook, addMetaSheet } from '../../utils/excelTheme';
 import { ExportMenu } from '../common/ExportMenu';
+import { notify } from '../../lib/notify';
 
 export function GameModal({ isOpen, onClose, session, onSave }) {
   const { colors } = useTheme();
@@ -140,7 +141,7 @@ export function GameModal({ isOpen, onClose, session, onSave }) {
       onClose();
     } catch (error) {
       console.error('Erro ao salvar:', error);
-      alert('Erro ao salvar dados do jogo');
+      notify.error('Erro ao salvar dados do jogo');
     } finally {
       setSaving(false);
     }
@@ -212,7 +213,7 @@ export function GameModal({ isOpen, onClose, session, onSave }) {
 
   const exportToPdf = async () => {
     if (selectedPlayers.length === 0) {
-      alert('Selecione jogadores antes de exportar');
+      notify.error('Selecione jogadores antes de exportar');
       return;
     }
     const resetColor = applyClubPrimaryColor(selectedClub?.primary_color || null);
@@ -340,7 +341,7 @@ export function GameModal({ isOpen, onClose, session, onSave }) {
 
   const exportToExcel = () => {
     if (selectedPlayers.length === 0) {
-      alert('Selecione jogadores antes de exportar');
+      notify.error('Selecione jogadores antes de exportar');
       return;
     }
     const gameDate = session?.date ? session.date.split('-').reverse().join('/') : '';

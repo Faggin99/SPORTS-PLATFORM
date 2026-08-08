@@ -40,7 +40,7 @@ const mainNav = [
   { to: '/training-stats', icon: BarChart3, label: 'Estatísticas' },
   { kind: 'equipe', icon: UsersRound, label: 'Minha Equipe' },
   { kind: 'cadastros', icon: ClipboardList, label: 'Cadastros' },
-  { to: '/tactical-board', icon: Waypoints, label: 'Quadro Tatico' },
+  { to: '/tactical-board', icon: Waypoints, label: 'Quadro Tático' },
 ];
 
 function useOnOutsideClick(ref, handler) {

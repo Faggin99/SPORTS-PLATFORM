@@ -8,7 +8,7 @@ const { jwtSecret, jwtExpiresIn } = require('../config/auth');
 const authMiddleware = require('../middleware/auth');
 const { uploadProfilePhoto } = require('../middleware/upload');
 const { loginLimiter, registerLimiter, recoveryLimiter } = require('../middleware/rateLimit');
-const { sendPasswordResetEmail } = require('../services/mailer');
+const { sendPasswordResetEmail, sendWelcomeEmail } = require('../services/mailer');
 const { isAdmin, isLifetime } = require('../config/specialUsers');
 const { OAuth2Client } = require('google-auth-library');
 
@@ -84,6 +84,14 @@ router.post('/register', registerLimiter, [
 
     const token = generateToken(user);
 
+    // Fire-and-forget: e-mail de boas-vindas (não bloqueia o response).
+    // Trial de 30d é hard-coded no INSERT acima; se for admin/lifetime, ainda mandamos welcome.
+    setImmediate(() => {
+      const appUrl = process.env.APP_BASE_URL || 'https://app.tactiplan.faggin.com.br';
+      sendWelcomeEmail({ to: user.email, name: user.name, trialDaysLeft: 30, appUrl })
+        .catch(err => console.error('sendWelcomeEmail error:', err?.message));
+    });
+
     res.status(201).json({ token, user, workspace_id: workspaceId });
   } catch (err) {
     console.error('Register error:', err);
@@ -105,19 +113,24 @@ router.post('/login', loginLimiter, [
     const { email, password } = req.body;
 
     const result = await query(
-      'SELECT id, email, encrypted_password, name, phone, bio, profile_photo, role, id as tenant_id FROM users WHERE email = $1',
+      'SELECT id, email, encrypted_password, name, phone, bio, profile_photo, role, deleted_at, id as tenant_id FROM users WHERE email = $1 AND deleted_at IS NULL',
       [email]
     );
 
     if (result.rows.length === 0) {
+      // Não distinguimos "não existe" de "conta removida" pra evitar user enumeration
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
     const user = result.rows[0];
+    if (user.deleted_at) {
+      return res.status(401).json({ error: 'Conta removida' });
+    }
     const validPassword = await bcrypt.compare(password, user.encrypted_password);
     if (!validPassword) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
+    delete user.deleted_at;
 
     delete user.encrypted_password;
     user.tenant_id = user.tenant_id || user.id;
@@ -152,6 +165,70 @@ router.get('/me', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error('Get me error:', err);
     res.status(500).json({ error: 'Failed to get user data' });
+  }
+});
+
+// DELETE /api/auth/me — LGPD "direito ao esquecimento"
+// Anonimiza PII (não hard-delete pra preservar integridade referencial), cancela
+// assinaturas imediatamente e invalida sessões futuras (JWT existente será rejeitado
+// pelo middleware quando bater no check de deleted_at).
+router.delete('/me', authMiddleware, async (req, res) => {
+  try {
+    // Confirma que o user existe e recupera a senha atual pra validar (se houver)
+    const userRes = await query(
+      'SELECT id, encrypted_password, deleted_at FROM users WHERE id = $1',
+      [req.user.id]
+    );
+    if (userRes.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    const u = userRes.rows[0];
+    if (u.deleted_at) {
+      return res.status(410).json({ error: 'Conta já foi removida' });
+    }
+
+    // Se tiver senha, exige confirmação. Google-only users (sem senha) passam direto.
+    if (u.encrypted_password) {
+      const { password } = req.body || {};
+      if (!password) {
+        return res.status(400).json({ error: 'Senha obrigatória para confirmar exclusão' });
+      }
+      const valid = await bcrypt.compare(password, u.encrypted_password);
+      if (!valid) {
+        return res.status(401).json({ error: 'Senha incorreta' });
+      }
+    }
+
+    // Anonimiza PII e marca soft-delete. Email vira placeholder único
+    // pra liberar o e-mail original pra futuros cadastros.
+    await query(
+      `UPDATE users
+          SET deleted_at         = NOW(),
+              email              = 'deleted-' || id || '@deleted.local',
+              name               = 'Usuário removido',
+              encrypted_password = NULL,
+              google_id          = NULL,
+              avatar_url         = NULL,
+              profile_photo      = NULL,
+              phone              = NULL,
+              bio                = NULL,
+              updated_at         = NOW()
+        WHERE id = $1`,
+      [req.user.id]
+    );
+
+    // Cancela assinatura imediatamente
+    await query('DELETE FROM subscriptions WHERE user_id = $1', [req.user.id]);
+
+    // Invalida cache de accessible workspaces/clubs pra esse user
+    if (typeof authMiddleware.invalidateAccessibleCache === 'function') {
+      authMiddleware.invalidateAccessibleCache(req.user.id);
+    }
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Delete account error:', err);
+    res.status(500).json({ error: 'Failed to delete account' });
   }
 });
 
@@ -295,15 +372,19 @@ router.post('/google', loginLimiter, async (req, res) => {
     const googleId = payload.sub;
     const name = payload.name || payload.given_name || email.split('@')[0];
 
-    // Procura por google_id ou email
+    // Procura por google_id ou email — ignora contas removidas (LGPD)
     let userRes = await query(
-      'SELECT id, email, name, phone, bio, profile_photo, role FROM users WHERE google_id = $1 OR email = $2 LIMIT 1',
+      'SELECT id, email, name, phone, bio, profile_photo, role, deleted_at FROM users WHERE (google_id = $1 OR email = $2) AND deleted_at IS NULL LIMIT 1',
       [googleId, email]
     );
 
     let user;
     if (userRes.rows.length > 0) {
       user = userRes.rows[0];
+      if (user.deleted_at) {
+        return res.status(401).json({ error: 'Conta removida' });
+      }
+      delete user.deleted_at;
       // Atualiza google_id se ainda não estiver setado (vinculação à conta existente)
       await query(
         `UPDATE users SET google_id = COALESCE(google_id, $1), auth_provider = CASE WHEN google_id IS NULL THEN 'google' ELSE auth_provider END WHERE id = $2`,

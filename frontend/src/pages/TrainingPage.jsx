@@ -20,6 +20,7 @@ import { usePreference } from '../hooks/usePreference';
 import { usePlanFeatures } from '../hooks/usePlanFeatures';
 import { TourGuide } from '../components/common/TourGuide';
 import { useTour, useTourReplayListener } from '../hooks/useTour';
+import { notify } from '../lib/notify';
 
 export function TrainingPage() {
   const { colors } = useTheme();
@@ -1039,7 +1040,7 @@ export function TrainingPage() {
             setShowUnifiedModal(false);
           } catch (error) {
             console.error('Error saving training data:', error);
-            alert('Erro ao salvar treino: ' + error.message);
+            notify.error('Erro ao salvar treino: ' + error.message);
           }
         }}
       />
@@ -1101,7 +1102,7 @@ export function TrainingPage() {
             await loadMicrocycle(true); // Force reload to bypass cache
           } catch (error) {
             console.error('Error updating session type:', error);
-            alert('Erro ao atualizar tipo de sessão: ' + error.message);
+            notify.error('Erro ao atualizar tipo de sessão: ' + error.message);
           }
         }}
       />

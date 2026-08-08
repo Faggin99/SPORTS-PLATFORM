@@ -1,15 +1,33 @@
 {
-  "name": "frontend",
+  "name": "tactiplan-frontend",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "cap:sync": "npm run build && cap sync",
+    "cap:sync:ios": "npm run build && cap sync ios",
+    "cap:sync:android": "npm run build && cap sync android",
+    "cap:add:ios": "cap add ios",
+    "cap:add:android": "cap add android",
+    "cap:open:ios": "cap open ios",
+    "cap:open:android": "cap open android",
+    "cap:assets": "capacitor-assets generate --iconBackgroundColor '#0f172a' --iconBackgroundColorDark '#0b1220' --splashBackgroundColor '#0f172a' --splashBackgroundColorDark '#0b1220'",
+    "cap:run:ios": "npm run build && cap sync ios && cap run ios",
+    "cap:run:android": "npm run build && cap sync android && cap run android"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/app": "^8.1.1",
+    "@capacitor/browser": "^8.0.4",
+    "@capacitor/core": "^8.5.0",
+    "@capacitor/haptics": "^8.0.2",
+    "@capacitor/ios": "^8.5.0",
+    "@capacitor/splash-screen": "^8.0.2",
+    "@capacitor/status-bar": "^8.0.3",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
@@ -30,6 +48,7 @@
     "react-big-calendar": "^1.19.4",
     "react-dom": "^19.1.1",
     "react-hook-form": "^7.65.0",
+    "react-hot-toast": "^2.6.0",
     "react-icons": "^5.5.0",
     "react-konva": "^19.2.3",
     "react-modal": "^3.16.3",
@@ -41,6 +60,8 @@
     "yup": "^1.7.1"
   },
   "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^8.5.0",
     "@eslint/js": "^9.36.0",
     "@types/react": "^19.1.16",
     "@types/react-dom": "^19.1.9",

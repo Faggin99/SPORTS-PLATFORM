@@ -39,6 +39,7 @@ const clubMembersRoutes = require('./src/routes/clubMembers');
 const workspacesRoutes = require('./src/routes/workspaces');
 const competitionsRoutes = require('./src/routes/competitions');
 const externalCompetitionsRoutes = require('./src/routes/externalCompetitions');
+const publicStatsRoutes = require('./src/routes/publicStats');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -48,11 +49,23 @@ app.set('trust proxy', 1);
 
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 
+// Rotas públicas SEM auth chamadas por outros domínios (ex: landing page).
+// Montadas ANTES do rate limiter genérico e do CORS middleware — o próprio
+// router seta CORS manualmente pra tactiplan.faggin.com.br e tem cache de
+// 10min in-memory, então não precisa da proteção de rate limit padrão.
+app.use('/api/public', publicStatsRoutes);
+
 const { generalLimiter } = require('./src/middleware/rateLimit');
 app.use('/api/', generalLimiter);
 
 const requireActiveSubscription = require('./src/middleware/requireActiveSubscription');
 app.use(requireActiveSubscription);
+// CORS — em produção exige lista explícita, nunca aceita '*' de fallback.
+const isProduction = process.env.NODE_ENV === 'production';
+if (isProduction && !process.env.CORS_ORIGIN) {
+  console.error('FATAL: CORS_ORIGIN ausente em produção. Defina domínios permitidos (vírgula-separados) no .env.');
+  process.exit(1);
+}
 const allowedOrigins = (process.env.CORS_ORIGIN || '*').split(',').map(s => s.trim());
 app.use(cors({
   origin: (origin, callback) => {
@@ -121,8 +134,15 @@ app.use((err, req, res, next) => {
   });
 });
 
+const { startBillingCleanupTimer } = require('./src/jobs/cleanupExpiredSubscriptions');
+const { startTrialExpiringNotifierTimer } = require('./src/jobs/trialExpiringNotifier');
+
 app.listen(PORT, () => {
   console.log(`Sports Platform API running on port ${PORT}`);
+  // Cron leve: sobe subs com cancel_at_period_end vencidas pra 'canceled' (1x/h).
+  startBillingCleanupTimer();
+  // Cron leve: notifica trials que expiram em 2–3 dias (1x/h).
+  startTrialExpiringNotifierTimer();
 });
 
 module.exports = app;

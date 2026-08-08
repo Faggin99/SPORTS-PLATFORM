@@ -34,6 +34,13 @@ export const authService = {
     return await api.post('/auth/reset', { token, password });
   },
 
+  async deleteMe(password) {
+    // Backend: DELETE /api/auth/me — exige senha atual quando a conta tem senha;
+    // apaga/anonimiza dados e cancela assinatura ativa (LGPD).
+    const body = password ? { password } : {};
+    return await api.delete('/auth/me', body);
+  },
+
   async me() {
     const data = await api.get('/auth/me');
     return {

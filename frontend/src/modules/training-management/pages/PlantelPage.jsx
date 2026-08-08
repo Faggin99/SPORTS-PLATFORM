@@ -13,6 +13,7 @@ import { generatePlantelPDF, generatePlantelExcel } from '../utils/pdfGenerator'
 import { ExportMenu } from '../../../components/common/ExportMenu';
 import { TourGuide } from '../../../components/common/TourGuide';
 import { useTour, useTourReplayListener } from '../../../hooks/useTour';
+import { notify } from '../../../lib/notify';
 
 export default function PlantelPage() {
   const { colors } = useTheme();
@@ -69,7 +70,7 @@ export default function PlantelPage() {
   const handleCreatePlayer = async (data) => {
     try {
       if (!selectedClub?.id) {
-        alert('Selecione um clube antes de cadastrar atletas.');
+        notify.error('Selecione um clube antes de cadastrar atletas.');
         return;
       }
       await athleteService.create({
@@ -114,14 +115,18 @@ export default function PlantelPage() {
   };
 
   const handleDeletePlayer = async (id) => {
-    if (window.confirm('Tem certeza que deseja excluir este atleta?')) {
-      try {
-        await athleteService.delete(id);
-        await loadAthletes();
-      } catch (err) {
-        console.error('Error deleting player:', err);
-        alert('Erro ao excluir atleta');
-      }
+    const ok = await notify.confirm('Tem certeza que deseja excluir este atleta?', {
+      confirmText: 'Excluir',
+      cancelText: 'Cancelar',
+    });
+    if (!ok) return;
+    try {
+      await athleteService.delete(id);
+      await loadAthletes();
+      notify.success('Atleta excluído.');
+    } catch (err) {
+      console.error('Error deleting player:', err);
+      notify.error('Erro ao excluir atleta');
     }
   };
 
@@ -160,7 +165,7 @@ export default function PlantelPage() {
     } catch (err) {
       console.error('Error saving group changes:', err);
       console.error('Error details:', err.response?.data);
-      alert('Erro ao salvar alterações de grupo');
+      notify.error('Erro ao salvar alterações de grupo');
     } finally {
       setSaving(false);
     }
@@ -174,7 +179,7 @@ export default function PlantelPage() {
       });
     } catch (err) {
       console.error('Error generating PDF:', err);
-      alert('Erro ao gerar PDF do plantel');
+      notify.error('Erro ao gerar PDF do plantel');
     }
   };
 

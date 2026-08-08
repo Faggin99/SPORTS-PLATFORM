@@ -97,3 +97,13 @@ body {
 [data-theme="dark"] .select-options-scroll:hover::-webkit-scrollbar-thumb {
   background: rgba(255,255,255,0.20);
 }
+
+/* iOS não faz zoom automático no focus se a font-size do input for >= 16px.
+   Deixamos 16px em qualquer viewport pequena (< 768px) pra evitar essa UX ruim. */
+@media (max-width: 768px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}

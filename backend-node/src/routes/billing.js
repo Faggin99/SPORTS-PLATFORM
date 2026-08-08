@@ -3,14 +3,127 @@ const crypto = require('crypto');
 const { query } = require('../config/database');
 const authMiddleware = require('../middleware/auth');
 const billing = require('../services/billing');
+const { sendPaymentApprovedEmail, sendPaymentFailedEmail } = require('../services/mailer');
 
 const router = express.Router();
+
+// Fire-and-forget: quando o webhook do MP entrega um evento de pagamento,
+// notifica o user por e-mail conforme o resultado. Falha silenciosa — nunca
+// pode derrubar a resposta 200 do webhook.
+async function notifyPaymentEvent(payload) {
+  try {
+    const type = String(payload?.type || payload?.action || '');
+    const resourceId = payload?.data?.id || payload?.id;
+    if (!resourceId) return;
+    // Só processa eventos de pagamento (payment.*, subscription_authorized_payment.*)
+    if (!type.startsWith('payment') && !type.includes('subscription_authorized_payment')) return;
+    if (!billing.isEnabled()) return;
+
+    const payment = await billing.fetchPayment(resourceId);
+    if (!payment) return;
+
+    const rawStatus = String(payment.status || '').toLowerCase();
+    const approved = rawStatus === 'approved';
+    const rejected = ['rejected', 'cancelled', 'canceled', 'failed'].includes(rawStatus);
+    if (!approved && !rejected) return;
+
+    // Descobre user/plan: prioriza external_reference ("userId|planId") posto
+    // por createCheckout; fallback via preapproval → subscription.
+    let userId = null;
+    let planId = null;
+    const extRef = String(payment.external_reference || '');
+    if (extRef.includes('|')) {
+      [userId, planId] = extRef.split('|');
+    } else {
+      const preId = payment?.metadata?.preapproval_id
+        || payment?.point_of_interaction?.transaction_data?.preapproval_id;
+      if (preId) {
+        const sr = await query(
+          'SELECT id, user_id, plan_id FROM subscriptions WHERE mp_preapproval_id = $1 LIMIT 1',
+          [preId]
+        );
+        if (sr.rows[0]) {
+          userId = sr.rows[0].user_id;
+          planId = sr.rows[0].plan_id;
+        }
+      }
+    }
+    if (!userId) return;
+
+    const userRes = await query(
+      'SELECT email, name FROM users WHERE id = $1 AND deleted_at IS NULL',
+      [userId]
+    );
+    const user = userRes.rows[0];
+    if (!user) return;
+
+    let planName = planId || 'TactiPlan';
+    if (planId) {
+      const pr = await query('SELECT name FROM plans WHERE id = $1', [planId]);
+      if (pr.rows[0]?.name) planName = pr.rows[0].name;
+    }
+
+    const subRes = await query(
+      `SELECT id FROM subscriptions
+       WHERE user_id = $1
+       ORDER BY (status IN ('trialing','active','past_due','paused')) DESC, created_at DESC
+       LIMIT 1`,
+      [userId]
+    );
+    const subscriptionId = subRes.rows[0]?.id || null;
+
+    const baseUrl = process.env.APP_BASE_URL || 'https://app.tactiplan.faggin.com.br';
+
+    if (approved) {
+      const amountBRL = Number(payment.transaction_amount || 0);
+      await sendPaymentApprovedEmail({
+        to: user.email,
+        name: user.name,
+        planName,
+        amountBRL,
+        appUrl: baseUrl,
+      });
+      await billing.logBillingEvent({
+        subscriptionId,
+        userId,
+        type: 'payment.approved.email_sent',
+        mpResourceId: String(resourceId),
+        status: rawStatus,
+        raw: { to: user.email, plan_id: planId, amount_brl: amountBRL },
+      });
+    } else {
+      await sendPaymentFailedEmail({
+        to: user.email,
+        name: user.name,
+        planName,
+        billingUrl: `${baseUrl.replace(/\/$/, '')}/#/billing`,
+      });
+      await billing.logBillingEvent({
+        subscriptionId,
+        userId,
+        type: 'payment.rejected.email_sent',
+        mpResourceId: String(resourceId),
+        status: rawStatus,
+        raw: { to: user.email, plan_id: planId },
+      });
+    }
+  } catch (err) {
+    console.error('notifyPaymentEvent error:', err?.message);
+  }
+}
 
 // Valida assinatura HMAC SHA-256 do webhook do Mercado Pago.
 // Doc: https://www.mercadopago.com.br/developers/pt/docs/your-integrations/notifications/webhooks
 function verifyMpSignature(req) {
   const secret = process.env.MP_WEBHOOK_SECRET;
-  if (!secret) return { ok: true, reason: 'no_secret_configured' }; // tolerante em dev
+  if (!secret) {
+    // Em produção: recusa qualquer webhook sem secret configurado (evita spoofing).
+    // Em dev: tolerante pra facilitar teste local.
+    if (process.env.NODE_ENV === 'production') {
+      return { ok: false, reason: 'no_secret_configured_in_production' };
+    }
+    return { ok: true, reason: 'no_secret_configured_dev' };
+  }
 
   const sigHeader = req.get('x-signature') || '';
   const reqId = req.get('x-request-id') || '';
@@ -127,6 +240,11 @@ router.post('/webhook', async (req, res) => {
   }
   try {
     await billing.handleWebhook(req.body, req.headers);
+    // Fire-and-forget: notifica user do resultado do pagamento (approved/rejected).
+    // Não bloqueia o 200 do webhook.
+    setImmediate(() => {
+      notifyPaymentEvent(req.body).catch(err => console.error('notifyPaymentEvent bg:', err?.message));
+    });
     res.status(200).send('ok');
   } catch (err) {
     console.error('Webhook error:', err);

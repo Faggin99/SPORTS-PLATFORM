@@ -125,8 +125,10 @@ class ApiClient {
     });
   }
 
-  delete(endpoint) {
-    return this.request(endpoint, { method: 'DELETE' });
+  delete(endpoint, data) {
+    const config = { method: 'DELETE' };
+    if (data !== undefined) config.body = JSON.stringify(data);
+    return this.request(endpoint, config);
   }
 
   async upload(endpoint, formData) {

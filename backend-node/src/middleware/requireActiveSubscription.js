@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const { query } = require('../config/database');
 const { jwtSecret } = require('../config/auth');
+const { isSubscriptionActive } = require('../services/billing');
 
 // Paths que ficam liberados independente da assinatura
 // (auth, billing, healthcheck, etc) — pra user expirado conseguir pagar
@@ -46,6 +47,8 @@ async function requireActiveSubscription(req, res, next) {
     // subscription do user (fallback pra compat).
     const requestedWs = req.headers['x-workspace-id'] || null;
 
+    // Query traz também cancel_at_period_end pro isSubscriptionActive lidar
+    // com a janela de graça pós-cancelamento.
     let subRes;
     if (requestedWs) {
       // Antes de checar a sub da workspace, garante que o user tem acesso a ela.
@@ -62,19 +65,21 @@ async function requireActiveSubscription(req, res, next) {
         return res.status(403).json({ error: 'workspace_not_accessible' });
       }
       subRes = await query(
-        `SELECT plan_id, status, trial_ends_at, current_period_end
+        `SELECT plan_id, status, trial_ends_at, current_period_end, cancel_at_period_end
            FROM subscriptions
           WHERE workspace_id = $1
-            AND status IN ('trialing','active','past_due','paused')
+            AND (status IN ('trialing','active','past_due','paused')
+                 OR (cancel_at_period_end = TRUE AND current_period_end > NOW()))
           ORDER BY (plan_id = 'lifetime') DESC, created_at DESC LIMIT 1`,
         [requestedWs]
       );
     } else {
       subRes = await query(
-        `SELECT plan_id, status, trial_ends_at, current_period_end
+        `SELECT plan_id, status, trial_ends_at, current_period_end, cancel_at_period_end
            FROM subscriptions
           WHERE user_id = $1
-            AND status IN ('trialing','active','past_due','paused')
+            AND (status IN ('trialing','active','past_due','paused')
+                 OR (cancel_at_period_end = TRUE AND current_period_end > NOW()))
           ORDER BY (plan_id = 'lifetime') DESC, created_at DESC LIMIT 1`,
         [userId]
       );
@@ -92,6 +97,7 @@ async function requireActiveSubscription(req, res, next) {
 
     const now = new Date();
 
+    // Trial: mesmo com cancel_at_period_end, respeita a janela original.
     if (sub.status === 'trialing') {
       if (sub.trial_ends_at && new Date(sub.trial_ends_at) < now) {
         return res.status(402).json({
@@ -102,15 +108,28 @@ async function requireActiveSubscription(req, res, next) {
       return next();
     }
 
+    // Active: se período ainda está válido, libera (inclusive quando o user
+    // já cancelou e está usando a janela de graça CDC).
     if (sub.status === 'active') {
-      if (sub.current_period_end && new Date(sub.current_period_end) < now) {
+      if (!sub.current_period_end || new Date(sub.current_period_end) >= now) {
+        return next();
+      }
+      // Período expirou. Mensagem depende de se foi cancelamento voluntário ou falha de pagamento.
+      if (sub.cancel_at_period_end) {
         return res.status(402).json({
-          error: 'subscription_expired',
-          message: 'Sua assinatura expirou. Renove o pagamento para continuar.',
+          error: 'subscription_canceled',
+          message: 'Sua assinatura foi cancelada e o período pago terminou. Reassine para continuar.',
         });
       }
-      return next();
+      return res.status(402).json({
+        error: 'subscription_expired',
+        message: 'Sua assinatura expirou. Renove o pagamento para continuar.',
+      });
     }
+
+    // Fallback: past_due, paused, ou algo que a query trouxe (ex.: canceled
+    // ainda dentro da graça). Delega pra isSubscriptionActive.
+    if (isSubscriptionActive(sub)) return next();
 
     return res.status(402).json({
       error: 'payment_pending',

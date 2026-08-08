@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   User, Building2, SlidersHorizontal, Camera, Lock, Save,
-  Plus, Trash2, Sun, Moon, Check, Target, Crown, Info,
+  Plus, Trash2, Sun, Moon, Check, Target, Crown, Info, AlertTriangle,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -13,7 +13,10 @@ import { SideSheet } from '../common/SideSheet';
 import { Button } from '../common/Button';
 import { ChangePasswordModal } from './ChangePasswordModal';
 import { PhotoCropModal } from './PhotoCropModal';
+import { DeleteAccountModal } from './DeleteAccountModal';
 import { userProfileService } from '../../services/userProfileService';
+import { notify } from '../../lib/notify';
+import { authService } from '../../services/authService';
 
 const TABS = [
   { id: 'perfil', label: 'Perfil', icon: User },
@@ -73,13 +76,16 @@ function Tabs({ tab, setTab }) {
 // ---------------- Perfil ----------------
 function PerfilTab() {
   const { colors } = useTheme();
-  const { user: authUser } = useAuth();
+  const { user: authUser, logout } = useAuth();
+  const navigate = useNavigate();
   const [user, setUser] = useState(authUser || null);
   const [form, setForm] = useState({ name: '', email: '', phone: '', bio: '' });
   const [loading, setLoading] = useState(false);
   const [showPwd, setShowPwd] = useState(false);
   const [showCrop, setShowCrop] = useState(false);
   const [photoFile, setPhotoFile] = useState(null);
+  const [showDelete, setShowDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   async function load() {
     try {
@@ -97,16 +103,16 @@ function PerfilTab() {
     try {
       await userProfileService.updateProfile(form);
       await load();
-      alert('Perfil atualizado!');
-    } catch (e) { alert('Erro ao salvar'); }
+      notify.success('Perfil atualizado!');
+    } catch (e) { notify.error('Erro ao salvar'); }
     finally { setLoading(false); }
   }
 
   function onPickPhoto(e) {
     const f = e.target.files[0];
     if (!f) return;
-    if (!f.type.startsWith('image/')) return alert('Selecione uma imagem');
-    if (f.size > 5 * 1024 * 1024) return alert('Máx 5MB');
+    if (!f.type.startsWith('image/')) { notify.error('Selecione uma imagem'); return; }
+    if (f.size > 5 * 1024 * 1024) { notify.error('Máx 5MB'); return; }
     setPhotoFile(f);
     setShowCrop(true);
     e.target.value = '';
@@ -115,15 +121,34 @@ function PerfilTab() {
   async function uploadPhoto(file) {
     setLoading(true);
     try { await userProfileService.uploadPhoto(file); await load(); setShowCrop(false); setPhotoFile(null); }
-    catch (e) { alert('Erro no upload'); }
+    catch (e) { notify.error('Erro no upload'); }
     finally { setLoading(false); }
   }
 
   async function changePwd({ current_password, password }) {
     setLoading(true);
-    try { await userProfileService.changePassword(current_password, password); alert('Senha alterada!'); setShowPwd(false); }
-    catch (e) { alert(e.message || 'Erro ao alterar senha'); }
+    try { await userProfileService.changePassword(current_password, password); notify.success('Senha alterada!'); setShowPwd(false); }
+    catch (e) { notify.error(e.message || 'Erro ao alterar senha'); }
     finally { setLoading(false); }
+  }
+
+  async function handleDeleteAccount(password) {
+    // Chamado pelo DeleteAccountModal após o usuário digitar 'EXCLUIR' + senha.
+    // Erros aqui borbulham pro modal (que mostra o erro e reabilita o botão).
+    setDeleting(true);
+    try {
+      await authService.deleteMe(password);
+      // Sucesso — encerra sessão local, fecha o modal e manda pro login.
+      setShowDelete(false);
+      try { await logout(); } catch (e) { /* logout local: nunca falha */ }
+      notify.success('Sua conta foi excluída.');
+      navigate('/login', { replace: true });
+    } catch (e) {
+      // Rethrow pro modal capturar (evita fechar em caso de erro).
+      throw e;
+    } finally {
+      setDeleting(false);
+    }
   }
 
   const input = {
@@ -179,10 +204,51 @@ function PerfilTab() {
         </div>
       </div>
 
+      {/* Zona de perigo */}
+      <div style={{ marginTop: '1.5rem', paddingTop: '1.25rem', borderTop: `1px solid ${colors.border}` }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '0.4rem',
+          fontSize: '0.875rem', fontWeight: 600, color: colors.error || '#ef4444',
+          marginBottom: '0.75rem',
+        }}>
+          <AlertTriangle size={14} /> Zona de perigo
+        </div>
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem',
+          padding: '0.75rem 1rem',
+          backgroundColor: `${colors.error || '#ef4444'}08`,
+          border: `1px solid ${colors.error || '#ef4444'}40`,
+          borderRadius: '0.5rem',
+        }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: '0.875rem', fontWeight: 500, color: colors.text }}>Excluir minha conta</div>
+            <div style={{ fontSize: '0.75rem', color: colors.textSecondary, lineHeight: 1.45 }}>
+              Apaga seus dados, cancela sua assinatura e encerra o acesso. Ação permanente.
+            </div>
+          </div>
+          <Button
+            variant="danger"
+            size="sm"
+            icon={<Trash2 size={14} />}
+            onClick={() => setShowDelete(true)}
+            disabled={deleting}
+          >
+            Excluir
+          </Button>
+        </div>
+      </div>
+
       <ChangePasswordModal isOpen={showPwd} onClose={() => setShowPwd(false)} onSave={changePwd} />
       {showCrop && photoFile && (
         <PhotoCropModal isOpen={showCrop} selectedFile={photoFile} onClose={() => { setShowCrop(false); setPhotoFile(null); }} onSave={uploadPhoto} />
       )}
+      <DeleteAccountModal
+        isOpen={showDelete}
+        onClose={() => (deleting ? null : setShowDelete(false))}
+        onConfirm={handleDeleteAccount}
+        requiresPassword={!user?.requires_password}
+        userEmail={user?.email}
+      />
     </div>
   );
 }
@@ -220,10 +286,11 @@ function ClubesTab() {
   async function handleSave() {
     if (!editName.trim() || saving) return;
     if (modalityChanged) {
-      const ok = window.confirm(
+      const ok = await notify.confirm(
         'Mudar a modalidade vai LIMPAR as posições atuais dos atletas deste clube. ' +
         'Você precisará recadastrar a posição de cada atleta usando as opções da nova modalidade.\n\n' +
-        'Estatísticas históricas e templates seguem preservados. Deseja continuar?'
+        'Estatísticas históricas e templates seguem preservados. Deseja continuar?',
+        { confirmText: 'Continuar', cancelText: 'Cancelar' }
       );
       if (!ok) return;
     }
@@ -234,8 +301,9 @@ function ClubesTab() {
         description: editDesc.trim() || null,
         modality: editModality,
       });
+      notify.success('Clube atualizado.');
     } catch (e) {
-      alert(e.message || 'Erro ao salvar');
+      notify.error(e.message || 'Erro ao salvar');
     } finally {
       setSaving(false);
     }
@@ -245,7 +313,7 @@ function ClubesTab() {
     if (!file) return;
     setSaving(true);
     try { await uploadLogo(selectedClub.id, file); }
-    catch (e) { alert(e.message || 'Erro ao enviar logo'); }
+    catch (e) { notify.error(e.message || 'Erro ao enviar logo'); }
     finally { setSaving(false); }
   }
 
@@ -337,12 +405,14 @@ function PreferenciasTab() {
 
   const canUseTheme = plan.monthly_theme;
 
-  function handleToggle(v) {
+  async function handleToggle(v) {
     if (v && !canUseTheme) {
       // Tenta ativar sem plano → leva pro upgrade
-      if (window.confirm('Tema do Mês está disponível apenas no plano Clube. Ver planos?')) {
-        navigate('/billing');
-      }
+      const ok = await notify.confirm('Tema do Mês está disponível apenas no plano Clube. Ver planos?', {
+        confirmText: 'Ver planos',
+        cancelText: 'Agora não',
+      });
+      if (ok) navigate('/billing');
       return;
     }
     if (v) {

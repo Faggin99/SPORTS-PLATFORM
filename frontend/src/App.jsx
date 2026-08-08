@@ -1,5 +1,6 @@
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { ThemeProvider } from './contexts/ThemeContext';
+import { Toaster } from 'react-hot-toast';
+import { ThemeProvider, useTheme } from './contexts/ThemeContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ClubProvider } from './contexts/ClubContext';
 import { WorkspaceProvider } from './contexts/WorkspaceContext';
@@ -54,6 +55,43 @@ function AdminRoutes() {
       {/* Qualquer outra rota no host admin redireciona pro login admin */}
       <Route path="*" element={<Navigate to="/admin/login" replace />} />
     </Routes>
+  );
+}
+
+// Toaster global — estilo integrado ao tema (dark/light). Também expõe
+// variáveis CSS pro notify.confirm() customizado ler.
+function ThemedToaster() {
+  const { isDark, colors } = useTheme();
+  const bg = isDark ? colors.surface : '#ffffff';
+  const fg = colors.text;
+  const border = colors.border;
+  return (
+    <>
+      <style>{`:root { --toast-bg: ${bg}; --toast-color: ${fg}; --toast-border: ${border}; }`}</style>
+      <Toaster
+        position="top-right"
+        toastOptions={{
+          duration: 3500,
+          style: {
+            background: bg,
+            color: fg,
+            border: `1px solid ${border}`,
+            fontSize: 14,
+            padding: '10px 14px',
+            borderRadius: 8,
+            boxShadow: '0 10px 25px rgba(0,0,0,0.15)',
+          },
+          success: {
+            duration: 3500,
+            iconTheme: { primary: colors.success, secondary: bg },
+          },
+          error: {
+            duration: 6000,
+            iconTheme: { primary: colors.error, secondary: bg },
+          },
+        }}
+      />
+    </>
   );
 }
 
@@ -213,6 +251,8 @@ function AppRoutes() {
       {/* /admin/* fora do host admin → manda pra raiz da app */}
       <Route path="/admin/*" element={<Navigate to="/home" replace />} />
       <Route path="/" element={<Navigate to="/home" />} />
+      {/* Catch-all: URL desconhecida cai na home em vez de tela branca */}
+      <Route path="*" element={<Navigate to="/home" replace />} />
     </Routes>
   );
 }
@@ -222,6 +262,7 @@ function App() {
   return (
     <HashRouter>
       <ThemeProvider>
+        <ThemedToaster />
         {adminHost ? (
           <AdminRoutes />
         ) : (

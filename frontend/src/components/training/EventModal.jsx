@@ -3,6 +3,7 @@ import { X, Goal, Shield, AlertTriangle, Clock, Plus, Target, ArrowLeftRight, Sq
 import { useTheme } from '../../contexts/ThemeContext';
 import { useSportConfig } from '../../hooks/useSportConfig';
 import { Button } from '../common/Button';
+import { notify } from '../../lib/notify';
 
 // ───────────────────────────────────────────────────────────────
 // Helpers de goal_type — momento do jogo + subtipo de bola parada.
@@ -175,12 +176,15 @@ export function EventModal({ isOpen, onClose, onAdd, matchDuration = 90, editing
   const inOptions  = playersList.filter(p => p.id !== secondaryPlayerId);
   const outOptions = playersList.filter(p => p.id !== playerId);
 
-  const handleAdd = () => {
+  const handleAdd = async () => {
     // Validações simples por tipo
-    if (isCard && !playerId) { alert('Selecione o atleta que recebeu o cartão.'); return; }
-    if (isSub && (!playerId || !secondaryPlayerId)) { alert('Selecione quem entrou e quem saiu.'); return; }
+    if (isCard && !playerId) { notify.error('Selecione o atleta que recebeu o cartão.'); return; }
+    if (isSub && (!playerId || !secondaryPlayerId)) { notify.error('Selecione quem entrou e quem saiu.'); return; }
     if (isGoal && eventType === 'goal_scored' && !playerId) {
-      if (!confirm('Salvar gol sem atribuir ao atleta?')) return;
+      const ok = await notify.confirm('Salvar gol sem atribuir ao atleta?', {
+        confirmText: 'Salvar', cancelText: 'Cancelar',
+      });
+      if (!ok) return;
     }
     onAdd({
       event_type: eventType,
