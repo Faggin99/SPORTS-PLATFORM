@@ -1,9 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { authService } from '../../services/authService';
 import { useTheme } from '../../contexts/ThemeContext';
+import { isNative } from '../../lib/platform';
 
 const GIS_SRC = 'https://accounts.google.com/gsi/client';
 let gisLoadingPromise = null;
+
+// Google Identity Services (o botão web) NÃO funciona dentro do webview de
+// apps Capacitor — o Google bloqueia o origin não confiável (localhost/
+// capacitor). A solução correta é usar o plugin nativo
+// @codetrix-studio/capacitor-google-auth. Enquanto não migramos, escondemos
+// o botão em nativo pra não frustrar o usuário; ele loga com email/senha.
+const HIDDEN_ON_NATIVE = true;
 
 function loadGoogleIdentity() {
   if (typeof window === 'undefined') return Promise.reject(new Error('No window'));
@@ -115,6 +123,9 @@ export function GoogleSignInButton({
   }, [clientId, isDark, label]);
 
   if (!clientId) return null;
+  // Em app nativo (Capacitor Android/iOS), Google Identity Services é bloqueado
+  // pelo webview. Escondemos o botão até termos plugin nativo Android/iOS Client IDs.
+  if (HIDDEN_ON_NATIVE && isNative()) return null;
 
   function handleOverlayClick(e) {
     // Intercepta o clique antes de chegar no iframe do Google.
