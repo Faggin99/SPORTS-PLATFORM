@@ -61,14 +61,15 @@ async function cancelOnMP(preapprovalId) {
 // `uq_subscriptions_active_per_user` bloqueia 2 subs ativas do mesmo user, então
 // precisamos fechar as antigas antes de inserir a nova.
 // Não é o mesmo fluxo do cancelSubscription do usuário (que preserva o período).
-async function _hardCancelActiveSubsForUser(userId, reason = 'upgrade') {
+async function _hardCancelActiveSubsForUser(userId, reason = 'upgrade', exceptSubId = null) {
   const r = await query(
     `SELECT id, mp_preapproval_id, plan_id, status, current_period_end
        FROM subscriptions
       WHERE user_id = $1
         AND status IN ('trialing','active','past_due','paused')
-        AND plan_id <> 'lifetime'`,
-    [userId]
+        AND plan_id <> 'lifetime'
+        AND ($2::uuid IS NULL OR id <> $2)`,
+    [userId, exceptSubId]
   );
   let closed = 0;
   for (const sub of r.rows) {
@@ -144,7 +145,8 @@ async function getActiveSubscription(userId) {
      FROM subscriptions s
      JOIN plans p ON p.id = s.plan_id
      WHERE s.user_id = $1
-       AND s.status IN ('trialing','active','past_due','paused')
+       AND (s.status IN ('trialing','active','past_due','paused')
+            OR (s.cancel_at_period_end = TRUE AND s.current_period_end > NOW()))
      ORDER BY (s.plan_id = 'lifetime') DESC, s.created_at DESC LIMIT 1`,
     [userId]
   );
@@ -184,7 +186,8 @@ async function getSubscriptionForWorkspace(workspaceId) {
      FROM subscriptions s
      JOIN plans p ON p.id = s.plan_id
      WHERE s.workspace_id = $1
-       AND s.status IN ('trialing','active','past_due','paused')
+       AND (s.status IN ('trialing','active','past_due','paused')
+            OR (s.cancel_at_period_end = TRUE AND s.current_period_end > NOW()))
      ORDER BY (s.plan_id = 'lifetime') DESC, s.created_at DESC LIMIT 1`,
     [workspaceId]
   );
@@ -249,9 +252,19 @@ async function createCheckout({ userId, planId, payerEmail, workspaceId = null }
   const plan = await getPlan(planId);
   if (!plan) throw new Error('Plan not found');
 
-  // Dedup: fecha qualquer sub ativa desse user antes de criar a nova.
-  // Sem isso, o unique partial index bate.
-  await _hardCancelActiveSubsForUser(userId, 'upgrade_checkout');
+  // IMPORTANTE: NÃO cancelamos a assinatura anterior aqui. O checkout pode ser
+  // abandonado; cancelar antes de confirmar o pagamento deixaria o usuário sem
+  // o plano que já pagava. A troca de plano só se efetiva quando o webhook
+  // confirma o preapproval como autorizado (syncSubscriptionFromPreapproval).
+  //
+  // Limpa apenas checkouts PENDENTES antigos deste user (não-pagos, fora do
+  // índice de ativos) pra não acumular lixo — nunca toca em sub ativa/paga.
+  await query(
+    `UPDATE subscriptions
+        SET status = 'expired', updated_at = NOW()
+      WHERE user_id = $1 AND status = 'pending'`,
+    [userId]
+  );
 
   const mp = getMP();
   const pa = new PreApproval(mp);
@@ -273,9 +286,11 @@ async function createCheckout({ userId, planId, payerEmail, workspaceId = null }
     },
   });
 
+  // Sub nasce 'pending' — NÃO conta como ativa (fora do índice único e dos
+  // lookups de acesso). Só vira 'active' quando o pagamento for confirmado.
   const ins = await query(
     `INSERT INTO subscriptions (user_id, workspace_id, plan_id, status, mp_preapproval_id, mp_status)
-     VALUES ($1, $2, $3, 'trialing', $4, $5)
+     VALUES ($1, $2, $3, 'pending', $4, $5)
      RETURNING id`,
     [userId, workspaceId, planId, result.id, result.status]
   );
@@ -283,7 +298,7 @@ async function createCheckout({ userId, planId, payerEmail, workspaceId = null }
   await logBillingEvent({
     subscriptionId: ins.rows[0]?.id || null,
     userId,
-    type: 'subscription.created',
+    type: 'subscription.checkout_started',
     mpResourceId: result.id,
     status: result.status,
     raw: { plan_id: planId, workspace_id: workspaceId },
@@ -296,7 +311,10 @@ async function createCheckout({ userId, planId, payerEmail, workspaceId = null }
 function mapMpStatus(mpStatus) {
   const m = String(mpStatus || '').toLowerCase();
   if (['authorized', 'active', 'approved'].includes(m)) return 'active';
-  if (['pending', 'trialing'].includes(m)) return 'trialing';
+  if (m === 'trialing') return 'trialing';
+  // 'pending' fica 'pending' (NÃO ativo) — preapproval criado mas não pago
+  // ainda não libera acesso; só vira 'active' quando o pagamento confirma.
+  if (m === 'pending') return 'pending';
   if (['paused'].includes(m)) return 'paused';
   if (['cancelled', 'canceled'].includes(m)) return 'canceled';
   if (['rejected', 'failed'].includes(m)) return 'past_due';
@@ -345,28 +363,56 @@ async function syncSubscriptionFromPreapproval(preapprovalId) {
 
   // Atualiza por preapproval_id se já existir
   const existing = await query(
-    'SELECT id, user_id, plan_id FROM subscriptions WHERE mp_preapproval_id = $1',
+    'SELECT id, user_id, plan_id, status, cancel_at_period_end, current_period_end FROM subscriptions WHERE mp_preapproval_id = $1',
     [preapprovalId]
   );
 
   if (existing.rows.length > 0) {
-    await query(
-      `UPDATE subscriptions SET
-         status = COALESCE($2, status),
-         mp_status = $3,
-         mp_payer_id = COALESCE($4, mp_payer_id),
-         current_period_end = COALESCE($5, current_period_end),
-         updated_at = now()
-       WHERE mp_preapproval_id = $1`,
-      [preapprovalId, mappedStatus, pa.status, pa.payer_id ? String(pa.payer_id) : null, nextPaymentDate]
-    );
+    const local = existing.rows[0];
+
+    if (mappedStatus === 'active') {
+      // PAGAMENTO CONFIRMADO. É AQUI (e só aqui) que a troca de plano se
+      // efetiva: esta sub vira a ativa e as OUTRAS ativas do user são
+      // canceladas no MP + localmente. Checkout abandonado nunca chega aqui,
+      // então a assinatura anterior fica intacta.
+      await _hardCancelActiveSubsForUser(local.user_id, 'plan_switch_confirmed', local.id);
+      await query(
+        `UPDATE subscriptions SET
+           status = 'active',
+           mp_status = $2,
+           mp_payer_id = COALESCE($3, mp_payer_id),
+           current_period_end = COALESCE($4, current_period_end),
+           cancel_at_period_end = FALSE,
+           updated_at = now()
+         WHERE id = $1`,
+        [local.id, pa.status, pa.payer_id ? String(pa.payer_id) : null, nextPaymentDate]
+      );
+    } else {
+      // Não rebaixa uma sub em período de graça (cancelou mas período ainda
+      // válido) pra 'canceled' — o cron faz a transição final no fim do período.
+      const inGrace = local.cancel_at_period_end === true
+        && local.current_period_end && new Date(local.current_period_end) > new Date();
+      const nextStatus = (mappedStatus === 'canceled' && inGrace) ? local.status : mappedStatus;
+      await query(
+        `UPDATE subscriptions SET
+           status = COALESCE($2, status),
+           mp_status = $3,
+           mp_payer_id = COALESCE($4, mp_payer_id),
+           current_period_end = COALESCE($5, current_period_end),
+           updated_at = now()
+         WHERE id = $1`,
+        [local.id, nextStatus, pa.status, pa.payer_id ? String(pa.payer_id) : null, nextPaymentDate]
+      );
+    }
   } else if (userId && planId) {
-    // Caso o checkout não tenha criado o registro local antes (raro).
-    // Precisamos fechar as ativas primeiro pra não bater no unique index.
-    await _hardCancelActiveSubsForUser(userId, 'sync_from_preapproval');
+    // Checkout não criou o registro local antes (raro). Se já está autorizado,
+    // fecha as ativas e insere como active; senão insere pending.
+    if (mappedStatus === 'active') {
+      await _hardCancelActiveSubsForUser(userId, 'sync_from_preapproval');
+    }
     await query(
       `INSERT INTO subscriptions (user_id, plan_id, status, mp_preapproval_id, mp_status, mp_payer_id, current_period_end)
-       VALUES ($1, $2, COALESCE($3, 'trialing'), $4, $5, $6, $7)`,
+       VALUES ($1, $2, COALESCE($3, 'pending'), $4, $5, $6, $7)`,
       [userId, planId, mappedStatus, preapprovalId, pa.status, pa.payer_id ? String(pa.payer_id) : null, nextPaymentDate]
     );
   }
@@ -398,22 +444,36 @@ async function handleWebhook(payload, headers = {}) {
         const preId = payment.metadata?.preapproval_id || payment.point_of_interaction?.transaction_data?.preapproval_id;
         await syncSubscriptionFromPreapproval(preId);
       } else if (payment?.external_reference?.includes('|')) {
-        // Tenta achar a subscription pelo external_reference do payment
-        const [userId] = payment.external_reference.split('|');
-        if (userId) {
-          // Marca a subscription ativa do user como active quando o pagamento for aprovado
-          if (mapMpStatus(payment.status) === 'active') {
+        // Fallback sem preapproval_id: identifica a sub pelo external_reference
+        // (userId|planId) e promove a pendente pra ativa quando o pagamento
+        // aprovar, cancelando as demais ativas do user.
+        const [userId, planId] = payment.external_reference.split('|');
+        if (userId && mapMpStatus(payment.status) === 'active') {
+          const pend = await query(
+            `SELECT id FROM subscriptions
+              WHERE user_id = $1 AND plan_id = $2
+                AND status IN ('pending','trialing','past_due','paused')
+              ORDER BY created_at DESC LIMIT 1`,
+            [userId, planId]
+          );
+          if (pend.rows[0]) {
+            await _hardCancelActiveSubsForUser(userId, 'payment_confirmed', pend.rows[0].id);
             await query(
-              `UPDATE subscriptions SET status='active', mp_status=$2, updated_at=now()
-               WHERE user_id=$1 AND status IN ('trialing','past_due','paused')`,
-              [userId, payment.status]
+              `UPDATE subscriptions
+                  SET status='active', mp_status=$2, cancel_at_period_end=FALSE, updated_at=now()
+                WHERE id=$1`,
+              [pend.rows[0].id, payment.status]
             );
           }
         }
       }
     }
   } catch (err) {
+    // Propaga pro caller (rota do webhook) responder != 2xx e o MP re-enviar.
+    // O evento bruto já foi gravado em billing_events antes deste try, então
+    // nada se perde mesmo que o retry demore.
     console.error('Webhook sync error:', err);
+    throw err;
   }
   return { ok: true };
 }
@@ -531,6 +591,8 @@ module.exports = {
   fetchPayment,
   mapMpStatus,
   logBillingEvent,
+  // Exportado pro cron de reconciliação (reconcilePendingSubscriptions).
+  syncSubscriptionFromPreapproval,
   // Exportado pra tests/scripts admin — não usar em rotas de user comum.
   _hardCancelActiveSubsForUser,
 };

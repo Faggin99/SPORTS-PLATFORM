@@ -9,6 +9,7 @@ const authMiddleware = require('../middleware/auth');
 const { uploadProfilePhoto } = require('../middleware/upload');
 const { loginLimiter, registerLimiter, recoveryLimiter } = require('../middleware/rateLimit');
 const { sendPasswordResetEmail, sendWelcomeEmail } = require('../services/mailer');
+const billing = require('../services/billing');
 const { isAdmin, isLifetime } = require('../config/specialUsers');
 const { OAuth2Client } = require('google-auth-library');
 
@@ -217,8 +218,17 @@ router.delete('/me', authMiddleware, async (req, res) => {
       [req.user.id]
     );
 
-    // Cancela assinatura imediatamente
-    await query('DELETE FROM subscriptions WHERE user_id = $1', [req.user.id]);
+    // Cancela a recorrência no Mercado Pago E marca a sub local como canceled.
+    // NÃO usar DELETE: (1) sem cancelar no MP a cobrança recorrente continua
+    // pro cartão do usuário excluído; (2) deletar a linha faz o próximo webhook
+    // do MP RE-INSERIR a sub via external_reference, ressuscitando-a. Manter a
+    // linha 'canceled' faz o webhook só dar UPDATE (idempotente).
+    try {
+      await billing._hardCancelActiveSubsForUser(req.user.id, 'account_deleted');
+    } catch (e) {
+      console.error('Falha ao cancelar assinatura na exclusão de conta:', e?.message);
+      // Não bloqueia a exclusão LGPD — mas registra pra reconciliação manual.
+    }
 
     // Invalida cache de accessible workspaces/clubs pra esse user
     if (typeof authMiddleware.invalidateAccessibleCache === 'function') {

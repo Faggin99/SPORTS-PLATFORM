@@ -10,6 +10,7 @@ import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { PricingPage } from './pages/PricingPage';
 import { BillingPage } from './pages/BillingPage';
+import { BillingCallbackPage } from './pages/BillingCallbackPage';
 import { PWAUpdatePrompt } from './components/common/PWAUpdatePrompt';
 import { TrainingPage } from './pages/TrainingPage';
 import { TrainingStatsPage } from './pages/TrainingStatsPage';
@@ -132,6 +133,16 @@ function AppRoutes() {
           <ProtectedRoute>
             <Layout>
               <BillingPage />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/billing/callback"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <BillingCallbackPage />
             </Layout>
           </ProtectedRoute>
         }

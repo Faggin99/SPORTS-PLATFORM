@@ -242,8 +242,12 @@ router.post('/webhook', async (req, res) => {
     });
     res.status(200).send('ok');
   } catch (err) {
+    // Falha ao processar (não é spoofing — a assinatura já passou). Responde 500
+    // pra o Mercado Pago RE-ENVIAR o evento. O evento bruto já foi persistido em
+    // billing_events, e o cron de reconciliação (reconcilePendingSubscriptions)
+    // é a segunda rede de segurança caso os retries também falhem.
     console.error('Webhook error:', err);
-    res.status(200).send('ok');
+    res.status(500).send('error');
   }
 });
 
