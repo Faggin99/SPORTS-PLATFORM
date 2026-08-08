@@ -1,25 +1,45 @@
-import { useState } from 'react';
-import { UserPlus, X, Users } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { UserPlus, X, Users, Search } from 'lucide-react';
 import { useTheme } from '../../../../contexts/ThemeContext';
+import { useIsMobile } from '../../../../hooks/useIsMobile';
 
 export default function PlayerPalette({
   athletes = [],
+  athleteIdsOnBoard = new Set(),
   onAddPlayer,
+  nextGenericJersey,
   teamAColor = '#3b82f6',
   teamBColor = '#ef4444',
   isOpen,
   onClose,
 }) {
   const { colors } = useTheme();
+  const isMobile = useIsMobile();
   const [selectedTeam, setSelectedTeam] = useState('A');
-  const [nextNumber, setNextNumber] = useState(1);
+  const [query, setQuery] = useState('');
+
+  const filteredAthletes = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return athletes;
+    return athletes.filter((a) => {
+      const name = (a.name || a.nome || '').toLowerCase();
+      const num = String(a.jersey_number || a.number || '');
+      return name.includes(q) || num === q;
+    });
+  }, [athletes, query]);
+
+  const onBoardCount = useMemo(
+    () => athletes.filter((a) => athleteIdsOnBoard.has(a.id)).length,
+    [athletes, athleteIdsOnBoard]
+  );
 
   if (!isOpen) return null;
 
   const handleAddAthlete = (athlete) => {
+    if (athleteIdsOnBoard.has(athlete.id)) return;
     onAddPlayer({
       team: selectedTeam,
-      jerseyNumber: athlete.jersey_number || athlete.number || nextNumber,
+      jerseyNumber: athlete.jersey_number || athlete.number || nextGenericJersey?.(selectedTeam) || 2,
       name: athlete.name || athlete.nome,
       athleteId: athlete.id,
     });
@@ -28,18 +48,18 @@ export default function PlayerPalette({
   const handleAddGeneric = () => {
     onAddPlayer({
       team: selectedTeam,
-      jerseyNumber: nextNumber,
+      jerseyNumber: nextGenericJersey?.(selectedTeam) || 2,
       name: '',
       athleteId: null,
     });
-    setNextNumber((n) => n + 1);
   };
 
   const teamColor = selectedTeam === 'A' ? teamAColor : teamBColor;
 
   return (
     <div style={{
-      width: '220px',
+      width: '230px',
+      height: '100%',
       backgroundColor: colors.surface,
       borderLeft: `1px solid ${colors.border}`,
       display: 'flex',
@@ -56,6 +76,11 @@ export default function PlayerPalette({
       }}>
         <span style={{ fontSize: '0.85rem', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
           <Users size={16} /> Jogadores
+          {onBoardCount > 0 && (
+            <span style={{ fontSize: '0.68rem', fontWeight: 500, color: colors.textSecondary }}>
+              · {onBoardCount} em campo
+            </span>
+          )}
         </span>
         <button onClick={onClose} style={{ background: 'none', border: 'none', color: colors.text, cursor: 'pointer' }}>
           <X size={16} />
@@ -93,6 +118,29 @@ export default function PlayerPalette({
         ))}
       </div>
 
+      {/* Busca */}
+      <div style={{ position: 'relative', margin: '0 0.5rem 0.5rem' }}>
+        <Search size={13} style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: colors.textSecondary }} />
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Buscar por nome ou nº"
+          autoFocus={!isMobile}
+          style={{
+            width: '100%',
+            boxSizing: 'border-box',
+            padding: '0.4rem 0.5rem 0.4rem 1.7rem',
+            borderRadius: '0.375rem',
+            border: `1px solid ${colors.border}`,
+            backgroundColor: colors.background,
+            color: colors.text,
+            fontSize: '0.78rem',
+            outline: 'none',
+          }}
+        />
+      </div>
+
       {/* Generic player button */}
       <button
         onClick={handleAddGeneric}
@@ -111,7 +159,7 @@ export default function PlayerPalette({
         }}
       >
         <UserPlus size={14} color={teamColor} />
-        Jogador genérico #{nextNumber}
+        Jogador genérico
       </button>
 
       {/* Athletes list */}
@@ -127,45 +175,63 @@ export default function PlayerPalette({
           <p style={{ fontSize: '0.75rem', color: colors.textSecondary, textAlign: 'center', padding: '1rem 0' }}>
             Nenhum atleta no plantel.
           </p>
+        ) : filteredAthletes.length === 0 ? (
+          <p style={{ fontSize: '0.75rem', color: colors.textSecondary, textAlign: 'center', padding: '1rem 0' }}>
+            Nenhum atleta encontrado pra "{query}".
+          </p>
         ) : (
-          athletes.map((athlete) => (
-            <button
-              key={athlete.id}
-              onClick={() => handleAddAthlete(athlete)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                padding: '0.375rem 0.5rem',
-                borderRadius: '0.25rem',
-                border: `1px solid ${colors.border}`,
-                backgroundColor: 'transparent',
-                color: colors.text,
-                fontSize: '0.8rem',
-                cursor: 'pointer',
-                textAlign: 'left',
-              }}
-            >
-              <span style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 24,
-                height: 24,
-                borderRadius: '50%',
-                backgroundColor: teamColor,
-                color: 'white',
-                fontSize: '0.7rem',
-                fontWeight: '600',
-                flexShrink: 0,
-              }}>
-                {athlete.jersey_number || athlete.number || '?'}
-              </span>
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {athlete.name || athlete.nome}
-              </span>
-            </button>
-          ))
+          filteredAthletes.map((athlete) => {
+            const onBoard = athleteIdsOnBoard.has(athlete.id);
+            return (
+              <button
+                key={athlete.id}
+                onClick={() => handleAddAthlete(athlete)}
+                disabled={onBoard}
+                title={onBoard ? 'Já está em campo' : undefined}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  padding: '0.375rem 0.5rem',
+                  borderRadius: '0.25rem',
+                  border: `1px solid ${colors.border}`,
+                  backgroundColor: 'transparent',
+                  color: colors.text,
+                  fontSize: '0.8rem',
+                  cursor: onBoard ? 'default' : 'pointer',
+                  textAlign: 'left',
+                  opacity: onBoard ? 0.45 : 1,
+                }}
+              >
+                <span style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 24,
+                  height: 24,
+                  borderRadius: '50%',
+                  backgroundColor: teamColor,
+                  color: 'white',
+                  fontSize: '0.7rem',
+                  fontWeight: '600',
+                  flexShrink: 0,
+                }}>
+                  {athlete.jersey_number || athlete.number || '?'}
+                </span>
+                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {athlete.name || athlete.nome}
+                </span>
+                {onBoard && (
+                  <span style={{
+                    fontSize: '0.62rem', fontWeight: 700, textTransform: 'uppercase',
+                    color: colors.textSecondary, letterSpacing: '0.04em', flexShrink: 0,
+                  }}>
+                    em campo
+                  </span>
+                )}
+              </button>
+            );
+          })
         )}
       </div>
     </div>

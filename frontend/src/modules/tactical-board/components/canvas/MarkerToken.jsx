@@ -8,6 +8,7 @@ export default function MarkerToken({
   draggable = true,
   onDragEnd,
   onClick,
+  onDblClick,
 }) {
   return (
     <Group
@@ -17,7 +18,12 @@ export default function MarkerToken({
       onDragEnd={onDragEnd}
       onClick={onClick}
       onTap={onClick}
+      onDblClick={onDblClick}
+      onDblTap={onDblClick}
     >
+      {/* Hit area invisível — formas finas (vara, bandeira) são impossíveis
+          de tocar no dedo sem isso */}
+      <Rect x={-16} y={-16} width={32} height={32} fill="transparent" />
       {/* Selection ring */}
       {isSelected && (
         <Circle

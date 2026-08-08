@@ -9,6 +9,7 @@ import { useTheme } from '../../../contexts/ThemeContext';
 import { useClub } from '../../../contexts/ClubContext';
 import { useIsMobile } from '../../../hooks/useIsMobile';
 import { useSportConfig } from '../../../hooks/useSportConfig';
+import { notify } from '../../../lib/notify';
 import TacticalCanvas from '../components/canvas/TacticalCanvas';
 import FrameControls from '../components/toolbar/FrameControls';
 import PlaybackControls from '../components/toolbar/PlaybackControls';
@@ -21,8 +22,8 @@ import { useVideoExport } from '../hooks/useVideoExport';
 import { usePlays } from '../hooks/usePlays';
 import { TourGuide } from '../../../components/common/TourGuide';
 import { useTour, useTourReplayListener } from '../../../hooks/useTour';
-import { getFormationsForFieldType } from '../utils/defaultFormations';
-import { FIELD_VIEWS } from '../utils/fieldDimensions';
+import { getFormationsForFieldType, mirrorFormation } from '../utils/defaultFormations';
+import { FIELD_TYPES, FIELD_VIEWS } from '../utils/fieldDimensions';
 
 // ─────────────────────────────────────────────────────────────────
 // Catálogos
@@ -55,12 +56,19 @@ const FIELD_VIEW_OPTIONS = [
   { view: FIELD_VIEWS.THIRD_RIGHT, label: 'Terço direito' },
 ];
 
+const FIELD_TYPE_OPTIONS = [
+  { type: FIELD_TYPES.FOOTBALL_11, label: 'Futebol 11' },
+  { type: FIELD_TYPES.FOOTBALL_7,  label: 'Futebol 7' },
+  { type: FIELD_TYPES.FUTSAL,      label: 'Futsal' },
+];
+
 const DRAWING_COLORS = ['#ffffff', '#fbbf24', '#ef4444', '#22c55e', '#3b82f6', '#a855f7', '#f97316', '#ec4899'];
 
 const SHORTCUTS = [
   ['Espaço',          'Play / Pause'],
   ['← / →',           'Frame anterior / próximo'],
   ['Ctrl+Z / Ctrl+Y', 'Desfazer / Refazer'],
+  ['Ctrl+S',          'Salvar jogada'],
   ['Delete',          'Remover seleção'],
   ['Esc',             'Cancelar / fechar painéis'],
   ['F11',             'Tela cheia'],
@@ -82,6 +90,7 @@ export default function TacticalBoardPage() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [currentPlayId, setCurrentPlayId] = useState(null);
   const [currentPlayName, setCurrentPlayName] = useState('');
+  const [currentPlayDescription, setCurrentPlayDescription] = useState('');
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Drawing mode
@@ -93,6 +102,9 @@ export default function TacticalBoardPage() {
 
   // Sidebar flyout
   const [openSection, setOpenSection] = useState(null); // 'players' | 'arrows' | 'draw' | 'objects' | 'formations' | 'view'
+
+  // Alvo da formação: 'A' | 'B' | 'both'
+  const [formationTarget, setFormationTarget] = useState('A');
 
   const [athletes, setAthletes] = useState([]);
   useEffect(() => {
@@ -112,13 +124,11 @@ export default function TacticalBoardPage() {
   useTourReplayListener('tactical-board', () => tour.setIsOpen(true));
   const tourSteps = useMemo(() => [
     { title: 'Quadro Tático', content: 'Aqui você cria jogadas animadas pra mostrar ao time. Sidebar à esquerda agrupa todas as ferramentas.' },
-    { title: 'Adicionar peças', content: 'Clique em "Peças" na sidebar pra adicionar jogadores das duas equipes, goleiros e bola.' },
+    { title: 'Formações', content: 'Em "Formações", escolha Time A, Time B ou Ambos e aplique com 1 clique — o Time B entra espelhado, e nada do que você desenhou é apagado.' },
     { title: 'Animação', content: 'Use a barra inferior pra criar frames. Em cada frame, mova as peças onde quiser. O play interpola entre frames.' },
-    { title: 'Salvar/Exportar', content: 'Salve sua jogada pra reusar depois ou exporte como vídeo .mp4 pra mandar pro grupo do clube.' },
-    { title: 'Atalhos', content: 'Espaço pra play, ← → pra frames, Del pra remover, Ctrl+Z pra desfazer. Veja todos no botão "?" no canto.' },
+    { title: 'Salvar/Exportar', content: 'Salve sua jogada pra reusar depois ou exporte como vídeo pra mandar pro grupo do clube.' },
+    { title: 'Atalhos', content: 'Espaço pra play, ← → pra frames, Del pra remover, Ctrl+Z pra desfazer, Ctrl+S pra salvar. Veja todos no botão "?" no canto.' },
   ], []);
-
-  const playerCountRef = useRef({ A: 0, B: 0 });
 
   const displayElements = videoExport.exportElements
     ? videoExport.exportElements
@@ -139,6 +149,14 @@ export default function TacticalBoardPage() {
     return () => document.removeEventListener('fullscreenchange', handler);
   }, []);
 
+  // ── Aviso de alterações não salvas ao fechar a aba ──
+  useEffect(() => {
+    if (!board.isDirty) return;
+    const onBeforeUnload = (e) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [board.isDirty]);
+
   // ── Drawing helpers ──
   const activateDrawingTool = useCallback((toolId, mode, dash = [], color = null) => {
     if (activeToolId === toolId) {
@@ -157,8 +175,9 @@ export default function TacticalBoardPage() {
     clearDrawingMode();
     let team, jerseyNumber, name, athleteId, isGoalkeeper;
     if (typeof teamOrData === 'string') {
-      team = teamOrData; playerCountRef.current[team]++;
-      jerseyNumber = playerCountRef.current[team]; name = ''; athleteId = null; isGoalkeeper = false;
+      team = teamOrData;
+      jerseyNumber = board.nextGenericJersey(team);
+      name = ''; athleteId = null; isGoalkeeper = false;
     } else {
       ({ team, jerseyNumber, name, athleteId } = teamOrData); isGoalkeeper = teamOrData.isGoalkeeper || false;
     }
@@ -170,7 +189,6 @@ export default function TacticalBoardPage() {
 
   const handleAddGoalkeeper = useCallback((team) => {
     clearDrawingMode();
-    playerCountRef.current[team]++;
     board.addElement({
       type: 'player', team, jerseyNumber: 1, name: 'GK', athleteId: null, isGoalkeeper: true,
       x: team === 'A' ? 5 : 95, y: 50,
@@ -195,56 +213,103 @@ export default function TacticalBoardPage() {
     if (board.selectedDrawingId) board.removeDrawing(board.selectedDrawingId);
   }, [board]);
 
-  const handleSave = useCallback(async ({ name, description }) => {
+  // ── Salvar ──
+  const persistPlay = useCallback(async ({ name, description, asNew = false }) => {
     const playData = { ...board.getPlayData(), name, description, club_id: selectedClub?.id || null };
-    if (currentPlayId) await plays.updatePlay(currentPlayId, playData);
-    else {
+    if (currentPlayId && !asNew) {
+      await plays.updatePlay(currentPlayId, playData);
+    } else {
       const created = await plays.createPlay(playData);
       setCurrentPlayId(created.id);
     }
     setCurrentPlayName(name);
+    setCurrentPlayDescription(description || '');
+    board.markSaved();
   }, [board, currentPlayId, plays, selectedClub]);
+
+  // Salvar em 1 clique quando a jogada já existe; modal só na primeira vez
+  const handleSaveClick = useCallback(async () => {
+    if (currentPlayId && currentPlayName) {
+      try {
+        await persistPlay({ name: currentPlayName, description: currentPlayDescription });
+        notify.success('Jogada salva');
+      } catch {
+        notify.error('Não foi possível salvar. Tente novamente.');
+      }
+    } else {
+      setSaveModalOpen(true);
+    }
+  }, [currentPlayId, currentPlayName, currentPlayDescription, persistPlay]);
 
   const handleLoad = useCallback((play) => {
     board.loadPlay(play);
     setCurrentPlayId(play.id);
     setCurrentPlayName(play.name || '');
-    playerCountRef.current = { A: 0, B: 0 };
+    setCurrentPlayDescription(play.description || '');
     clearDrawingMode();
     setOpenSection(null);
   }, [board, clearDrawingMode]);
 
-  const handleReset = useCallback(() => {
-    if (window.confirm('Limpar todo o quadro tático?')) {
-      board.resetBoard();
-      setCurrentPlayId(null);
-      setCurrentPlayName('');
-      playerCountRef.current = { A: 0, B: 0 };
-      clearDrawingMode();
-    }
+  const handleReset = useCallback(async () => {
+    const ok = await notify.confirm('Limpar todo o quadro tático?', { confirmText: 'Limpar', cancelText: 'Cancelar' });
+    if (!ok) return;
+    board.resetBoard();
+    setCurrentPlayId(null);
+    setCurrentPlayName('');
+    setCurrentPlayDescription('');
+    clearDrawingMode();
   }, [board, clearDrawingMode]);
 
-  const handleLoadFormation = useCallback((formationKey) => {
+  // ── Formações (por time, não-destrutivo) ──
+  const handleApplyFormation = useCallback((formationKey) => {
     clearDrawingMode();
     const formations = getFormationsForFieldType(board.fieldType);
     const formation = formations[formationKey];
     if (!formation) return;
-    board.resetBoard();
-    playerCountRef.current = { A: 0, B: 0 };
-    formation.positions.forEach((pos) => {
-      playerCountRef.current.A++;
-      board.addElement({
-        type: 'player', team: 'A', jerseyNumber: pos.jerseyNumber, name: pos.name, athleteId: null,
-        isGoalkeeper: pos.jerseyNumber === 1 && (pos.name === 'GK' || pos.name === 'GOL'),
-        x: pos.x, y: pos.y,
-      });
-    });
-    setOpenSection(null);
-  }, [board, clearDrawingMode]);
+
+    // Coordenadas % são relativas à vista atual — formação só faz sentido no
+    // campo inteiro. Força a vista full antes de aplicar.
+    if (board.fieldView !== FIELD_VIEWS.FULL) {
+      board.setFieldView(FIELD_VIEWS.FULL);
+      notify.info('Vista ajustada para campo inteiro');
+    }
+
+    const applications = [];
+    if (formationTarget === 'A' || formationTarget === 'both') {
+      applications.push({ team: 'A', positions: formation.positions });
+    }
+    if (formationTarget === 'B' || formationTarget === 'both') {
+      applications.push({ team: 'B', positions: mirrorFormation(formation.positions) });
+    }
+
+    const { kept } = board.applyFormations(applications);
+
+    const targetLabel = formationTarget === 'both' ? 'aos dois times'
+      : formationTarget === 'B' ? 'ao Time B' : 'ao Time A';
+    const keptSuffix = kept > 0 ? ` · ${kept} jogador${kept > 1 ? 'es' : ''} mantido${kept > 1 ? 's' : ''} fora da formação` : '';
+    notify.success(`${formation.label} aplicada ${targetLabel}${keptSuffix}`);
+  }, [board, formationTarget, clearDrawingMode]);
+
+  // ── Troca de tipo de campo ──
+  const handleSetFieldType = useCallback((type) => {
+    if (type === board.fieldType) return;
+    board.setFieldType(type);
+    const hasPieces = (board.currentFrame.elements || []).length > 0;
+    if (hasPieces) {
+      const label = FIELD_TYPE_OPTIONS.find(o => o.type === type)?.label || type;
+      notify.info(`Formações disponíveis atualizadas para ${label}`);
+    }
+  }, [board]);
 
   // ── Atalhos ──
   useEffect(() => {
     const onKey = (e) => {
+      // Ctrl+S SEMPRE previne o "Salvar página" do navegador, mesmo em inputs
+      if (e.key === 's' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') handleSaveClick();
+        return;
+      }
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
       if (e.key === 'Delete' || e.key === 'Backspace') handleRemoveSelected();
       else if (e.key === 'z' && (e.ctrlKey || e.metaKey) && !e.shiftKey) { e.preventDefault(); board.undo(); }
@@ -257,20 +322,47 @@ export default function TacticalBoardPage() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [board, playback, handleRemoveSelected, toggleFullscreen, clearDrawingMode]);
+  }, [board, playback, handleRemoveSelected, toggleFullscreen, clearDrawingMode, handleSaveClick]);
 
   const formations = getFormationsForFieldType(board.fieldType);
   const selectedElement = useMemo(
     () => board.currentFrame.elements.find(el => el.id === board.selectedElementId) || null,
     [board.currentFrame.elements, board.selectedElementId]
   );
+  const selectedDrawing = useMemo(
+    () => (board.currentFrame.drawings || []).find(d => d.id === board.selectedDrawingId) || null,
+    [board.currentFrame.drawings, board.selectedDrawingId]
+  );
+
+  // Atletas já em campo (pra PlayerPalette indicar e evitar duplicar)
+  const athleteIdsOnBoard = useMemo(() => {
+    const set = new Set();
+    for (const frame of board.frames) {
+      for (const el of frame.elements) {
+        if (el.type === 'player' && el.athleteId) set.add(el.athleteId);
+      }
+    }
+    return set;
+  }, [board.frames]);
+
+  // Seleções mutuamente exclusivas — sem isso o painel mostra "Jogador" mas
+  // o Delete remove também um desenho selecionado antes
+  const handleSelectElement = useCallback((id) => {
+    board.setSelectedElementId(id);
+    if (id) board.setSelectedDrawingId(null);
+  }, [board]);
+  const handleSelectDrawing = useCallback((id) => {
+    board.setSelectedDrawingId(id);
+    if (id) board.setSelectedElementId(null);
+  }, [board]);
+
+  // Duplo-clique numa peça: seleciona e garante painel aberto
+  const handleElementEdit = useCallback((elementId) => {
+    board.setSelectedElementId(elementId);
+    board.setSelectedDrawingId(null);
+  }, [board]);
 
   // ─────────────────── Renderização ───────────────────
-  // Detecta navegador mobile — bloqueia edição e mostra aviso do app oficial
-  // Mobile: em vez de bloquear, adaptamos o layout (Flyout vira overlay,
-  // hint discreto se estiver em retrato). Um botão em MobileHint sugere
-  // rotacionar. O usuário PODE editar; só é menos confortável.
-
   return (
     <div ref={containerRef} style={{
       position: 'relative', width: '100%',
@@ -280,7 +372,6 @@ export default function TacticalBoardPage() {
       overflow: 'hidden',
       display: 'flex',
       color: colors.text,
-      // Em mobile: melhor toque, evita scroll acidental
       touchAction: isMobile ? 'none' : 'auto',
     }}>
       <TourGuide isOpen={tour.isOpen} onClose={tour.stop} steps={tourSteps} storageKey={tour.storageKey} />
@@ -294,10 +385,10 @@ export default function TacticalBoardPage() {
         canRedo={board.canRedo}
         onUndo={board.undo}
         onRedo={board.redo}
-        onSave={() => setSaveModalOpen(true)}
+        onSave={handleSaveClick}
         onLoad={() => setLoadModalOpen(true)}
-        onExport={() => board.totalFrames > 1 && videoExport.startExport()}
-        canExport={board.totalFrames > 1}
+        onExport={() => board.totalFrames > 1 && !videoExport.isExporting && videoExport.startExport(currentPlayName || 'jogada')}
+        canExport={board.totalFrames > 1 && !videoExport.isExporting}
         exporting={videoExport.isExporting}
         onReset={handleReset}
         primary={colors.primary}
@@ -336,14 +427,22 @@ export default function TacticalBoardPage() {
             />
           )}
           {openSection === 'objects' && (
-            <ObjectsFlyout onAdd={handleAddMarker} />
+            <ObjectsFlyout onAdd={handleAddMarker} isMobile={isMobile} />
           )}
           {openSection === 'formations' && (
-            <FormationsFlyout formations={formations} onLoad={handleLoadFormation} />
+            <FormationsFlyout
+              formations={formations}
+              target={formationTarget}
+              setTarget={setFormationTarget}
+              teamAColor={board.teamAColor}
+              teamBColor={board.teamBColor}
+              onApply={handleApplyFormation}
+              isMobile={isMobile}
+            />
           )}
           {openSection === 'view' && (
             <ViewFlyout
-              fieldType={board.fieldType} setFieldType={board.setFieldType}
+              fieldType={board.fieldType} setFieldType={handleSetFieldType}
               fieldView={board.fieldView} setFieldView={board.setFieldView}
             />
           )}
@@ -365,9 +464,15 @@ export default function TacticalBoardPage() {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
             <span style={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.55)', fontWeight: 600 }}>Jogada:</span>
-            <span style={{ fontSize: '0.9rem', color: '#fff', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 280 }}>
+            <span
+              onClick={() => setSaveModalOpen(true)}
+              title="Renomear / salvar como nova jogada"
+              style={{ fontSize: '0.9rem', color: '#fff', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 280, cursor: 'pointer', textDecoration: 'underline dotted rgba(255,255,255,0.35)', textUnderlineOffset: 3 }}>
               {currentPlayName || 'Sem nome'}
             </span>
+            {board.isDirty && (
+              <span title="Alterações não salvas" style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#fbbf24', flexShrink: 0 }} />
+            )}
             {board.totalFrames > 1 && (
               <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.45)', padding: '0.1rem 0.4rem', backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 999 }}>
                 {board.totalFrames} frames
@@ -399,21 +504,23 @@ export default function TacticalBoardPage() {
             nextFrameElements={nextFrameElements}
             teamAColor={board.teamAColor}
             teamBColor={board.teamBColor}
-            isPlaying={playback.isPlaying}
+            isPlaying={playback.isPlaying || videoExport.isExporting}
             drawingMode={drawingMode}
             drawingColor={drawingColor}
             drawingDash={drawingDash}
             drawingStrokeWidth={drawingStrokeWidth}
             onElementMove={board.updateElementPosition}
-            onElementSelect={board.setSelectedElementId}
-            onDrawingSelect={board.setSelectedDrawingId}
+            onElementSelect={handleSelectElement}
+            onElementEdit={handleElementEdit}
+            onDrawingSelect={handleSelectDrawing}
             onDrawingComplete={handleDrawingComplete}
+            onDrawingUpdate={board.updateDrawing}
             selectedElementId={board.selectedElementId}
             selectedDrawingId={board.selectedDrawingId}
           />
 
           {/* Indicador de modo de desenho */}
-          {drawingMode && (
+          {drawingMode && !videoExport.isExporting && (
             <div style={{
               position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 25,
               backgroundColor: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)', borderRadius: '0.5rem',
@@ -429,31 +536,42 @@ export default function TacticalBoardPage() {
             </div>
           )}
 
-          {/* Painel de propriedades flutuante (canto inferior direito) quando há seleção */}
-          {(board.selectedElementId || board.selectedDrawingId) && (
+          {/* Progresso do export de vídeo */}
+          {videoExport.isExporting && (
             <div style={{
-              position: 'absolute', bottom: 110, right: 12, zIndex: 22,
-              backgroundColor: 'rgba(12,12,28,0.92)', backdropFilter: 'blur(14px)',
-              borderRadius: '0.5rem', border: '1px solid rgba(255,255,255,0.1)',
-              padding: '0.55rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem',
-              boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
+              position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 26,
+              backgroundColor: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)', borderRadius: '0.5rem',
+              padding: '0.35rem 0.9rem', display: 'flex', alignItems: 'center', gap: '0.6rem',
+              border: '1px solid rgba(200,255,0,0.35)', fontSize: '0.78rem', color: 'white',
             }}>
-              <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.6)' }}>
-                {selectedElement ? `${selectedElement.type === 'player' ? `#${selectedElement.jerseyNumber || '—'}` : selectedElement.type === 'ball' ? 'Bola' : 'Objeto'}` : 'Desenho selecionado'}
-              </span>
-              <button onClick={handleRemoveSelected}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '0.3rem 0.55rem', background: 'rgba(239,68,68,0.18)', color: '#fca5a5', border: '1px solid rgba(239,68,68,0.4)', borderRadius: '0.3rem', fontSize: '0.72rem', cursor: 'pointer' }}>
-                <Trash2 size={12} /> Remover
+              <Film size={14} style={{ color: '#c8ff00' }} />
+              <span style={{ fontWeight: 600 }}>Gerando vídeo… {Math.round(videoExport.progress)}%</span>
+              <button onClick={videoExport.cancelExport}
+                style={{ border: 'none', background: 'rgba(239,68,68,0.3)', color: '#fca5a5', borderRadius: '0.25rem', cursor: 'pointer', padding: '0.15rem 0.45rem', fontSize: '0.7rem' }}>
+                Cancelar
               </button>
             </div>
+          )}
+
+          {/* Painel de propriedades da seleção */}
+          {(selectedElement || selectedDrawing) && !playback.isPlaying && !videoExport.isExporting && (
+            <SelectionPanel
+              element={selectedElement}
+              drawing={selectedDrawing}
+              teamAColor={board.teamAColor}
+              teamBColor={board.teamBColor}
+              onPatchElement={(patch) => board.updateElementProps(selectedElement.id, patch)}
+              onPatchDrawing={(patch) => board.updateDrawing(selectedDrawing.id, patch)}
+              onRemove={handleRemoveSelected}
+              isMobile={isMobile}
+            />
           )}
         </div>
 
         {/* BOTTOM BAR — playback + frames */}
         <div style={{
           flexShrink: 0,
-          backgroundColor: 'rgba(15,23,42,0.5)',
-          backdropFilter: 'blur(8px)',
+          backgroundColor: '#0f172a',
           borderTop: '1px solid rgba(255,255,255,0.08)',
         }}>
           <div style={{ display: 'flex', justifyContent: 'center', padding: '0.15rem 0' }}>
@@ -490,7 +608,9 @@ export default function TacticalBoardPage() {
         }}>
           <PlayerPalette
             athletes={athletes}
+            athleteIdsOnBoard={athleteIdsOnBoard}
             onAddPlayer={handleAddPlayer}
+            nextGenericJersey={board.nextGenericJersey}
             teamAColor={board.teamAColor}
             teamBColor={board.teamBColor}
             isOpen={paletteOpen}
@@ -503,8 +623,9 @@ export default function TacticalBoardPage() {
       <SavePlayModal
         isOpen={saveModalOpen}
         onClose={() => setSaveModalOpen(false)}
-        onSave={handleSave}
-        initialData={{ name: currentPlayName }}
+        onSave={persistPlay}
+        initialData={{ name: currentPlayName, description: currentPlayDescription }}
+        existingPlayName={currentPlayId ? currentPlayName : null}
       />
       <LoadPlayModal
         isOpen={loadModalOpen}
@@ -513,7 +634,9 @@ export default function TacticalBoardPage() {
         onDelete={plays.deletePlay}
         plays={plays.plays}
         loading={plays.loading}
+        error={plays.error}
         onFetch={() => plays.fetchPlays(selectedClub?.id)}
+        isDirty={board.isDirty}
       />
 
       {shortcutsOpen && (
@@ -545,6 +668,187 @@ function describeMode(m) {
     case 'text':           return 'Texto';
     default: return m;
   }
+}
+
+// ── Painel de propriedades editável da seleção ──
+function SelectionPanel({ element, drawing, teamAColor, teamBColor, onPatchElement, onPatchDrawing, onRemove, isMobile }) {
+  const isPlayer = element?.type === 'player';
+  const [jersey, setJersey] = useState(isPlayer ? String(element.jerseyNumber ?? '') : '');
+  const [name, setName] = useState(isPlayer ? (element.name || '') : '');
+
+  // Ressincroniza quando muda a seleção
+  useEffect(() => {
+    if (isPlayer) {
+      setJersey(String(element.jerseyNumber ?? ''));
+      setName(element.name || '');
+    }
+  }, [element?.id, element?.jerseyNumber, element?.name]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const commitJersey = () => {
+    if (!isPlayer) return;
+    const n = parseInt(jersey, 10);
+    if (Number.isFinite(n) && n >= 1 && n <= 99 && n !== element.jerseyNumber) {
+      onPatchElement({ jerseyNumber: n });
+    } else {
+      setJersey(String(element.jerseyNumber ?? ''));
+    }
+  };
+  const commitName = () => {
+    if (!isPlayer) return;
+    const v = name.trim().slice(0, 12);
+    if (v !== (element.name || '')) onPatchElement({ name: v });
+  };
+
+  const stop = (e) => e.stopPropagation();
+
+  const panelStyle = isMobile
+    ? {
+        position: 'absolute', bottom: 8, left: '50%', transform: 'translateX(-50%)', zIndex: 22,
+        backgroundColor: 'rgba(12,12,28,0.94)', backdropFilter: 'blur(14px)',
+        borderRadius: '0.6rem', border: '1px solid rgba(255,255,255,0.12)',
+        padding: '0.55rem 0.7rem', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap',
+        boxShadow: '0 8px 24px rgba(0,0,0,0.45)', maxWidth: 'calc(100% - 24px)',
+      }
+    : {
+        position: 'absolute', bottom: 12, right: 12, zIndex: 22,
+        backgroundColor: 'rgba(12,12,28,0.94)', backdropFilter: 'blur(14px)',
+        borderRadius: '0.6rem', border: '1px solid rgba(255,255,255,0.12)',
+        padding: '0.6rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.55rem', flexWrap: 'wrap',
+        boxShadow: '0 8px 24px rgba(0,0,0,0.45)', maxWidth: 380,
+      };
+
+  const inputBase = {
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    border: '1px solid rgba(255,255,255,0.15)',
+    borderRadius: '0.3rem',
+    color: '#fff',
+    fontSize: '0.78rem',
+    padding: '0.28rem 0.4rem',
+    outline: 'none',
+  };
+
+  if (isPlayer) {
+    return (
+      <div style={panelStyle} onKeyDown={stop}>
+        <span style={{ fontSize: '0.68rem', color: 'rgba(255,255,255,0.5)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Jogador</span>
+        <input
+          type="number" min={1} max={99} value={jersey}
+          onChange={(e) => setJersey(e.target.value)}
+          onBlur={commitJersey}
+          onKeyDown={(e) => { stop(e); if (e.key === 'Enter') e.currentTarget.blur(); }}
+          title="Número da camisa"
+          style={{ ...inputBase, width: 48, textAlign: 'center' }}
+        />
+        <input
+          type="text" maxLength={12} value={name} placeholder="Nome"
+          onChange={(e) => setName(e.target.value)}
+          onBlur={commitName}
+          onKeyDown={(e) => { stop(e); if (e.key === 'Enter') e.currentTarget.blur(); }}
+          title="Nome exibido"
+          style={{ ...inputBase, width: 96 }}
+        />
+        {/* Toggle de time */}
+        <div style={{ display: 'flex', gap: 3 }}>
+          {['A', 'B'].map((t) => {
+            const tColor = t === 'A' ? teamAColor : teamBColor;
+            const active = element.team === t;
+            return (
+              <button key={t}
+                onClick={() => !active && onPatchElement({ team: t })}
+                title={`Time ${t}`}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  padding: '0.26rem 0.5rem', borderRadius: '0.3rem', cursor: 'pointer',
+                  border: `1px solid ${active ? tColor : 'rgba(255,255,255,0.15)'}`,
+                  backgroundColor: active ? `${tColor}30` : 'transparent',
+                  color: '#fff', fontSize: '0.72rem', fontWeight: active ? 700 : 400,
+                }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: tColor }} />
+                {t}
+              </button>
+            );
+          })}
+        </div>
+        {/* Toggle goleiro */}
+        <button
+          onClick={() => onPatchElement({ isGoalkeeper: !element.isGoalkeeper })}
+          title="Alternar goleiro"
+          style={{
+            padding: '0.26rem 0.5rem', borderRadius: '0.3rem', cursor: 'pointer',
+            border: `1px solid ${element.isGoalkeeper ? '#fbbf24' : 'rgba(255,255,255,0.15)'}`,
+            backgroundColor: element.isGoalkeeper ? 'rgba(251,191,36,0.18)' : 'transparent',
+            color: element.isGoalkeeper ? '#fbbf24' : 'rgba(255,255,255,0.75)',
+            fontSize: '0.72rem', fontWeight: 600,
+          }}>
+          GK
+        </button>
+        <button onClick={onRemove}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '0.3rem 0.55rem', background: 'rgba(239,68,68,0.18)', color: '#fca5a5', border: '1px solid rgba(239,68,68,0.4)', borderRadius: '0.3rem', fontSize: '0.72rem', cursor: 'pointer' }}>
+          <Trash2 size={12} /> Remover
+        </button>
+      </div>
+    );
+  }
+
+  if (drawing) {
+    return (
+      <div style={panelStyle} onKeyDown={stop}>
+        <span style={{ fontSize: '0.68rem', color: 'rgba(255,255,255,0.5)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Desenho</span>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {DRAWING_COLORS.map((c) => (
+            <button key={c}
+              onClick={() => onPatchDrawing(drawing.drawType?.startsWith('zone') ? { color: hexToRgbaStr(c, 0.15), strokeColor: hexToRgbaStr(c, 0.5) } : { color: c })}
+              title={c}
+              style={{
+                width: 18, height: 18, borderRadius: '50%',
+                border: (drawing.color === c || drawing.strokeColor?.includes(hexPartial(c))) ? '2px solid #fff' : '1px solid rgba(255,255,255,0.25)',
+                backgroundColor: c, cursor: 'pointer', padding: 0,
+              }}
+            />
+          ))}
+        </div>
+        {['arrow_straight', 'arrow_curved', 'free_draw'].includes(drawing.drawType) && (
+          <input
+            type="range" min={1} max={6} step={0.5}
+            value={drawing.strokeWidth || 2.5}
+            onChange={(e) => onPatchDrawing({ strokeWidth: Number(e.target.value) })}
+            title="Espessura"
+            style={{ width: 70 }}
+          />
+        )}
+        <button onClick={onRemove}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '0.3rem 0.55rem', background: 'rgba(239,68,68,0.18)', color: '#fca5a5', border: '1px solid rgba(239,68,68,0.4)', borderRadius: '0.3rem', fontSize: '0.72rem', cursor: 'pointer' }}>
+          <Trash2 size={12} /> Remover
+        </button>
+      </div>
+    );
+  }
+
+  // Bola / marcador — só remover
+  return (
+    <div style={panelStyle}>
+      <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.6)' }}>
+        {element?.type === 'ball' ? 'Bola' : 'Objeto'}
+      </span>
+      <button onClick={onRemove}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '0.3rem 0.55rem', background: 'rgba(239,68,68,0.18)', color: '#fca5a5', border: '1px solid rgba(239,68,68,0.4)', borderRadius: '0.3rem', fontSize: '0.72rem', cursor: 'pointer' }}>
+        <Trash2 size={12} /> Remover
+      </button>
+    </div>
+  );
+}
+
+function hexToRgbaStr(hex, alpha) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+function hexPartial(hex) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `${r},${g},${b}`;
 }
 
 // ── Sidebar (compacta, só ícones com tooltip) ──
@@ -598,9 +902,9 @@ function Sidebar({ openSection, setOpenSection, canUndo, canRedo, onUndo, onRedo
       {item('draw',       Pencil,     'Desenho')}
       {item('objects',    Cone,       'Objetos')}
       {divider}
-      {item(null, Save,       'Salvar jogada',   onSave)}
+      {item(null, Save,       'Salvar jogada (Ctrl+S)',   onSave)}
       {item(null, FolderOpen, 'Abrir jogada',    onLoad)}
-      {item(null, exporting ? Pause : Film, 'Exportar vídeo', onExport, { disabled: !canExport })}
+      {item(null, exporting ? Pause : Film, canExport ? 'Exportar vídeo' : 'Crie um 2º frame para animar (botão +)', onExport, { disabled: !canExport })}
       {divider}
       {item(null, Undo2, 'Desfazer (Ctrl+Z)', onUndo, { disabled: !canUndo })}
       {item(null, Redo2, 'Refazer (Ctrl+Y)',  onRedo, { disabled: !canRedo })}
@@ -613,14 +917,11 @@ function Sidebar({ openSection, setOpenSection, canUndo, canRedo, onUndo, onRedo
 // ── Flyout (painel ao lado da sidebar) ──
 function Flyout({ title, onClose, children }) {
   const isMobile = useIsMobile();
-  // Em mobile o Flyout vira overlay flutuante (position absolute) pra não
-  // empurrar o canvas nem consumir metade da tela. Em desktop segue como
-  // coluna que ocupa espaço no flex do container principal.
   const containerStyle = isMobile
     ? {
         position: 'absolute',
         top: 0, left: 44, bottom: 0,
-        width: 'min(260px, calc(100vw - 60px))',
+        width: 'min(280px, calc(100vw - 60px))',
         backgroundColor: 'rgba(15,23,42,0.92)',
         backdropFilter: 'blur(14px)',
         boxShadow: '4px 0 20px rgba(0,0,0,0.5)',
@@ -628,7 +929,7 @@ function Flyout({ title, onClose, children }) {
         zIndex: 40,
       }
     : {
-        width: 230, flexShrink: 0,
+        width: 250, flexShrink: 0,
         backgroundColor: 'rgba(15,23,42,0.82)',
         backdropFilter: 'blur(14px)',
         borderRight: '1px solid rgba(255,255,255,0.08)',
@@ -735,13 +1036,13 @@ function DrawFlyout({ activeToolId, onActivate, drawingColor, setDrawingColor })
   );
 }
 
-function ObjectsFlyout({ onAdd }) {
+function ObjectsFlyout({ onAdd, isMobile }) {
   return (
     <div>
       <FlyoutLabel>Adicionar objeto</FlyoutLabel>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
         {MARKER_TYPES.map((m) => (
-          <FlyBtn key={m.type} onClick={() => onAdd(m.type)}>
+          <FlyBtn key={m.type} onClick={() => onAdd(m.type)} minHeight={isMobile ? 44 : undefined}>
             <span style={{ width: 14, textAlign: 'center', fontSize: '0.85rem' }}>{m.icon}</span>
             <span>{m.label}</span>
           </FlyBtn>
@@ -751,21 +1052,98 @@ function ObjectsFlyout({ onAdd }) {
   );
 }
 
-function FormationsFlyout({ formations, onLoad }) {
+// Mini-campo SVG do card de formação: um ponto por posição.
+// Espelha ao vivo quando o alvo é o Time B.
+function FormationPreview({ positions, mirrored, color }) {
+  const pts = mirrored ? mirrorFormation(positions) : positions;
+  return (
+    <svg width={72} height={46} viewBox="0 0 100 64" style={{ display: 'block', flexShrink: 0 }}>
+      <rect x={0.5} y={0.5} width={99} height={63} rx={3} fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.18)" strokeWidth={1} />
+      <line x1={50} y1={0.5} x2={50} y2={63.5} stroke="rgba(255,255,255,0.14)" strokeWidth={1} />
+      <circle cx={50} cy={32} r={9} fill="none" stroke="rgba(255,255,255,0.14)" strokeWidth={1} />
+      {pts.map((p, i) => (
+        <circle key={i} cx={p.x} cy={(p.y / 100) * 64} r={3.2} fill={color} opacity={p.isGoalkeeper ? 0.75 : 1} />
+      ))}
+    </svg>
+  );
+}
+
+function FormationsFlyout({ formations, target, setTarget, teamAColor, teamBColor, onApply, isMobile }) {
   const entries = Object.entries(formations || {});
   if (entries.length === 0) return <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.8rem' }}>Sem formações para esse tipo de campo.</div>;
+
+  const chips = [
+    { key: 'A',    label: 'Time A', dot: teamAColor },
+    { key: 'B',    label: 'Time B', dot: teamBColor },
+    { key: 'both', label: 'Ambos',  dot: null },
+  ];
+  const previewColor = target === 'B' ? teamBColor : teamAColor;
+
   return (
-    <div>
-      <FlyoutLabel>Aplicar formação (Time A)</FlyoutLabel>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-        {entries.map(([key, f]) => (
-          <FlyBtn key={key} onClick={() => onLoad(key)}>
-            <LayoutGrid size={12} /><span>{f.label}</span>
-          </FlyBtn>
-        ))}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+      <div>
+        <FlyoutLabel>Aplicar em</FlyoutLabel>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {chips.map((c) => {
+            const active = target === c.key;
+            return (
+              <button key={c.key}
+                onClick={() => setTarget(c.key)}
+                style={{
+                  flex: 1,
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                  padding: '0.4rem 0.3rem',
+                  minHeight: isMobile ? 44 : undefined,
+                  backgroundColor: active ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.04)',
+                  border: `1px solid ${active ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.08)'}`,
+                  borderRadius: '0.4rem',
+                  color: '#fff', fontSize: '0.72rem', fontWeight: active ? 700 : 500,
+                  cursor: 'pointer', transition: 'all 0.12s',
+                }}>
+                {c.dot && <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: c.dot, flexShrink: 0 }} />}
+                {c.key === 'both' && (
+                  <span style={{ display: 'inline-flex', flexShrink: 0 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: teamAColor }} />
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: teamBColor, marginLeft: -3 }} />
+                  </span>
+                )}
+                {c.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
-      <div style={{ marginTop: 8, fontSize: '0.65rem', color: 'rgba(255,255,255,0.4)' }}>
-        ⚠ Aplicar uma formação substitui as peças atuais.
+
+      <div>
+        <FlyoutLabel>Formação</FlyoutLabel>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {entries.map(([key, f]) => (
+            <button key={key}
+              onClick={() => onApply(key)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                padding: '0.45rem 0.55rem',
+                minHeight: isMobile ? 44 : undefined,
+                backgroundColor: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: '0.45rem',
+                color: 'rgba(255,255,255,0.92)',
+                fontSize: '0.78rem', fontWeight: 600,
+                cursor: 'pointer', textAlign: 'left',
+                transition: 'all 0.12s',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.1)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.04)'; }}
+            >
+              <FormationPreview positions={f.positions} mirrored={target === 'B'} color={previewColor} />
+              <span>{f.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ fontSize: '0.66rem', color: 'rgba(255,255,255,0.45)', lineHeight: 1.5 }}>
+        Reposiciona apenas o time escolhido. O outro time, a bola e os desenhos não mudam. Ctrl+Z desfaz.
       </div>
     </div>
   );
@@ -776,9 +1154,10 @@ function ViewFlyout({ fieldType, setFieldType, fieldView, setFieldView }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
       <div>
         <FlyoutLabel>Tipo de campo</FlyoutLabel>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
-          <FlyBtn onClick={() => setFieldType('football_11')} active={fieldType === 'football_11'}>Futebol 11</FlyBtn>
-          <FlyBtn onClick={() => setFieldType('futsal')} active={fieldType === 'futsal'}>Futsal</FlyBtn>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 5 }}>
+          {FIELD_TYPE_OPTIONS.map((o) => (
+            <FlyBtn key={o.type} onClick={() => setFieldType(o.type)} active={fieldType === o.type}>{o.label}</FlyBtn>
+          ))}
         </div>
       </div>
       <div>
@@ -802,13 +1181,14 @@ function FlyoutLabel({ children }) {
   );
 }
 
-function FlyBtn({ onClick, active, children, color, small }) {
+function FlyBtn({ onClick, active, children, color, small, minHeight }) {
   return (
     <button
       onClick={onClick}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 6,
         padding: small ? '0.32rem 0.5rem' : '0.42rem 0.55rem',
+        minHeight,
         backgroundColor: active ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.04)',
         border: `1px solid ${active ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.07)'}`,
         borderRadius: '0.35rem',
@@ -878,7 +1258,6 @@ function TopBtn({ children, onClick, title, active }) {
   );
 }
 
-// Tela de bloqueio em mobile — Quadro Tático precisa de tela maior pra ser usável
 // Hint discreto no topo pra sugerir modo paisagem. Some após 5s
 // ou quando o usuário rotaciona pra landscape.
 function MobileRotateHint({ colors }) {
@@ -915,61 +1294,6 @@ function MobileRotateHint({ colors }) {
     }}>
       <Smartphone size={13} />
       Gire o celular pra paisagem — cabe mais campo
-    </div>
-  );
-}
-
-// Mantido caso volte a fazer sentido bloquear (device muito pequeno, versão
-// legacy, etc.). Hoje NÃO é usado — usuário mobile tem acesso completo.
-function MobileBlockScreen({ colors }) {
-  return (
-    <div style={{
-      width: '100%', minHeight: 'calc(100vh - 64px)',
-      margin: '-1.5rem -1.5rem 0',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      padding: '2rem 1.5rem',
-      backgroundColor: 'transparent',
-    }}>
-      <div style={{
-        maxWidth: 360,
-        backgroundColor: colors.surface,
-        border: `1px solid ${colors.border}`,
-        borderRadius: '0.75rem',
-        padding: '1.75rem 1.5rem',
-        textAlign: 'center',
-        boxShadow: '0 10px 30px rgba(0,0,0,0.18)',
-      }}>
-        <div style={{
-          width: 56, height: 56, borderRadius: '50%',
-          backgroundColor: `${colors.primary}1A`, color: colors.primary,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          margin: '0 auto 1rem',
-        }}>
-          <Smartphone size={28} strokeWidth={1.75} />
-        </div>
-        <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: colors.text }}>
-          Quadro Tático no celular
-        </h2>
-        <p style={{ margin: '0.6rem 0 0', fontSize: '0.875rem', color: colors.textSecondary, lineHeight: 1.5 }}>
-          A edição do quadro tático precisa de tela maior pra dar conta dos jogadores, setas e frames.
-          No navegador mobile a experiência fica comprometida.
-        </p>
-        <div style={{
-          marginTop: '1.1rem',
-          padding: '0.75rem 0.9rem',
-          backgroundColor: `${colors.primary}10`,
-          border: `1px solid ${colors.primary}30`,
-          borderRadius: '0.5rem',
-          color: colors.primary,
-          fontSize: '0.825rem',
-          fontWeight: 600,
-        }}>
-          📱 App oficial em desenvolvimento — em breve!
-        </div>
-        <p style={{ margin: '1rem 0 0', fontSize: '0.78rem', color: colors.textSecondary }}>
-          Por enquanto, abra o Quadro Tático em um computador ou tablet em modo paisagem.
-        </p>
-      </div>
     </div>
   );
 }

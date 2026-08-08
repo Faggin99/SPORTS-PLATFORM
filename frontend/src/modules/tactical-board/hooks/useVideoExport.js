@@ -14,8 +14,13 @@ export function useVideoExport(stageRef, frames, fieldType) {
   const [progress, setProgress] = useState(0);
   const [exportElements, setExportElements] = useState(null);
   const recorderRef = useRef(null);
+  // Guarda síncrona de reentrada — dois cliques rápidos criavam dois
+  // MediaRecorders concorrentes disputando setExportElements (vídeo corrompido)
+  const exportingRef = useRef(false);
+  const abortRef = useRef(false);
 
   const startExport = useCallback(async (playName = 'jogada') => {
+    if (exportingRef.current) return;
     if (!stageRef?.current || frames.length <= 1) return;
 
     const stage = stageRef.current.getStage();
@@ -23,10 +28,13 @@ export function useVideoExport(stageRef, frames, fieldType) {
 
     const mimeType = getSupportedMimeType();
     if (!mimeType) {
-      alert('Seu navegador não suporta exportação de vídeo.');
+      const { notify } = await import('../../../lib/notify');
+      notify.error('Seu navegador não suporta exportação de vídeo.');
       return;
     }
 
+    exportingRef.current = true;
+    abortRef.current = false;
     setIsExporting(true);
     setProgress(0);
 
@@ -59,6 +67,8 @@ export function useVideoExport(stageRef, frames, fieldType) {
 
       const downloadPromise = new Promise((resolve) => {
         recorder.onstop = () => {
+          // Export cancelado: descarta os chunks, não baixa vídeo parcial
+          if (abortRef.current) { resolve(); return; }
           const blob = new Blob(chunks, { type: mimeType });
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
@@ -86,12 +96,12 @@ export function useVideoExport(stageRef, frames, fieldType) {
 
       const totalTransitions = frames.length - 1;
 
-      for (let frameIdx = 0; frameIdx < totalTransitions; frameIdx++) {
+      for (let frameIdx = 0; frameIdx < totalTransitions && !abortRef.current; frameIdx++) {
         const frameA = frames[frameIdx];
         const frameB = frames[frameIdx + 1];
         const totalSteps = Math.ceil((FRAME_DURATION_MS / 1000) * EXPORT_FPS);
 
-        for (let step = 0; step <= totalSteps; step++) {
+        for (let step = 0; step <= totalSteps && !abortRef.current; step++) {
           const t = step / totalSteps;
           const interpolated = interpolateElements(frameA, frameB, t);
 
@@ -114,17 +124,19 @@ export function useVideoExport(stageRef, frames, fieldType) {
 
       // Hold last frame for 1 second
       const holdSteps = EXPORT_FPS;
-      for (let i = 0; i < holdSteps; i++) {
+      for (let i = 0; i < holdSteps && !abortRef.current; i++) {
         compositeFrame();
         await waitFrame();
       }
 
-      recorder.stop();
+      if (recorder.state === 'recording') recorder.stop();
       await downloadPromise;
     } catch (error) {
       console.error('Erro na exportação de vídeo:', error);
-      alert('Erro ao exportar vídeo. Tente novamente.');
+      const { notify } = await import('../../../lib/notify');
+      notify.error('Erro ao exportar vídeo. Tente novamente.');
     } finally {
+      exportingRef.current = false;
       setIsExporting(false);
       setProgress(0);
       setExportElements(null);
@@ -133,12 +145,10 @@ export function useVideoExport(stageRef, frames, fieldType) {
   }, [stageRef, frames, fieldType]);
 
   const cancelExport = useCallback(() => {
+    abortRef.current = true;
     if (recorderRef.current && recorderRef.current.state === 'recording') {
       recorderRef.current.stop();
     }
-    setIsExporting(false);
-    setProgress(0);
-    setExportElements(null);
   }, []);
 
   return {

@@ -5,7 +5,7 @@ import PlayerToken from './PlayerToken';
 import BallToken from './BallToken';
 import MarkerToken from './MarkerToken';
 import TrajectoryLayer from './TrajectoryLayer';
-import DrawingLayer from './DrawingLayer';
+import DrawingLayer, { DrawnElement } from './DrawingLayer';
 import { FIELD_TYPES, FIELD_VIEWS, calculateCanvasDimensions, toPercent, toPixel } from '../../utils/fieldDimensions';
 
 const TacticalCanvas = forwardRef(function TacticalCanvas({
@@ -18,13 +18,15 @@ const TacticalCanvas = forwardRef(function TacticalCanvas({
   teamBColor = '#ef4444',
   isPlaying = false,
   drawingMode = null, // 'arrow_straight', 'arrow_curved', 'free_draw', 'zone_rect', 'zone_circle', 'text'
-  drawingColor = 'white',
+  drawingColor = '#ffffff',
   drawingDash = [],
   drawingStrokeWidth = 2.5,
   onElementMove,
   onElementSelect,
+  onElementEdit,
   onDrawingSelect,
   onDrawingComplete,
+  onDrawingUpdate,
   selectedElementId,
   selectedDrawingId,
 }, ref) {
@@ -32,8 +34,20 @@ const TacticalCanvas = forwardRef(function TacticalCanvas({
   const stageRef = useRef(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 500, offsetX: 0, offsetY: 0 });
   const [isDrawing, setIsDrawing] = useState(false);
+  // Draft do desenho em andamento — renderizado ao vivo com opacity reduzida
+  const [previewDrawing, setPreviewDrawing] = useState(null);
   const drawingStartRef = useRef(null);
   const freeDrawPointsRef = useRef([]);
+  const rafRef = useRef(null);
+  const isDrawingRef = useRef(false);
+
+  // Editor de texto inline (substitui window.prompt, que não funciona no
+  // Electron e não permite reedição)
+  const [textEditor, setTextEditor] = useState(null); // { xPct, yPct, drawingId|null, value }
+  // Espelho em ref — o mousedown do Konva dispara ANTES do blur do input;
+  // sem isso, clicar no campo com o editor aberto descartaria o texto digitado
+  const textEditorRef = useRef(null);
+  useEffect(() => { textEditorRef.current = textEditor; }, [textEditor]);
 
   useImperativeHandle(ref, () => ({
     getStage: () => stageRef.current,
@@ -71,6 +85,11 @@ const TacticalCanvas = forwardRef(function TacticalCanvas({
     if (onElementSelect) onElementSelect(elementId);
   }, [onElementSelect, drawingMode]);
 
+  const handleElementDblClick = useCallback((elementId) => {
+    if (drawingMode || isPlaying) return;
+    if (onElementEdit) onElementEdit(elementId);
+  }, [onElementEdit, drawingMode, isPlaying]);
+
   const handleStageClick = useCallback((e) => {
     if (drawingMode) return;
     if (e.target === stageRef.current || e.target.getParent()?.attrs?.name === 'field-background') {
@@ -79,8 +98,101 @@ const TacticalCanvas = forwardRef(function TacticalCanvas({
     }
   }, [onElementSelect, onDrawingSelect, drawingMode]);
 
+  // ── Draft helpers ──
+  const cancelDraft = useCallback(() => {
+    setIsDrawing(false);
+    isDrawingRef.current = false;
+    setPreviewDrawing(null);
+    drawingStartRef.current = null;
+    freeDrawPointsRef.current = [];
+    if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
+  }, []);
+
+  // Esc cancela o draft em andamento
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape' && isDrawingRef.current) cancelDraft();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [cancelDraft]);
+
+  // Raio do círculo em espaço de PIXELS (percentual é anisotrópico: 1% em x
+  // ≠ 1% em y quando o campo não é quadrado). Devolve o raio como % da altura,
+  // que é como o DrawingLayer o renderiza (py(radius)).
+  const circleRadiusPct = useCallback((x1, y1, x2, y2) => {
+    const dxPx = toPixel(x2 - x1, dimensions.width);
+    const dyPx = toPixel(y2 - y1, dimensions.height);
+    const distPx = Math.sqrt(dxPx * dxPx + dyPx * dyPx);
+    return toPercent(distPx, dimensions.height);
+  }, [dimensions]);
+
+  const buildDraft = useCallback((x2, y2) => {
+    const start = drawingStartRef.current;
+    if (!start) return null;
+    const { x: x1, y: y1 } = start;
+    const base = { id: '__preview__', color: drawingColor, strokeWidth: drawingStrokeWidth, dash: drawingDash };
+    switch (drawingMode) {
+      case 'arrow_straight':
+        return { ...base, drawType: 'arrow_straight', x1, y1, x2, y2 };
+      case 'arrow_curved': {
+        const midX = (x1 + x2) / 2;
+        const midY = (y1 + y2) / 2;
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        return { ...base, drawType: 'arrow_curved', x1, y1, x2, y2, cx: midX - dy * 0.3, cy: midY + dx * 0.3 };
+      }
+      case 'free_draw':
+        return { ...base, drawType: 'free_draw', points: [...freeDrawPointsRef.current] };
+      case 'zone_rect':
+        return {
+          ...base,
+          drawType: 'zone_rect',
+          x: Math.min(x1, x2), y: Math.min(y1, y2),
+          w: Math.abs(x2 - x1), h: Math.abs(y2 - y1),
+          color: hexToRgba(drawingColor, 0.15),
+          strokeColor: hexToRgba(drawingColor, 0.5),
+        };
+      case 'zone_circle':
+        return {
+          ...base,
+          drawType: 'zone_circle',
+          cx: x1, cy: y1,
+          radius: circleRadiusPct(x1, y1, x2, y2),
+          color: hexToRgba(drawingColor, 0.15),
+          strokeColor: hexToRgba(drawingColor, 0.5),
+        };
+      default:
+        return null;
+    }
+  }, [drawingMode, drawingColor, drawingStrokeWidth, drawingDash, circleRadiusPct]);
+
+  // ── Editor de texto inline ──
+  // Lê do ref (não do state) pra poder ser chamado do mousedown do Konva,
+  // que dispara antes do blur do input
+  const commitTextEditor = useCallback(() => {
+    const editor = textEditorRef.current;
+    if (!editor) return;
+    const value = editor.value.trim();
+    if (value) {
+      if (editor.drawingId) {
+        onDrawingUpdate?.(editor.drawingId, { text: value });
+      } else {
+        onDrawingComplete?.({
+          drawType: 'text',
+          x: editor.xPct, y: editor.yPct,
+          text: value,
+          color: drawingColor,
+          fontSize: 14,
+        });
+      }
+    }
+    textEditorRef.current = null;
+    setTextEditor(null);
+  }, [onDrawingComplete, onDrawingUpdate, drawingColor]);
+
   // Drawing mode mouse handlers
-  const handleMouseDown = useCallback((e) => {
+  const handleMouseDown = useCallback(() => {
     if (!drawingMode || isPlaying) return;
     const stage = stageRef.current;
     const pointer = stage.getPointerPosition();
@@ -90,55 +202,68 @@ const TacticalCanvas = forwardRef(function TacticalCanvas({
     const y = toPercent(pointer.y, dimensions.height);
 
     if (drawingMode === 'text') {
-      const text = prompt('Digite o texto:');
-      if (text) {
-        onDrawingComplete?.({
-          drawType: 'text',
-          x, y,
-          text,
-          color: drawingColor,
-          fontSize: 14,
-        });
+      // Se já há um editor aberto com texto digitado, commita ele primeiro
+      // (o mousedown chega antes do blur do input)
+      if (textEditorRef.current) {
+        commitTextEditor();
+        return; // este clique só fecha/commita; próximo clique abre novo
       }
+      setTextEditor({ xPct: x, yPct: y, drawingId: null, value: '' });
       return;
     }
 
     setIsDrawing(true);
+    isDrawingRef.current = true;
     drawingStartRef.current = { x, y };
 
     if (drawingMode === 'free_draw') {
       freeDrawPointsRef.current = [x, y];
     }
-  }, [drawingMode, isPlaying, dimensions, drawingColor, onDrawingComplete]);
+  }, [drawingMode, isPlaying, dimensions, commitTextEditor]);
 
-  const handleMouseMove = useCallback((e) => {
-    if (!isDrawing || !drawingMode || drawingMode === 'text') return;
+  const handleMouseMove = useCallback(() => {
+    if (!isDrawingRef.current || !drawingMode || drawingMode === 'text') return;
     const stage = stageRef.current;
     const pointer = stage.getPointerPosition();
     if (!pointer) return;
 
+    const x = toPercent(pointer.x, dimensions.width);
+    const y = toPercent(pointer.y, dimensions.height);
+
     if (drawingMode === 'free_draw') {
-      const x = toPercent(pointer.x, dimensions.width);
-      const y = toPercent(pointer.y, dimensions.height);
       freeDrawPointsRef.current.push(x, y);
-      // Force update for live preview could be added here
     }
-  }, [isDrawing, drawingMode, dimensions]);
 
-  const handleMouseUp = useCallback((e) => {
-    if (!isDrawing || !drawingMode) return;
-    setIsDrawing(false);
+    // Preview ao vivo com throttle via rAF
+    if (!rafRef.current) {
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = null;
+        setPreviewDrawing(buildDraft(x, y));
+      });
+    }
+  }, [drawingMode, dimensions, buildDraft]);
+
+  const finishDrawing = useCallback((clientPointer = null) => {
+    if (!isDrawingRef.current || !drawingMode) return;
+    const start = drawingStartRef.current;
+    // Captura os pontos ANTES do cancelDraft — ele limpa o ref
+    const freePts = [...freeDrawPointsRef.current];
+    cancelDraft();
+    if (!start) return;
+
     const stage = stageRef.current;
-    const pointer = stage.getPointerPosition();
-    if (!pointer || !drawingStartRef.current) return;
+    const pointer = clientPointer || stage?.getPointerPosition();
+    if (!pointer) return;
 
-    const x2 = toPercent(pointer.x, dimensions.width);
-    const y2 = toPercent(pointer.y, dimensions.height);
-    const { x: x1, y: y1 } = drawingStartRef.current;
+    const x2 = Math.max(0, Math.min(100, toPercent(pointer.x, dimensions.width)));
+    const y2 = Math.max(0, Math.min(100, toPercent(pointer.y, dimensions.height)));
+    const { x: x1, y: y1 } = start;
 
-    // Minimum distance check
-    const dist = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
-    if (dist < 2 && drawingMode !== 'free_draw') return;
+    // Distância mínima em pixels (não em % anisotrópico)
+    const dxPx = toPixel(x2 - x1, dimensions.width);
+    const dyPx = toPixel(y2 - y1, dimensions.height);
+    const distPx = Math.sqrt(dxPx * dxPx + dyPx * dyPx);
+    if (distPx < 8 && drawingMode !== 'free_draw') return;
 
     switch (drawingMode) {
       case 'arrow_straight':
@@ -151,17 +276,14 @@ const TacticalCanvas = forwardRef(function TacticalCanvas({
         });
         break;
       case 'arrow_curved': {
-        // Control point perpendicular to midpoint
         const midX = (x1 + x2) / 2;
         const midY = (y1 + y2) / 2;
         const dx = x2 - x1;
         const dy = y2 - y1;
-        const perpX = midX - dy * 0.3;
-        const perpY = midY + dx * 0.3;
         onDrawingComplete?.({
           drawType: 'arrow_curved',
           x1, y1, x2, y2,
-          cx: perpX, cy: perpY,
+          cx: midX - dy * 0.3, cy: midY + dx * 0.3,
           color: drawingColor,
           strokeWidth: drawingStrokeWidth,
           dash: drawingDash,
@@ -169,44 +291,69 @@ const TacticalCanvas = forwardRef(function TacticalCanvas({
         break;
       }
       case 'free_draw': {
-        const pts = freeDrawPointsRef.current;
-        if (pts.length >= 4) {
+        if (freePts.length >= 4) {
           onDrawingComplete?.({
             drawType: 'free_draw',
-            points: [...pts],
+            points: freePts,
             color: drawingColor,
             strokeWidth: drawingStrokeWidth,
           });
         }
-        freeDrawPointsRef.current = [];
         break;
       }
       case 'zone_rect': {
-        const rx = Math.min(x1, x2);
-        const ry = Math.min(y1, y2);
         onDrawingComplete?.({
           drawType: 'zone_rect',
-          x: rx, y: ry,
-          w: Math.abs(x2 - x1),
-          h: Math.abs(y2 - y1),
-          color: drawingColor.includes('rgba') ? drawingColor : hexToRgba(drawingColor, 0.15),
-          strokeColor: drawingColor.includes('rgba') ? drawingColor : hexToRgba(drawingColor, 0.5),
+          x: Math.min(x1, x2), y: Math.min(y1, y2),
+          w: Math.abs(x2 - x1), h: Math.abs(y2 - y1),
+          color: hexToRgba(drawingColor, 0.15),
+          strokeColor: hexToRgba(drawingColor, 0.5),
         });
         break;
       }
       case 'zone_circle': {
-        const radius = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
         onDrawingComplete?.({
           drawType: 'zone_circle',
           cx: x1, cy: y1,
-          radius,
-          color: drawingColor.includes('rgba') ? drawingColor : hexToRgba(drawingColor, 0.15),
-          strokeColor: drawingColor.includes('rgba') ? drawingColor : hexToRgba(drawingColor, 0.5),
+          radius: circleRadiusPct(x1, y1, x2, y2),
+          color: hexToRgba(drawingColor, 0.15),
+          strokeColor: hexToRgba(drawingColor, 0.5),
         });
         break;
       }
     }
-  }, [isDrawing, drawingMode, dimensions, drawingColor, drawingStrokeWidth, drawingDash, onDrawingComplete]);
+  }, [drawingMode, dimensions, drawingColor, drawingStrokeWidth, drawingDash, onDrawingComplete, cancelDraft, circleRadiusPct]);
+
+  const handleMouseUp = useCallback(() => {
+    // free_draw usa os pontos acumulados; demais usam a posição atual do ponteiro
+    finishDrawing();
+  }, [finishDrawing]);
+
+  // Soltar o ponteiro FORA do Stage também finaliza (senão isDrawing trava
+  // em true e o traço continua ao reentrar no canvas)
+  useEffect(() => {
+    const onGlobalUp = () => {
+      if (isDrawingRef.current) {
+        // Sem posição válida do stage aqui — finaliza com o último ponto conhecido
+        const stage = stageRef.current;
+        const pointer = stage?.getPointerPosition();
+        if (pointer) finishDrawing(pointer);
+        else cancelDraft();
+      }
+    };
+    window.addEventListener('mouseup', onGlobalUp);
+    window.addEventListener('touchend', onGlobalUp);
+    return () => {
+      window.removeEventListener('mouseup', onGlobalUp);
+      window.removeEventListener('touchend', onGlobalUp);
+    };
+  }, [finishDrawing, cancelDraft]);
+
+  // Duplo-clique num texto existente reabre o editor
+  const handleTextEdit = useCallback((drawing) => {
+    if (isPlaying) return;
+    setTextEditor({ xPct: drawing.x, yPct: drawing.y, drawingId: drawing.id, value: drawing.text || '' });
+  }, [isPlaying]);
 
   const renderElement = (element) => {
     const pixelX = toPixel(element.x, dimensions.width);
@@ -221,6 +368,7 @@ const TacticalCanvas = forwardRef(function TacticalCanvas({
       isSelected,
       onDragEnd: (e) => handleDragEnd(element.id, e),
       onClick: () => handleElementClick(element.id),
+      onDblClick: () => handleElementDblClick(element.id),
     };
 
     switch (element.type) {
@@ -260,6 +408,7 @@ const TacticalCanvas = forwardRef(function TacticalCanvas({
         alignItems: 'center',
         justifyContent: 'center',
         overflow: 'hidden',
+        position: 'relative',
       }}
     >
       <Stage
@@ -267,6 +416,7 @@ const TacticalCanvas = forwardRef(function TacticalCanvas({
         width={dimensions.width}
         height={dimensions.height}
         onClick={handleStageClick}
+        onTap={handleStageClick}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
@@ -293,8 +443,20 @@ const TacticalCanvas = forwardRef(function TacticalCanvas({
             fieldHeight={dimensions.height}
             selectedDrawingId={selectedDrawingId}
             onSelectDrawing={onDrawingSelect}
+            onTextEdit={handleTextEdit}
             draggable={!isPlaying && !drawingMode}
+            onDragEnd={(drawingId, patch) => onDrawingUpdate?.(drawingId, patch)}
           />
+          {/* Preview ao vivo do desenho em andamento */}
+          {previewDrawing && (
+            <DrawnElement
+              element={previewDrawing}
+              fieldWidth={dimensions.width}
+              fieldHeight={dimensions.height}
+              isSelected={false}
+              opacity={0.6}
+            />
+          )}
         </Layer>
 
         {/* Layer 3: Movement arrows */}
@@ -315,11 +477,53 @@ const TacticalCanvas = forwardRef(function TacticalCanvas({
           {elements.map(renderElement)}
         </Layer>
       </Stage>
+
+      {/* Editor de texto inline sobre o Stage */}
+      {textEditor && (
+        <div style={{
+          position: 'absolute',
+          left: dimensions.offsetX + toPixel(textEditor.xPct, dimensions.width),
+          top: dimensions.offsetY + toPixel(textEditor.yPct, dimensions.height),
+          transform: 'translateY(-50%)',
+          zIndex: 30,
+        }}>
+          <input
+            autoFocus
+            type="text"
+            value={textEditor.value}
+            maxLength={60}
+            placeholder="Texto…"
+            onChange={(e) => setTextEditor((t) => ({ ...t, value: e.target.value }))}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'Enter') commitTextEditor();
+              else if (e.key === 'Escape') setTextEditor(null);
+            }}
+            onBlur={commitTextEditor}
+            style={{
+              backgroundColor: 'rgba(10,14,26,0.92)',
+              border: `1.5px solid ${drawingColor}`,
+              borderRadius: '0.3rem',
+              color: '#fff',
+              fontSize: '0.85rem',
+              fontWeight: 600,
+              padding: '0.25rem 0.5rem',
+              outline: 'none',
+              minWidth: 120,
+              boxShadow: '0 4px 14px rgba(0,0,0,0.5)',
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 });
 
 function hexToRgba(hex, alpha) {
+  if (typeof hex !== 'string' || !hex.startsWith('#') || hex.length < 7) {
+    // Cor inválida pra conversão (nome css, rgba, hex curto) — fallback branco
+    return `rgba(255,255,255,${alpha})`;
+  }
   const r = parseInt(hex.slice(1, 3), 16);
   const g = parseInt(hex.slice(3, 5), 16);
   const b = parseInt(hex.slice(5, 7), 16);
