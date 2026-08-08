@@ -195,17 +195,12 @@ router.post('/checkout', authMiddleware, async (req, res) => {
   }
 });
 
-// POST /api/billing/trial — inicia trial no plano free/pro
-router.post('/trial', authMiddleware, async (req, res) => {
-  try {
-    const { plan_id = 'pro' } = req.body || {};
-    const sub = await billing.startTrial(req.user.id, plan_id);
-    res.status(201).json(sub);
-  } catch (err) {
-    console.error('Trial error:', err);
-    res.status(500).json({ error: err.message || 'Failed to start trial' });
-  }
-});
+// NOTA: a rota POST /api/billing/trial foi REMOVIDA (segurança).
+// Era órfã (o frontend nunca chamava) e permitia a qualquer usuário logado
+// se autoconceder trial de qualquer plano, infinitas vezes — bypass total de
+// pagamento. O trial legítimo é criado uma única vez no cadastro
+// (routes/auth.js, INSERT direto). startTrial() ainda existe no service pra
+// esse uso interno, agora com guarda contra re-trial.
 
 // POST /api/billing/cancel — cancela assinatura ativa da workspace ativa
 router.post('/cancel', authMiddleware, async (req, res) => {

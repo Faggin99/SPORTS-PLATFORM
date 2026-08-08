@@ -205,6 +205,18 @@ async function getSubscriptionForWorkspace(workspaceId) {
 async function startTrial(userId, planId = 'pro', days = 30) {
   const plan = await getPlan(planId);
   if (!plan) throw new Error('Plan not found');
+  // Guarda contra re-trial: um usuário só pode ter UM trial na vida. Sem isso,
+  // qualquer chamada repetida reabriria acesso grátis indefinidamente. A
+  // checagem cobre qualquer assinatura já existente (trial ou paga).
+  const prior = await query(
+    'SELECT 1 FROM subscriptions WHERE user_id = $1 LIMIT 1',
+    [userId]
+  );
+  if (prior.rows.length > 0) {
+    const err = new Error('Usuário já possui (ou já teve) uma assinatura — trial não pode ser reiniciado.');
+    err.statusCode = 409;
+    throw err;
+  }
   // Trial também conta como sub ativa — precisa fechar as antigas pro unique
   // index não rejeitar.
   await _hardCancelActiveSubsForUser(userId, 'start_trial');
