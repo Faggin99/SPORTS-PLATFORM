@@ -6,6 +6,7 @@ import { FIELD_TYPES } from '../../utils/fieldDimensions';
 
 const fieldTypeLabels = {
   [FIELD_TYPES.FOOTBALL_11]: 'Futebol 11',
+  [FIELD_TYPES.FOOTBALL_7]: 'Futebol 7',
   [FIELD_TYPES.FUTSAL]: 'Futsal',
 };
 

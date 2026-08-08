@@ -27,6 +27,10 @@ export const gameService = {
       match_duration: data.match_duration,
       players: data.players,
       events: data.events,
+      competition_id: data.competition_id ?? null,
+      match_round: data.match_round ?? null,
+      match_location: data.match_location ?? null,
+      video_full_url: data.video_full_url ?? null,
     });
   },
 };

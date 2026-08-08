@@ -29,4 +29,14 @@ export const athleteService = {
   async batchUpdateGroups(athletes) {
     return await api.put('/athletes/batch-groups', { athletes });
   },
+
+  async uploadPhoto(id, file) {
+    const fd = new FormData();
+    fd.append('photo', file);
+    return await api.upload(`/athletes/${id}/photo`, fd);
+  },
+
+  async deletePhoto(id) {
+    return await api.delete(`/athletes/${id}/photo`);
+  },
 };

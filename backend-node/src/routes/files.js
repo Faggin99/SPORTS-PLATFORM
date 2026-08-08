@@ -9,8 +9,21 @@ const router = express.Router();
 
 router.use(authMiddleware);
 
+// Resolve a workspace_id (owner) da sessão.
+async function workspaceForSession(sessionId, workspaceIds) {
+  const r = await query(
+    `SELECT m.workspace_id, m.club_id
+       FROM training_sessions s
+       JOIN training_microcycles m ON m.id = s.microcycle_id
+      WHERE s.id = $1 AND m.workspace_id = ANY($2)`,
+    [sessionId, workspaceIds]
+  );
+  return r.rows[0] || null;
+}
+
 // POST /api/files/upload
 router.post('/upload', (req, res) => {
+  if (!req.user.can('training:edit')) return res.status(403).json({ error: 'Sem permissão pra enviar arquivos' });
   uploadSessionFile(req, res, async (err) => {
     if (err) {
       return res.status(400).json({ error: err.message });
@@ -25,14 +38,20 @@ router.post('/upload', (req, res) => {
         return res.status(400).json({ error: 'session_id is required' });
       }
 
+      const workspaceIds = req.user.workspaceIds || [];
+      const session = await workspaceForSession(session_id, workspaceIds);
+      if (!session) return res.status(404).json({ error: 'Sessão não encontrada' });
+
+      const writableWs = req.user.writableWorkspaceForClub(session.club_id);
+      if (!writableWs) return res.status(403).json({ error: 'Sem permissão de escrita nesta sessão' });
+
       const filePath = `/uploads/session-files/${req.file.filename}`;
-      // Multer decodes filename as Latin-1 by default - convert to UTF-8
       const originalName = Buffer.from(req.file.originalname, 'latin1').toString('utf8');
       const result = await query(
-        `INSERT INTO training_activity_files (session_id, title, file_path, url, file_name, file_size, mime_type, tenant_id)
+        `INSERT INTO training_activity_files (session_id, title, file_path, url, file_name, file_size, mime_type, workspace_id)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          RETURNING *`,
-        [session_id, title || originalName, filePath, filePath, originalName, req.file.size, req.file.mimetype, req.user.id]
+        [session_id, title || originalName, filePath, filePath, originalName, req.file.size, req.file.mimetype, session.workspace_id]
       );
 
       res.status(201).json(result.rows[0]);
@@ -55,8 +74,8 @@ function normalizeFileRow(row) {
 router.get('/session/:sessionId', async (req, res) => {
   try {
     const result = await query(
-      'SELECT * FROM training_activity_files WHERE session_id = $1 AND tenant_id = $2 ORDER BY created_at DESC',
-      [req.params.sessionId, req.user.id]
+      'SELECT * FROM training_activity_files WHERE session_id = $1 AND workspace_id = ANY($2) ORDER BY created_at DESC',
+      [req.params.sessionId, req.user.workspaceIds || []]
     );
     res.json(result.rows.map(normalizeFileRow));
   } catch (err) {
@@ -69,8 +88,8 @@ router.get('/session/:sessionId', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const result = await query(
-      'SELECT * FROM training_activity_files WHERE id = $1 AND tenant_id = $2',
-      [req.params.id, req.user.id]
+      'SELECT * FROM training_activity_files WHERE id = $1 AND workspace_id = ANY($2)',
+      [req.params.id, req.user.workspaceIds || []]
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'File not found' });
@@ -85,9 +104,15 @@ router.get('/:id', async (req, res) => {
 // DELETE /api/files/:id
 router.delete('/:id', async (req, res) => {
   try {
+    if (!req.user.can('training:delete')) return res.status(403).json({ error: 'Sem permissão' });
+    const workspaceIds = req.user.workspaceIds || [];
     const result = await query(
-      'SELECT * FROM training_activity_files WHERE id = $1 AND tenant_id = $2',
-      [req.params.id, req.user.id]
+      `SELECT f.*, m.club_id
+         FROM training_activity_files f
+         JOIN training_sessions s ON s.id = f.session_id
+         JOIN training_microcycles m ON m.id = s.microcycle_id
+        WHERE f.id = $1 AND f.workspace_id = ANY($2)`,
+      [req.params.id, workspaceIds]
     );
 
     if (result.rows.length === 0) {
@@ -96,7 +121,9 @@ router.delete('/:id', async (req, res) => {
 
     const file = result.rows[0];
 
-    // Delete physical file
+    const writableWs = req.user.writableWorkspaceForClub(file.club_id);
+    if (!writableWs) return res.status(403).json({ error: 'Sem permissão de escrita neste arquivo' });
+
     if (file.file_path) {
       const uploadDir = path.resolve(process.env.UPLOAD_DIR || '../uploads');
       const fullPath = path.join(uploadDir, '..', file.file_path);
@@ -109,10 +136,9 @@ router.delete('/:id', async (req, res) => {
       }
     }
 
-    // Delete DB record
     await query(
-      'DELETE FROM training_activity_files WHERE id = $1 AND tenant_id = $2',
-      [req.params.id, req.user.id]
+      'DELETE FROM training_activity_files WHERE id = $1 AND workspace_id = $2',
+      [req.params.id, file.workspace_id]
     );
 
     res.json({ message: 'File deleted successfully' });

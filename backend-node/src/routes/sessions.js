@@ -9,9 +9,10 @@ router.use(authMiddleware);
 // GET /api/sessions/:id
 router.get('/:id', async (req, res) => {
   try {
+    if (!req.user.can('training:view')) return res.status(403).json({ error: 'Sem permissão' });
     const sessionResult = await query(
-      'SELECT * FROM training_sessions WHERE id = $1 AND tenant_id = $2',
-      [req.params.id, req.user.id]
+      'SELECT * FROM training_sessions WHERE id = $1 AND workspace_id = ANY($2)',
+      [req.params.id, req.user.workspaceIds || []]
     );
 
     if (sessionResult.rows.length === 0) {
@@ -74,13 +75,14 @@ router.get('/:id', async (req, res) => {
 // PUT /api/sessions/:id/type
 router.put('/:id/type', async (req, res) => {
   try {
+    if (!req.user.can('training:edit')) return res.status(403).json({ error: 'Sem permissão pra editar treinos' });
     const { session_type, opponent_name } = req.body;
 
     const result = await query(
       `UPDATE training_sessions SET session_type = $1, opponent_name = $2, updated_at = NOW()
-       WHERE id = $3 AND tenant_id = $4
+       WHERE id = $3 AND workspace_id = ANY($4)
        RETURNING *`,
-      [session_type || null, opponent_name || null, req.params.id, req.user.id]
+      [session_type || null, opponent_name || null, req.params.id, req.user.workspaceIds || []]
     );
 
     if (result.rows.length === 0) {

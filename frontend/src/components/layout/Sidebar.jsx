@@ -29,7 +29,7 @@ export function Sidebar({ isMobile = false, isOpen = false, onClose }) {
     {
       to: '/tactical-board',
       icon: Waypoints,
-      label: 'Quadro Tatico',
+      label: 'Quadro Tático',
     },
   ];
 

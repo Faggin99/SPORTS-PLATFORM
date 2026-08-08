@@ -1,337 +1,232 @@
+// PDF do Plantel — estilo U.E.C. (landscape, title strip verde, fotos circulares,
+// tabelas com header verde). Substitui a versão antiga.
+
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import {
+  PDF_THEME,
+  addTitleStrip,
+  drawCover,
+  paginate,
+  applyClubPrimaryColor,
+  setFillHex,
+  setTextHex,
+  setDrawHex,
+} from '../../../utils/pdfTheme';
+import { newWorkbook, addSheet, saveWorkbook, addMetaSheet } from '../../../utils/excelTheme';
 
-/**
- * Mapeia as posições para categorias
- */
-const getPositionCategory = (position) => {
-  const categories = {
-    'GR': 'Goleiros',
-    'DD': 'Laterais',
-    'DE': 'Laterais',
-    'DC': 'Zagueiros',
-    'MD': 'Meias',
-    'MC': 'Meias',
-    'ME': 'Meias',
-    'MOF': 'Meias',
-    'ED': 'Extremos',
-    'EE': 'Extremos',
-    'PL': 'Atacantes',
-    'SA': 'Atacantes',
-  };
-  return categories[position] || 'Outros';
+// Carrega imagem como dataURL pro jsPDF
+async function loadImageAsDataURL(url) {
+  if (!url) return null;
+  try {
+    const res = await fetch(url, { credentials: 'same-origin' });
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    return await new Promise((resolve) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = () => resolve(null);
+      r.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
+
+function detectImageFormat(dataUrl) {
+  if (!dataUrl) return 'JPEG';
+  if (dataUrl.startsWith('data:image/png'))  return 'PNG';
+  if (dataUrl.startsWith('data:image/webp')) return 'WEBP';
+  return 'JPEG';
+}
+
+export async function preloadAthletePhotos(athletes) {
+  const entries = await Promise.all((athletes || []).map(async (a) => {
+    const dataUrl = await loadImageAsDataURL(a.photo_url);
+    return [a.id, dataUrl];
+  }));
+  return new Map(entries);
+}
+
+function hexRgb(hex) {
+  const h = hex.replace('#', '');
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+
+const GROUP_LABELS = { '1': 'Grupo 1', '2': 'Grupo 2', '3': 'Grupo 3', 'Transição': 'Transição', 'DM': 'DM', 'Sem grupo': 'Sem grupo' };
+
+function organizeByGroup(athletes) {
+  const out = { '1': [], '2': [], '3': [], 'Transição': [], 'DM': [], 'Sem grupo': [] };
+  athletes.forEach((a) => {
+    const k = ['1', '2', '3', 'Transição', 'DM'].includes(String(a.group)) ? String(a.group) : 'Sem grupo';
+    out[k].push(a);
+  });
+  Object.keys(out).forEach((k) => out[k].sort((a, b) => (a.name || '').localeCompare(b.name || '')));
+  return out;
+}
+
+export const generatePlantelPDF = async (athletes, opts = {}) => {
+  const { clubName = '', primaryColor = null } = opts;
+  if (!athletes || athletes.length === 0) {
+    alert('Nenhum atleta cadastrado pra exportar.');
+    return;
+  }
+  const resetColor = applyClubPrimaryColor(primaryColor);
+  try {
+
+  const photoMap = await preloadAthletePhotos(athletes);
+  const doc = new jsPDF({ orientation: PDF_THEME.orientation, unit: 'mm', format: PDF_THEME.pageFormat });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const M = PDF_THEME.margins;
+  const totalW = pageW - M.left - M.right;
+
+  // ============ PÁGINA 1: Capa ============
+  drawCover(doc, {
+    title: 'Plantel de Atletas',
+    subtitle: `${athletes.length} atleta${athletes.length !== 1 ? 's' : ''}`,
+    clubName,
+  });
+
+  // ============ PÁGINAS POR GRUPO ============
+  const byGroup = organizeByGroup(athletes);
+  const groupsWithPlayers = Object.entries(byGroup).filter(([, list]) => list.length > 0);
+  const colGap = 4;
+
+  groupsWithPlayers.forEach(([groupKey, list]) => {
+    doc.addPage();
+    let y = addTitleStrip(doc, {
+      section: GROUP_LABELS[groupKey],
+      clubName,
+    });
+
+    // KPI no canto: contagem do grupo
+    const kpiW = 60;
+    const kpiH = 16;
+    const kpiX = pageW - M.right - kpiW;
+    setFillHex(doc, PDF_THEME.colors.primary);
+    doc.roundedRect(kpiX, y + 2, kpiW, kpiH, 1.5, 1.5, 'F');
+    doc.setFont(PDF_THEME.fonts.family, 'normal');
+    doc.setFontSize(8);
+    setTextHex(doc, PDF_THEME.colors.accent);
+    doc.text('TOTAL DE ATLETAS', kpiX + 4, y + 7);
+    doc.setFont(PDF_THEME.fonts.family, 'bold');
+    doc.setFontSize(16);
+    setTextHex(doc, PDF_THEME.colors.light);
+    doc.text(String(list.length), kpiX + kpiW - 4, y + 13, { align: 'right' });
+
+    y += kpiH + 8;
+
+    // PHOTO + nome em colunas (4 colunas → 8 atletas por linha em landscape)
+    const PHOTO_W = 9;
+    autoTable(doc, {
+      startY: y,
+      head: [['', '#', 'Camisa', 'Nome', 'Posição', 'Pé', 'Altura', 'Nascimento']],
+      body: list.map((p, i) => [
+        '',
+        i + 1,
+        p.jersey_number || '-',
+        p.name || '—',
+        p.position || '—',
+        p.preferred_foot === 'right' ? 'Direito' : p.preferred_foot === 'left' ? 'Esquerdo' : p.preferred_foot === 'both' ? 'Amb.' : '—',
+        p.height_cm ? `${p.height_cm}cm` : '—',
+        p.birthdate ? p.birthdate.split('-').reverse().join('/') : '—',
+      ]),
+      theme: 'plain',
+      headStyles: { fillColor: hexRgb(PDF_THEME.colors.primary), textColor: 255, fontStyle: 'bold', fontSize: 9, cellPadding: 2.4 },
+      bodyStyles: { fontSize: 9, textColor: hexRgb(PDF_THEME.colors.text), cellPadding: 2, valign: 'middle', minCellHeight: 11 },
+      alternateRowStyles: { fillColor: hexRgb(PDF_THEME.colors.surfaceAlt) },
+      columnStyles: {
+        0: { cellWidth: PHOTO_W, halign: 'center' },
+        1: { cellWidth: 9, halign: 'center', fontStyle: 'bold' },
+        2: { cellWidth: 14, halign: 'center' },
+        3: { cellWidth: 'auto', fontStyle: 'bold' },
+        4: { cellWidth: 18, halign: 'center' },
+        5: { cellWidth: 18, halign: 'center' },
+        6: { cellWidth: 16, halign: 'center' },
+        7: { cellWidth: 24, halign: 'center' },
+      },
+      margin: { left: M.left, right: M.right },
+      styles: { lineColor: hexRgb(PDF_THEME.colors.border), lineWidth: 0.05 },
+      didDrawCell: (hookData) => {
+        if (hookData.section !== 'body' || hookData.column.index !== 0) return;
+        const player = list[hookData.row.index];
+        const dataUrl = player && photoMap.get(player.id);
+        if (!dataUrl) return;
+        const { x, y, width, height } = hookData.cell;
+        const side = Math.min(width, height) - 1.5;
+        const cx = x + (width - side) / 2;
+        const cy = y + (height - side) / 2;
+        try { doc.addImage(dataUrl, detectImageFormat(dataUrl), cx, cy, side, side, undefined, 'FAST'); }
+        catch (err) { /* ignora */ }
+      },
+    });
+  });
+
+  paginate(doc);
+  doc.save(`plantel_${(clubName || 'clube').replace(/\s+/g, '_').replace(/[^\w-]/g, '')}_${new Date().toISOString().split('T')[0]}.pdf`);
+  } finally { resetColor(); }
 };
 
 /**
- * Organiza atletas por categoria de posição
+ * Excel do plantel — mantém o formato anterior (planilha por grupo + resumo).
  */
-const organizePlayersByCategory = (players) => {
-  const organized = {
-    'Goleiros': [],
-    'Laterais': [],
-    'Zagueiros': [],
-    'Meias': [],
-    'Extremos': [],
-    'Atacantes': [],
-    'Outros': [],
-  };
+export const generatePlantelExcel = (athletes) => {
+  const wb = newWorkbook({ title: 'Plantel de Atletas' });
 
-  players.forEach(player => {
-    const category = getPositionCategory(player.position);
-    organized[category].push(player);
-  });
-
-  // Ordenar atletas dentro de cada categoria por nome
-  Object.keys(organized).forEach(category => {
-    organized[category].sort((a, b) => a.name.localeCompare(b.name));
-  });
-
-  return organized;
-};
-
-/**
- * Obtém nome completo da posição
- */
-const getPositionFullName = (position) => {
-  const positions = {
-    'GR': 'Goleiro',
-    'DD': 'Lateral Direito',
-    'DE': 'Lateral Esquerdo',
-    'DC': 'Zagueiro',
-    'MD': 'Meia Direito',
-    'MC': 'Meia Central',
-    'ME': 'Meia Esquerdo',
-    'MOF': 'Meia Ofensivo',
-    'ED': 'Extremo Direito',
-    'EE': 'Extremo Esquerdo',
-    'PL': 'Ponta de Lança',
-    'SA': 'Segundo Atacante',
-  };
-  return positions[position] || position;
-};
-
-/**
- * Gera PDF do plantel
- */
-export const generatePlantelPDF = (athletes) => {
-  // Criar documento PDF em formato A4 paisagem para melhor visualização
-  const doc = new jsPDF({
-    orientation: 'landscape',
-    unit: 'mm',
-    format: 'a4',
-  });
-
-  // Configurações de cores
-  const primaryColor = [41, 128, 185]; // Azul profissional
-  const secondaryColor = [52, 73, 94]; // Cinza escuro
-  const headerBgColor = [236, 240, 241]; // Cinza claro
-
-  // Título do documento
-  doc.setFontSize(20);
-  doc.setTextColor(...secondaryColor);
-  doc.setFont('helvetica', 'bold');
-  doc.text('PLANTEL DE ATLETAS', doc.internal.pageSize.width / 2, 15, { align: 'center' });
-
-  // Data de geração
-  doc.setFontSize(10);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(100, 100, 100);
-  const currentDate = new Date().toLocaleDateString('pt-BR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-  doc.text(`Gerado em: ${currentDate}`, doc.internal.pageSize.width / 2, 22, { align: 'center' });
-
-  const startY = 35;
-  const pageWidth = doc.internal.pageSize.width;
-  const pageHeight = doc.internal.pageSize.height;
-  const margin = 14;
-
-  // Separar atletas por grupo (atletas sem grupo não são incluídos)
   const grupo1 = athletes.filter(a => String(a.group) === '1');
   const grupo2 = athletes.filter(a => String(a.group) === '2');
   const grupo3 = athletes.filter(a => String(a.group) === '3');
   const transicao = athletes.filter(a => String(a.group) === 'Transição');
   const dm = athletes.filter(a => String(a.group) === 'DM');
 
-  // Determinar quais colunas serão exibidas
-  const columns = [];
-
-  if (grupo1.length > 0) columns.push({ name: 'GRUPO 1', players: grupo1, type: 'group' });
-  if (grupo2.length > 0) columns.push({ name: 'GRUPO 2', players: grupo2, type: 'group' });
-  if (grupo3.length > 0) columns.push({ name: 'GRUPO 3', players: grupo3, type: 'group' });
-
-  // Se houver Transição ou DM, adicionar como uma coluna combinada
-  if (transicao.length > 0 || dm.length > 0) {
-    columns.push({
-      name: 'OUTROS',
-      transicao,
-      dm,
-      type: 'combined'
-    });
-  }
-
-  // Se não houver nenhum grupo com atletas, não gerar PDF
-  if (columns.length === 0) {
-    alert('Não há atletas em nenhum grupo para gerar o PDF.');
-    return;
-  }
-
-  // Calcular largura das colunas baseado no número de colunas
-  const numColumns = columns.length;
-  const gap = 4; // Espaço entre colunas
-  const totalGap = gap * (numColumns - 1);
-  const availableWidth = pageWidth - (margin * 2) - totalGap;
-  const columnWidth = availableWidth / numColumns;
-
-  // Desenhar linha de separação vertical entre colunas
-  const drawColumnSeparator = (x) => {
-    doc.setDrawColor(200, 200, 200);
-    doc.setLineWidth(0.3);
-    doc.line(x, startY - 3, x, pageHeight - 20);
-  };
-
-  // Desenhar caixa decorativa ao redor do título da coluna
-  const drawColumnHeader = (title, x, width) => {
-    doc.setFillColor(...primaryColor);
-    doc.roundedRect(x, startY - 3, width, 8, 1, 1, 'F');
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(255, 255, 255);
-    doc.text(title, x + width / 2, startY + 2, { align: 'center' });
-  };
-
-  // Função auxiliar para adicionar seção de grupo com atletas organizados por posição
-  const addGroupColumn = (players, xPosition, width) => {
-    if (players.length === 0) return;
-
-    let currentY = startY + 10;
-
-    // Organizar atletas por categoria de posição
-    const organized = organizePlayersByCategory(players);
-
-    // Renderizar cada categoria
-    Object.entries(organized).forEach(([category, categoryPlayers]) => {
-      if (categoryPlayers.length === 0) return;
-
-      // Título da categoria
-      doc.setFontSize(8);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(...secondaryColor);
-      doc.text(category, xPosition + 2, currentY);
-      currentY += 3.5;
-
-      // Preparar dados da tabela
-      const tableData = categoryPlayers.map((player, index) => [
-        index + 1,
-        player.name,
-        player.position,
-      ]);
-
-      // Renderizar tabela
-      autoTable(doc, {
-        startY: currentY,
-        head: [['#', 'Nome', 'Pos']],
-        body: tableData,
-        theme: 'striped',
-        headStyles: {
-          fillColor: headerBgColor,
-          textColor: secondaryColor,
-          fontStyle: 'bold',
-          fontSize: 7,
-          cellPadding: 1.2,
-          minCellHeight: 4,
-        },
-        bodyStyles: {
-          fontSize: 7,
-          textColor: [50, 50, 50],
-          cellPadding: 1.2,
-          minCellHeight: 4,
-          overflow: 'linebreak',
-          cellWidth: 'wrap',
-        },
-        columnStyles: {
-          0: { cellWidth: 6, halign: 'center', fontStyle: 'bold' },
-          1: { cellWidth: width - 18, halign: 'left', overflow: 'linebreak' },
-          2: { cellWidth: 12, halign: 'center', fontStyle: 'bold' },
-        },
-        margin: { left: xPosition, right: pageWidth - xPosition - width },
-        tableWidth: width,
-        alternateRowStyles: {
-          fillColor: [250, 250, 250],
-        },
-        styles: {
-          overflow: 'linebreak',
-          cellWidth: 'wrap',
-        },
-      });
-
-      currentY = doc.lastAutoTable.finalY + 2;
-    });
-  };
-
-  // Função auxiliar para adicionar seção simples (Transição e DM)
-  const addSimpleColumn = (groupName, players, xPosition, width, startYPos) => {
-    if (players.length === 0) return startYPos;
-
-    let currentY = startYPos;
-
-    // Subtítulo do grupo
-    doc.setFontSize(8.5);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(...primaryColor);
-    doc.text(groupName, xPosition + 2, currentY);
-    currentY += 3.5;
-
-    // Preparar dados da tabela
-    const tableData = players.map((player, index) => [
-      index + 1,
-      player.name,
-      player.position,
-    ]);
-
-    // Renderizar tabela
-    autoTable(doc, {
-      startY: currentY,
-      head: [['#', 'Nome', 'Pos']],
-      body: tableData,
-      theme: 'striped',
-      headStyles: {
-        fillColor: headerBgColor,
-        textColor: secondaryColor,
-        fontStyle: 'bold',
-        fontSize: 7,
-        cellPadding: 1.2,
-        minCellHeight: 4,
-      },
-      bodyStyles: {
-        fontSize: 7,
-        textColor: [50, 50, 50],
-        cellPadding: 1.2,
-        minCellHeight: 4,
-        overflow: 'linebreak',
-        cellWidth: 'wrap',
-      },
-      columnStyles: {
-        0: { cellWidth: 6, halign: 'center', fontStyle: 'bold' },
-        1: { cellWidth: width - 18, halign: 'left', overflow: 'linebreak' },
-        2: { cellWidth: 12, halign: 'center', fontStyle: 'bold' },
-      },
-      margin: { left: xPosition, right: pageWidth - xPosition - width },
-      tableWidth: width,
-      alternateRowStyles: {
-        fillColor: [250, 250, 250],
-      },
-      styles: {
-        overflow: 'linebreak',
-        cellWidth: 'wrap',
-      },
-    });
-
-    return doc.lastAutoTable.finalY + 4;
-  };
-
-  // Renderizar colunas dinamicamente
-  let currentX = margin;
-
-  columns.forEach((column, index) => {
-    // Desenhar header da coluna
-    drawColumnHeader(column.name, currentX, columnWidth);
-
-    // Renderizar conteúdo baseado no tipo
-    if (column.type === 'group') {
-      addGroupColumn(column.players, currentX, columnWidth);
-    } else if (column.type === 'combined') {
-      let yPos = startY + 10;
-      yPos = addSimpleColumn('TRANSIÇÃO', column.transicao, currentX, columnWidth, yPos);
-      addSimpleColumn('DM', column.dm, currentX, columnWidth, yPos);
-    }
-
-    // Desenhar separador (exceto após a última coluna)
-    if (index < columns.length - 1) {
-      drawColumnSeparator(currentX + columnWidth + gap / 2);
-    }
-
-    currentX += columnWidth + gap;
+  addMetaSheet(wb, {
+    title: 'Plantel de Atletas',
+    totals: [
+      ['Total', athletes.length],
+      ['Grupo 1', grupo1.length],
+      ['Grupo 2', grupo2.length],
+      ['Grupo 3', grupo3.length],
+      ['Transição', transicao.length],
+      ['DM', dm.length],
+    ],
   });
 
-  // Adicionar rodapé em todas as páginas
-  const pageCount = doc.internal.getNumberOfPages();
-  for (let i = 1; i <= pageCount; i++) {
-    doc.setPage(i);
-    doc.setFontSize(8);
-    doc.setTextColor(150, 150, 150);
-    doc.text(
-      `Página ${i} de ${pageCount}`,
-      doc.internal.pageSize.width / 2,
-      doc.internal.pageSize.height - 10,
-      { align: 'center' }
-    );
-  }
+  const allRows = [['Nome', 'Posição', 'Camisa', 'Grupo', 'Pé', 'Altura', 'Nascimento']];
+  athletes
+    .slice()
+    .sort((a, b) => (a.group || '').localeCompare(b.group || '') || (a.name || '').localeCompare(b.name || ''))
+    .forEach((a) => allRows.push([
+      a.name,
+      a.position || '',
+      a.jersey_number || '',
+      a.group || '',
+      a.preferred_foot === 'right' ? 'Direito' : a.preferred_foot === 'left' ? 'Esquerdo' : a.preferred_foot === 'both' ? 'Ambidestro' : '',
+      a.height_cm ? `${a.height_cm}cm` : '',
+      a.birthdate ? a.birthdate.split('-').reverse().join('/') : '',
+    ]));
+  addSheet(wb, 'Todos', allRows, { widths: [32, 14, 10, 12, 12, 10, 14], freezeHeader: true, autoFilter: true });
 
-  // Salvar o PDF
-  doc.save(`plantel_${new Date().toISOString().split('T')[0]}.pdf`);
+  const addGroupSheet = (label, players) => {
+    if (players.length === 0) return;
+    const rows = [['Nome', 'Posição', 'Camisa', 'Pé', 'Altura']];
+    players
+      .slice()
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+      .forEach((p) => rows.push([
+        p.name,
+        p.position || '',
+        p.jersey_number || '',
+        p.preferred_foot === 'right' ? 'Direito' : p.preferred_foot === 'left' ? 'Esquerdo' : p.preferred_foot === 'both' ? 'Ambidestro' : '',
+        p.height_cm ? `${p.height_cm}cm` : '',
+      ]));
+    addSheet(wb, label, rows, { widths: [32, 14, 10, 12, 10], freezeHeader: true, autoFilter: true });
+  };
+  addGroupSheet('Grupo 1', grupo1);
+  addGroupSheet('Grupo 2', grupo2);
+  addGroupSheet('Grupo 3', grupo3);
+  addGroupSheet('Transição', transicao);
+  addGroupSheet('DM', dm);
+
+  saveWorkbook(wb, `plantel_${new Date().toISOString().split('T')[0]}.xlsx`);
 };

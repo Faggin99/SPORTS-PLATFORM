@@ -6,12 +6,15 @@ import { MultiSelect } from '../common/MultiSelect';
 import { Select } from '../common/Select';
 import { Textarea } from '../common/Textarea';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useClub } from '../../contexts/ClubContext';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { trainingService } from '../../services/trainingService';
 import { CreateTitleModal } from './CreateTitleModal';
 
 export function SessionModal({ isOpen, onClose, session, onSave }) {
   const { colors } = useTheme();
+  const { selectedClub } = useClub();
+  const modality = selectedClub?.modality || 'football_11';
   const isMobile = useIsMobile();
   const [loading, setLoading] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
@@ -40,12 +43,12 @@ export function SessionModal({ isOpen, onClose, session, onSave }) {
     try {
       const [contentsData, stagesData, titlesData] = await Promise.all([
         trainingService.getContents(),
-        trainingService.getStages(),
+        trainingService.getStages(null, modality),
         trainingService.getTitles(),
       ]);
 
-      const loadedContents = contentsData?.data || [];
-      const loadedStages = stagesData?.data || [];
+      const loadedContents = (contentsData?.data || []).filter(c => c.active !== false);
+      const loadedStages = (stagesData?.data || []).filter(s => s.active !== false);
       const loadedTitles = titlesData?.data || [];
 
       setContents(loadedContents);
@@ -58,11 +61,14 @@ export function SessionModal({ isOpen, onClose, session, onSave }) {
         const activity = block?.activity;
 
         if (activity) {
-          // Map saved stage_names to stage IDs
+          // Prefer stage_id (novo), fallback no stage_name (legado)
           const stageIds = activity.stages
             ?.map(activityStage => {
-              const globalStage = loadedStages.find(s => s.name === activityStage.stage_name);
-              return globalStage?.id;
+              if (activityStage.stage_id && loadedStages.some(s => s.id === activityStage.stage_id)) {
+                return activityStage.stage_id;
+              }
+              const byName = loadedStages.find(s => s.name === activityStage.stage_name);
+              return byName?.id;
             })
             .filter(id => id) || [];
 
@@ -96,10 +102,18 @@ export function SessionModal({ isOpen, onClose, session, onSave }) {
   }
 
   const handleFieldChange = (blockId, field, value) => {
-    setBlockData((prev) => ({
-      ...prev,
-      [blockId]: { ...(prev[blockId] || {}), [field]: value },
-    }));
+    setBlockData((prev) => {
+      const next = { ...prev, [blockId]: { ...(prev[blockId] || {}), [field]: value } };
+      // Ao mudar conteúdos, descarta etapas que não pertencem mais
+      if (field === 'selectedContents') {
+        const set = new Set(value);
+        next[blockId].selectedStages = (next[blockId].selectedStages || []).filter((sid) => {
+          const s = stages.find((x) => x.id === sid);
+          return s && set.has(s.content_id);
+        });
+      }
+      return next;
+    });
   };
 
   const handleFileUpload = (e) => {
@@ -293,11 +307,21 @@ export function SessionModal({ isOpen, onClose, session, onSave }) {
                 />
 
                 <MultiSelect
-                  label="Etapas"
-                  options={stages.map((s) => ({ value: s.id, label: s.name }))}
+                  label="Submomentos"
+                  options={(() => {
+                    const sel = blockData[block.id]?.selectedContents || [];
+                    if (!sel.length) return [];
+                    const set = new Set(sel);
+                    const filtered = stages.filter((s) => set.has(s.content_id));
+                    const multi = sel.length > 1;
+                    return filtered.map((s) => ({
+                      value: s.id,
+                      label: multi && s.content_name ? `${s.content_name} · ${s.name}` : s.name,
+                    }));
+                  })()}
                   value={blockData[block.id]?.selectedStages || []}
                   onChange={(value) => handleFieldChange(block.id, 'selectedStages', value)}
-                  placeholder="Selecione etapas..."
+                  placeholder={(blockData[block.id]?.selectedContents || []).length ? 'Selecione submomentos...' : 'Selecione um conteúdo primeiro'}
                 />
 
                 <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr', gap: '1rem' }}>

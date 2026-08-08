@@ -1,7 +1,36 @@
+/* TactiPlan brand tokens — alinhados ao logo (navy #0f172a + lime #c8ff00).
+   Disponíveis globalmente pra uso em componentes que precisem do accent lime
+   (destaques, badges, glow em botão promocional, etc). */
+:root {
+  --brand-navy: #0f172a;
+  --brand-navy-deep: #0a1220;
+  --brand-lime: #c8ff00;
+  --brand-lime-soft: rgba(200, 255, 0, 0.15);
+  --brand-blue: #2563eb;
+  --brand-blue-hover: #1d4ed8;
+}
+
 * {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+}
+
+/* Reset de outline em interações de mouse — botões não ficam "selecionados"
+   após clique. Mantém :focus-visible pra acessibilidade (Tab/teclado). */
+button:focus,
+[role="button"]:focus,
+a:focus,
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+}
+button:focus-visible,
+[role="button"]:focus-visible,
+a:focus-visible {
+  outline: 2px solid #1d4ed8;
+  outline-offset: 2px;
 }
 
 body {
@@ -49,4 +78,44 @@ body {
 
 [data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
   background: #64748b;
+}
+
+/* Scrollbar minimalista pra dropdowns do Select — esconde quando não está com hover */
+.select-options-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color 0.2s;
+}
+.select-options-scroll:hover {
+  scrollbar-color: rgba(0,0,0,0.20) transparent;
+}
+[data-theme="dark"] .select-options-scroll:hover {
+  scrollbar-color: rgba(255,255,255,0.20) transparent;
+}
+.select-options-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.select-options-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.select-options-scroll::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 3px;
+  transition: background 0.2s;
+}
+.select-options-scroll:hover::-webkit-scrollbar-thumb {
+  background: rgba(0,0,0,0.20);
+}
+[data-theme="dark"] .select-options-scroll:hover::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.20);
+}
+
+/* iOS não faz zoom automático no focus se a font-size do input for >= 16px.
+   Deixamos 16px em qualquer viewport pequena (< 768px) pra evitar essa UX ruim. */
+@media (max-width: 768px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
 }

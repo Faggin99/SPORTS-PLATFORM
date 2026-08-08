@@ -1,0 +1,394 @@
+const express = require('express');
+const crypto = require('crypto');
+const { query } = require('../config/database');
+const authMiddleware = require('../middleware/auth');
+const mailer = require('../services/mailer');
+const billing = require('../services/billing');
+const { isAdmin, isLifetime } = require('../config/specialUsers');
+
+// Confirma que o owner pode usar multi-coach (multi_user no plano da workspace).
+async function ownerCanInvite(user, workspaceId) {
+  if (user.role === 'admin') return true;
+  if (isAdmin?.(user.email) || isLifetime?.(user.email)) return true;
+  const sub = await billing.getSubscriptionForWorkspace(workspaceId);
+  return !!(sub?.features?.multi_user);
+}
+
+// Conta membros ativos da workspace (excluindo owner). Pra gate max_coaches.
+async function countActiveMembers(workspaceId) {
+  const r = await query(
+    `SELECT COUNT(*)::int AS n FROM workspace_members
+      WHERE workspace_id = $1 AND accepted_at IS NOT NULL`,
+    [workspaceId]
+  );
+  return r.rows[0]?.n || 0;
+}
+
+// Conta convites pendentes (ainda não aceitos).
+async function countPendingInvites(workspaceId) {
+  const r = await query(
+    `SELECT COUNT(*)::int AS n FROM workspace_members
+      WHERE workspace_id = $1 AND accepted_at IS NULL`,
+    [workspaceId]
+  );
+  return r.rows[0]?.n || 0;
+}
+
+function buildInviteEmail({ workspaceName, role, inviterName, acceptUrl }) {
+  const roleLabel = role === 'assistant' ? 'auxiliar' : 'treinador';
+  const subject = `Convite para participar de "${workspaceName}" no TactiPlan`;
+  const html = `
+    <div style="font-family: Helvetica, Arial, sans-serif; max-width: 540px; margin: auto; padding: 24px; color: #0f172a;">
+      <h2 style="color: #2563eb; margin-top: 0;">Você recebeu um convite</h2>
+      <p>${inviterName || 'Um treinador'} te convidou para participar de
+        <strong>${workspaceName}</strong> como <strong>${roleLabel}</strong> no TactiPlan.</p>
+      <p>Pra aceitar, clique no botão abaixo. Você precisa ter uma conta TactiPlan
+        com o mesmo e-mail pra qual o convite foi enviado.</p>
+      <p style="margin: 24px 0;">
+        <a href="${acceptUrl}" style="background: #2563eb; color: #fff; padding: 12px 22px; text-decoration: none; border-radius: 6px; font-weight: 600;">
+          Aceitar convite
+        </a>
+      </p>
+      <p style="font-size: 13px; color: #64748b;">Se você não esperava esse convite, é só ignorar.</p>
+      <p style="font-size: 12px; color: #94a3b8; margin-top: 32px;">
+        Não consegue clicar? Cole no navegador: ${acceptUrl}
+      </p>
+    </div>
+  `;
+  const text = `Você foi convidado para "${workspaceName}" no TactiPlan como ${roleLabel}.
+Pra aceitar, abra: ${acceptUrl}`;
+  return { subject, html, text };
+}
+
+const router = express.Router();
+const { isValidRole, isValidPermission } = require('../utils/permissions');
+const VALID_ROLES = ['manager', 'head_coach', 'assistant_coach', 'specialist', 'viewer'];
+
+// Resolve workspace a partir de clubId (1 conta = 1 clube = 1 workspace)
+async function resolveWorkspaceFromClub(clubId) {
+  if (!clubId) return null;
+  const r = await query('SELECT workspace_id FROM clubs WHERE id = $1', [clubId]);
+  return r.rows[0]?.workspace_id || null;
+}
+
+// ───────── ROTAS COMPAT: /api/clubs/:clubId/members → workspace_members ─────────
+
+// GET /api/clubs/:clubId/members
+router.get('/clubs/:clubId/members', authMiddleware, async (req, res) => {
+  try {
+    const { clubId } = req.params;
+    const wsId = await resolveWorkspaceFromClub(clubId);
+    if (!wsId) return res.status(404).json({ error: 'Clube não encontrado' });
+
+    const isOwner = req.user.isWorkspaceOwner(wsId);
+    const isMember = (req.user.accessibleWorkspaces || []).some(w => w.workspace_id === wsId);
+    if (!isOwner && !isMember) return res.status(403).json({ error: 'Sem acesso à workspace' });
+
+    const ownerRow = await query(
+      `SELECT u.id, u.name, u.email FROM workspaces w JOIN users u ON u.id = w.owner_id WHERE w.id = $1`,
+      [wsId]
+    );
+
+    const membersResult = await query(
+      `SELECT m.id, m.user_id, m.invited_email, m.role, m.category_ids, m.invited_at, m.accepted_at,
+              u.name AS user_name, u.email AS user_email,
+              inv.name AS invited_by_name
+         FROM workspace_members m
+         LEFT JOIN users u   ON u.id = m.user_id
+         LEFT JOIN users inv ON inv.id = m.invited_by
+        WHERE m.workspace_id = $1
+        ORDER BY m.invited_at ASC`,
+      [wsId]
+    );
+
+    res.json({
+      owner: ownerRow.rows[0] ? { ...ownerRow.rows[0], role: 'owner' } : null,
+      members: membersResult.rows,
+      is_owner: isOwner,
+      workspace_id: wsId,
+    });
+  } catch (err) {
+    console.error('List members error:', err);
+    res.status(500).json({ error: 'Failed to list members' });
+  }
+});
+
+// POST /api/clubs/:clubId/invite
+router.post('/clubs/:clubId/invite', authMiddleware, async (req, res) => {
+  try {
+    const { clubId } = req.params;
+    const { email, role, category_ids, permissions } = req.body;
+
+    if (!email?.trim()) return res.status(400).json({ error: 'email é obrigatório' });
+    if (role && !VALID_ROLES.includes(role)) return res.status(400).json({ error: 'role inválido' });
+
+    const wsId = await resolveWorkspaceFromClub(clubId);
+    if (!wsId) return res.status(404).json({ error: 'Clube não encontrado' });
+    if (!req.user.can('members:manage') || !req.user.isWorkspaceOwner(wsId)) {
+      return res.status(403).json({ error: 'Apenas o dono pode convidar' });
+    }
+
+    const wsRow = await query('SELECT name FROM workspaces WHERE id = $1', [wsId]);
+    const workspaceName = wsRow.rows[0]?.name || 'TactiPlan';
+
+    if (!(await ownerCanInvite(req.user, wsId))) {
+      return res.status(402).json({
+        error: 'Convite de treinadores está disponível apenas no plano Clube. Faça upgrade pra liberar.',
+        code: 'PLAN_REQUIRED',
+        required_feature: 'multi_user',
+      });
+    }
+
+    // Gate max_coaches (5 por workspace, contando aceitos + pendentes)
+    const sub = await billing.getSubscriptionForWorkspace(wsId);
+    const limit = sub?.features?.max_coaches;
+    if (typeof limit === 'number' && limit > 0 && limit < 999) {
+      const active = await countActiveMembers(wsId);
+      const pending = await countPendingInvites(wsId);
+      if (active + pending >= limit) {
+        return res.status(402).json({
+          error: `Você atingiu o limite de ${limit} membros do plano. Add-on de membros extras será disponibilizado em breve.`,
+          code: 'PLAN_REQUIRED',
+          required_feature: 'max_coaches',
+          current: active + pending,
+          limit,
+        });
+      }
+    }
+
+    // Valida category_ids (todas devem pertencer à workspace, se informadas)
+    let normalizedCategoryIds = null;
+    if (Array.isArray(category_ids) && category_ids.length > 0) {
+      const check = await query(
+        'SELECT id FROM categories WHERE workspace_id = $1 AND id = ANY($2)',
+        [wsId, category_ids]
+      );
+      if (check.rows.length !== category_ids.length) {
+        return res.status(400).json({ error: 'Uma ou mais categorias inválidas' });
+      }
+      normalizedCategoryIds = category_ids;
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    const userResult = await query('SELECT id, name FROM users WHERE LOWER(email) = $1', [normalizedEmail]);
+    const existingUser = userResult.rows[0] || null;
+
+    if (existingUser) {
+      const dup = await query(
+        'SELECT id FROM workspace_members WHERE workspace_id = $1 AND user_id = $2 AND accepted_at IS NOT NULL',
+        [wsId, existingUser.id]
+      );
+      if (dup.rows.length > 0) return res.status(409).json({ error: 'Esse usuário já é membro' });
+    }
+
+    const pending = await query(
+      `SELECT id FROM workspace_members
+        WHERE workspace_id = $1 AND accepted_at IS NULL
+          AND (LOWER(invited_email) = $2 OR user_id = $3)`,
+      [wsId, normalizedEmail, existingUser?.id || null]
+    );
+    if (pending.rows.length > 0) return res.status(409).json({ error: 'Já existe um convite pendente pra esse email' });
+
+    // Permissões customizadas opcionais (se omitido, usa defaults do role)
+    let normalizedPermissions = null;
+    if (Array.isArray(permissions)) {
+      normalizedPermissions = permissions.filter(isValidPermission);
+    }
+
+    const token = crypto.randomBytes(24).toString('hex');
+    const inserted = await query(
+      `INSERT INTO workspace_members (workspace_id, user_id, invited_email, role, category_ids, permissions, invited_by, invite_token)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING *`,
+      [wsId, existingUser?.id || null, normalizedEmail, role || 'head_coach', normalizedCategoryIds,
+       normalizedPermissions ? JSON.stringify(normalizedPermissions) : null, req.user.id, token]
+    );
+
+    const baseUrl = process.env.APP_URL || 'https://app.tactiplan.faggin.com.br';
+    const acceptUrl = `${baseUrl}/#/accept-invite/${token}`;
+
+    try {
+      const { subject, html, text } = buildInviteEmail({
+        workspaceName,
+        role: role || 'coach',
+        inviterName: req.user.email,
+        acceptUrl,
+      });
+      await mailer.sendMail({ to: normalizedEmail, subject, html, text });
+    } catch (mailErr) {
+      console.error('Failed to send invite email:', mailErr.message);
+    }
+
+    res.status(201).json({
+      ...inserted.rows[0],
+      accept_url: acceptUrl,
+    });
+  } catch (err) {
+    console.error('Invite error:', err);
+    res.status(500).json({ error: 'Failed to invite member' });
+  }
+});
+
+// PUT /api/clubs/:clubId/members/:memberId — atualiza role/categorias/permissions
+router.put('/clubs/:clubId/members/:memberId', authMiddleware, async (req, res) => {
+  try {
+    const { clubId, memberId } = req.params;
+    const { role, category_ids, permissions } = req.body;
+    if (role && !VALID_ROLES.includes(role)) return res.status(400).json({ error: 'role inválido' });
+
+    const wsId = await resolveWorkspaceFromClub(clubId);
+    if (!wsId) return res.status(404).json({ error: 'Clube não encontrado' });
+    if (!req.user.can('members:manage') || !req.user.isWorkspaceOwner(wsId)) {
+      return res.status(403).json({ error: 'Apenas o dono pode alterar membros' });
+    }
+
+    let normalizedCategoryIds = null;
+    if (Array.isArray(category_ids) && category_ids.length > 0) {
+      const check = await query(
+        'SELECT id FROM categories WHERE workspace_id = $1 AND id = ANY($2)',
+        [wsId, category_ids]
+      );
+      if (check.rows.length !== category_ids.length) {
+        return res.status(400).json({ error: 'Uma ou mais categorias inválidas' });
+      }
+      normalizedCategoryIds = category_ids;
+    }
+
+    // permissions:
+    //   omitido (undefined) → mantém o que está
+    //   null  → reseta pros defaults do role
+    //   array → grava override
+    let permissionsParam = undefined;
+    if (permissions === null) permissionsParam = null;
+    else if (Array.isArray(permissions)) {
+      permissionsParam = JSON.stringify(permissions.filter(isValidPermission));
+    }
+
+    const result = await query(
+      `UPDATE workspace_members
+          SET role         = COALESCE($1, role),
+              category_ids = $2,
+              permissions  = CASE WHEN $4::boolean THEN $3::jsonb ELSE permissions END,
+              updated_at   = NOW()
+        WHERE id = $5 AND workspace_id = $6
+        RETURNING *`,
+      [role || null, normalizedCategoryIds, permissionsParam, permissionsParam !== undefined, memberId, wsId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Membro não encontrado' });
+
+    if (result.rows[0].user_id) authMiddleware.invalidateAccessibleCache?.(result.rows[0].user_id);
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Update member error:', err);
+    res.status(500).json({ error: 'Failed to update member' });
+  }
+});
+
+// DELETE /api/clubs/:clubId/members/:memberId
+router.delete('/clubs/:clubId/members/:memberId', authMiddleware, async (req, res) => {
+  try {
+    const { clubId, memberId } = req.params;
+    const wsId = await resolveWorkspaceFromClub(clubId);
+    if (!wsId) return res.status(404).json({ error: 'Clube não encontrado' });
+    if (!req.user.can('members:manage') || !req.user.isWorkspaceOwner(wsId)) {
+      return res.status(403).json({ error: 'Apenas o dono pode remover membros' });
+    }
+
+    const result = await query(
+      'DELETE FROM workspace_members WHERE id = $1 AND workspace_id = $2 RETURNING user_id',
+      [memberId, wsId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Membro não encontrado' });
+
+    if (result.rows[0].user_id) authMiddleware.invalidateAccessibleCache?.(result.rows[0].user_id);
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Delete member error:', err);
+    res.status(500).json({ error: 'Failed to delete member' });
+  }
+});
+
+// ───────── Endpoints PÚBLICOS — fluxo de aceite ─────────
+
+// GET /api/invites/:token
+router.get('/invites/:token', async (req, res) => {
+  try {
+    const result = await query(
+      `SELECT m.id, m.invited_email, m.role, m.invited_at, m.accepted_at, m.category_ids,
+              w.id AS workspace_id, w.name AS workspace_name,
+              inv.name AS invited_by_name, inv.email AS invited_by_email
+         FROM workspace_members m
+         JOIN workspaces w ON w.id = m.workspace_id
+         LEFT JOIN users inv ON inv.id = m.invited_by
+        WHERE m.invite_token = $1`,
+      [req.params.token]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Convite inválido ou já usado' });
+    const invite = result.rows[0];
+    if (invite.accepted_at) return res.status(410).json({ error: 'Convite já foi aceito' });
+
+    // Compat: front antigo espera club_id/club_name — adiciona campo extra
+    const clubRow = await query('SELECT id, name FROM clubs WHERE workspace_id = $1 LIMIT 1', [invite.workspace_id]);
+    if (clubRow.rows.length > 0) {
+      invite.club_id = clubRow.rows[0].id;
+      invite.club_name = clubRow.rows[0].name;
+    }
+
+    res.json(invite);
+  } catch (err) {
+    console.error('Get invite error:', err);
+    res.status(500).json({ error: 'Failed to get invite' });
+  }
+});
+
+// POST /api/invites/:token/accept
+router.post('/invites/:token/accept', authMiddleware, async (req, res) => {
+  try {
+    const result = await query(
+      `SELECT m.*, w.name AS workspace_name
+         FROM workspace_members m
+         JOIN workspaces w ON w.id = m.workspace_id
+        WHERE m.invite_token = $1`,
+      [req.params.token]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Convite inválido ou já usado' });
+    const invite = result.rows[0];
+    if (invite.accepted_at) return res.status(410).json({ error: 'Convite já foi aceito' });
+
+    if (invite.invited_email) {
+      const me = await query('SELECT email FROM users WHERE id = $1', [req.user.id]);
+      const myEmail = (me.rows[0]?.email || '').toLowerCase();
+      if (myEmail !== invite.invited_email.toLowerCase()) {
+        return res.status(403).json({ error: 'Esse convite é pra outro email. Entre com a conta correspondente.' });
+      }
+    }
+
+    const already = await query(
+      'SELECT id FROM workspace_members WHERE workspace_id = $1 AND user_id = $2 AND accepted_at IS NOT NULL',
+      [invite.workspace_id, req.user.id]
+    );
+    if (already.rows.length > 0) {
+      return res.status(409).json({ error: 'Você já é membro' });
+    }
+
+    const updated = await query(
+      `UPDATE workspace_members
+          SET user_id = $1, accepted_at = NOW(), invite_token = NULL, updated_at = NOW()
+        WHERE id = $2
+        RETURNING *`,
+      [req.user.id, invite.id]
+    );
+
+    authMiddleware.invalidateAccessibleCache?.(req.user.id);
+
+    res.json({ ok: true, member: updated.rows[0], workspace_id: invite.workspace_id, workspace_name: invite.workspace_name });
+  } catch (err) {
+    console.error('Accept invite error:', err);
+    res.status(500).json({ error: 'Failed to accept invite' });
+  }
+});
+
+module.exports = router;

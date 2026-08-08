@@ -5,7 +5,7 @@ import { useIsMobile } from '../../hooks/useIsMobile';
 import { themeService } from '../../services/themeService';
 import { ThemeSelectionModal } from './ThemeSelectionModal';
 
-export function MonthlyThemeBanner({ clubId, currentMonth }) {
+export function MonthlyThemeBanner({ clubId, currentMonth, inline = false }) {
   const { colors } = useTheme();
   const isMobile = useIsMobile();
   const [theme, setTheme] = useState(null);
@@ -54,7 +54,7 @@ export function MonthlyThemeBanner({ clubId, currentMonth }) {
     padding: isMobile ? '0.4rem 0.75rem' : '0.5rem 1rem',
     borderRadius: '0.5rem',
     border: `1px solid ${colors.border}`,
-    marginBottom: '0.75rem',
+    marginBottom: inline ? 0 : '0.75rem',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -89,7 +89,7 @@ export function MonthlyThemeBanner({ clubId, currentMonth }) {
     return (
       <>
         <div style={{
-          marginBottom: '0.5rem',
+          marginBottom: inline ? 0 : '0.5rem',
           display: 'flex',
           justifyContent: 'flex-end',
         }}>

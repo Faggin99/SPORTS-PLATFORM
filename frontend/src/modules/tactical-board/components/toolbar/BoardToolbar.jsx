@@ -64,6 +64,12 @@ export default function BoardToolbar({
           Futebol 11
         </button>
         <button
+          style={fieldType === FIELD_TYPES.FOOTBALL_7 ? activeButtonStyle : buttonStyle}
+          onClick={() => onFieldTypeChange(FIELD_TYPES.FOOTBALL_7)}
+        >
+          Futebol 7
+        </button>
+        <button
           style={fieldType === FIELD_TYPES.FUTSAL ? activeButtonStyle : buttonStyle}
           onClick={() => onFieldTypeChange(FIELD_TYPES.FUTSAL)}
         >

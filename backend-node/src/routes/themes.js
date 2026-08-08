@@ -21,8 +21,8 @@ router.get('/', async (req, res) => {
       FROM monthly_themes mt
       LEFT JOIN contents pc ON mt.primary_content_id = pc.id
       LEFT JOIN contents sc ON mt.secondary_content_id = sc.id
-      WHERE mt.tenant_id = $1 AND mt.club_id = $2 AND mt.month = $3`,
-      [req.user.id, club_id, month]
+      WHERE mt.workspace_id = ANY($1) AND mt.club_id = $2 AND mt.month = $3`,
+      [req.user.workspaceIds || [], club_id, month]
     );
 
     res.json(result.rows.length > 0 ? result.rows[0] : null);
@@ -48,8 +48,8 @@ router.get('/adherence', async (req, res) => {
       FROM monthly_themes mt
       LEFT JOIN contents pc ON mt.primary_content_id = pc.id
       LEFT JOIN contents sc ON mt.secondary_content_id = sc.id
-      WHERE mt.tenant_id = $1 AND mt.club_id = $2 AND mt.month = $3`,
-      [req.user.id, club_id, month]
+      WHERE mt.workspace_id = ANY($1) AND mt.club_id = $2 AND mt.month = $3`,
+      [req.user.workspaceIds || [], club_id, month]
     );
 
     if (themeResult.rows.length === 0) {
@@ -72,7 +72,7 @@ router.get('/adherence', async (req, res) => {
       JOIN training_activity_blocks tab ON ta.block_id = tab.id
       JOIN training_sessions ts ON tab.session_id = ts.id
       JOIN training_microcycles tm ON ts.microcycle_id = tm.id
-      WHERE ts.tenant_id = $1
+      WHERE ts.workspace_id = ANY($1)
         AND tm.club_id = $2
         AND ts.date >= $3
         AND ts.date <= $4
@@ -83,7 +83,7 @@ router.get('/adherence', async (req, res) => {
           GROUP BY tac_inner.activity_id
           HAVING bool_and(c_inner.abbreviation IN ('FIS', 'TEC'))
         )`,
-      [req.user.id, club_id, startDate.toISOString(), endDate.toISOString()]
+      [req.user.workspaceIds || [], club_id, startDate.toISOString(), endDate.toISOString()]
     );
 
     const totalActivities = activitiesResult.rows.length;
@@ -158,13 +158,28 @@ router.put('/', async (req, res) => {
       return res.status(400).json({ error: 'month, club_id, and primary_content_id are required' });
     }
 
+    if (!req.user.can('training:edit')) return res.status(403).json({ error: 'Sem permissão' });
+
+    // Gate de plano: Tema do Mês é exclusivo do plano Clube
+    const { hasFeature } = require('../utils/planFeatures');
+    if (!(await hasFeature(req.user, 'monthly_theme'))) {
+      return res.status(402).json({
+        error: 'Tema do Mês está disponível apenas no plano Clube.',
+        code: 'PLAN_REQUIRED',
+        required_feature: 'monthly_theme',
+      });
+    }
+
+    const wsId = req.user.writableWorkspaceForClub(club_id);
+    if (!wsId) return res.status(403).json({ error: 'Sem permissão de escrita no clube' });
+
     const result = await query(
-      `INSERT INTO monthly_themes (tenant_id, club_id, month, primary_content_id, secondary_content_id, description)
+      `INSERT INTO monthly_themes (workspace_id, club_id, month, primary_content_id, secondary_content_id, description)
       VALUES ($1, $2, $3, $4, $5, $6)
-      ON CONFLICT (tenant_id, club_id, month)
+      ON CONFLICT (workspace_id, club_id, month)
       DO UPDATE SET primary_content_id = $4, secondary_content_id = $5, description = $6, updated_at = now()
       RETURNING *`,
-      [req.user.id, club_id, month, primary_content_id, secondary_content_id || null, description || null]
+      [wsId, club_id, month, primary_content_id, secondary_content_id || null, description || null]
     );
 
     res.json(result.rows[0]);
@@ -178,8 +193,8 @@ router.put('/', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const result = await query(
-      'DELETE FROM monthly_themes WHERE id = $1 AND tenant_id = $2 RETURNING id',
-      [req.params.id, req.user.id]
+      'DELETE FROM monthly_themes WHERE id = $1 AND workspace_id = ANY($2) RETURNING id',
+      [req.params.id, req.user.workspaceIds || []]
     );
 
     if (result.rows.length === 0) {

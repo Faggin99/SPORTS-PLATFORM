@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useMemo, useState, useEffect } from 'react';
 
 const ThemeContext = createContext();
 
@@ -43,11 +43,32 @@ export const themes = {
   }
 };
 
+// Utilitários de luminância pra escolher contraste de texto sobre a cor primária
+function clamp8(v) { return Math.max(0, Math.min(255, Math.round(v))); }
+function hexToRgb(hex) {
+  if (!hex || typeof hex !== 'string') return null;
+  const h = hex.replace('#', '');
+  if (h.length < 6) return null;
+  return [
+    parseInt(h.slice(0, 2), 16),
+    parseInt(h.slice(2, 4), 16),
+    parseInt(h.slice(4, 6), 16),
+  ];
+}
+function darkenHex(hex, ratio) {
+  const rgb = hexToRgb(hex); if (!rgb) return hex;
+  const [r, g, b] = rgb;
+  return '#' + [r * (1 - ratio), g * (1 - ratio), b * (1 - ratio)]
+    .map((x) => clamp8(x).toString(16).padStart(2, '0')).join('');
+}
+
 export function ThemeProvider({ children }) {
   const [theme, setTheme] = useState(() => {
     const saved = localStorage.getItem('theme');
     return saved || 'light';
   });
+  // Cor do clube ativo — setada via setClubPrimary pelo ClubContext consumer
+  const [clubPrimary, setClubPrimary] = useState(null);
 
   useEffect(() => {
     localStorage.setItem('theme', theme);
@@ -58,12 +79,27 @@ export function ThemeProvider({ children }) {
     setTheme(prev => prev === 'light' ? 'dark' : 'light');
   };
 
+  // Resolução do tema: cor do clube ativo sobrescreve a primary do tema.
+  const colors = useMemo(() => {
+    const base = themes[theme].colors;
+    if (!clubPrimary) return base;
+    return {
+      ...base,
+      primary: clubPrimary,
+      primaryHover: darkenHex(clubPrimary, 0.2),
+      info: clubPrimary,  // links/info passam a usar a mesma cor
+    };
+  }, [theme, clubPrimary]);
+
   const value = {
     theme,
     setTheme,
     toggleTheme,
-    colors: themes[theme].colors,
-    isDark: theme === 'dark'
+    colors,
+    isDark: theme === 'dark',
+    // Permite que o ClubProvider injete a cor do clube ativo aqui
+    setClubPrimary,
+    clubPrimary,
   };
 
   return (

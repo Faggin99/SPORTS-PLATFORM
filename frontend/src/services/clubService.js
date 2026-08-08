@@ -7,6 +7,8 @@ export const clubService = {
 
   getLogoUrl(logoPath) {
     if (!logoPath) return null;
+    if (logoPath.startsWith('http://') || logoPath.startsWith('https://')) return logoPath;
+    if (logoPath.startsWith('/')) return logoPath;
     return `/uploads/club-logos/${logoPath}`;
   },
 
@@ -22,6 +24,7 @@ export const clubService = {
     return await api.put(`/clubs/${clubId}`, {
       name: clubData.name,
       description: clubData.description,
+      modality: clubData.modality,
     });
   },
 

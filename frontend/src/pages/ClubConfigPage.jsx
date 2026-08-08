@@ -1,19 +1,28 @@
 import { useState } from 'react';
-import { Plus, Edit2, Trash2, Building2, X, Check, Camera } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Plus, Edit2, Trash2, Building2, X, Check, Camera, Lock, Crown } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useClub } from '../contexts/ClubContext';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { usePlanFeatures } from '../hooks/usePlanFeatures';
 import { PhotoCropModal } from '../components/settings/PhotoCropModal';
 
 export function ClubConfigPage() {
   const { colors } = useTheme();
   const isMobile = useIsMobile();
+  const navigate = useNavigate();
+  const plan = usePlanFeatures();
   const { clubs, createClub, updateClub, deleteClub, uploadLogo, getLogoUrl } = useClub();
+
+  // Limite de clubes do plano (admin/lifetime/clube = sem limite).
+  const clubLimit = (plan.isAdmin || plan.isLifetime || plan.multi_user) ? null : 1;
+  const canCreateClub = clubLimit === null || clubs.length < clubLimit;
   const [showModal, setShowModal] = useState(false);
   const [editingClub, setEditingClub] = useState(null);
   const [formData, setFormData] = useState({
     name: '',
     description: '',
+    modality: 'football_11',
   });
   const [loading, setLoading] = useState(false);
   const [showPhotoCropModal, setShowPhotoCropModal] = useState(false);
@@ -26,10 +35,11 @@ export function ClubConfigPage() {
       setFormData({
         name: club.name,
         description: club.description || '',
+        modality: club.modality || 'football_11',
       });
     } else {
       setEditingClub(null);
-      setFormData({ name: '', description: '' });
+      setFormData({ name: '', description: '', modality: 'football_11' });
     }
     setShowModal(true);
   }
@@ -37,12 +47,22 @@ export function ClubConfigPage() {
   function handleCloseModal() {
     setShowModal(false);
     setEditingClub(null);
-    setFormData({ name: '', description: '' });
+    setFormData({ name: '', description: '', modality: 'football_11' });
   }
 
   async function handleSubmit(e) {
     e.preventDefault();
     if (!formData.name.trim()) return;
+
+    // Aviso: ao trocar a modalidade, posições dos atletas serão limpas (backend faz o reset)
+    if (editingClub && editingClub.modality && editingClub.modality !== formData.modality) {
+      const ok = window.confirm(
+        'Mudar a modalidade vai LIMPAR as posições atuais dos atletas deste clube. ' +
+        'Você precisará recadastrar a posição de cada atleta usando as opções da nova modalidade.\n\n' +
+        'Deseja continuar?'
+      );
+      if (!ok) return;
+    }
 
     try {
       setLoading(true);
@@ -348,15 +368,50 @@ export function ClubConfigPage() {
       <div style={headerStyle}>
         <h1 style={titleStyle}>Clubes</h1>
         <button
-          style={addButtonStyle}
-          onClick={() => handleOpenModal()}
+          style={{ ...addButtonStyle, backgroundColor: canCreateClub ? addButtonStyle.backgroundColor : '#f59e0b' }}
+          onClick={() => {
+            if (!canCreateClub) {
+              navigate('/billing?reason=max_clubs');
+              return;
+            }
+            handleOpenModal();
+          }}
+          title={!canCreateClub ? 'Disponível no plano Clube' : undefined}
           onMouseEnter={(e) => e.currentTarget.style.opacity = '0.9'}
           onMouseLeave={(e) => e.currentTarget.style.opacity = '1'}
         >
-          <Plus size={18} />
-          Novo Clube
+          {canCreateClub ? <Plus size={18} /> : <Lock size={16} />}
+          {canCreateClub ? 'Novo Clube' : 'Adicionar clube (plano Clube)'}
         </button>
       </div>
+
+      {!canCreateClub && (
+        <div style={{
+          marginBottom: '1rem',
+          padding: '0.875rem 1rem',
+          backgroundColor: '#f59e0b15',
+          border: '1px solid #f59e0b40',
+          borderRadius: '0.5rem',
+          display: 'flex', gap: '0.75rem', alignItems: 'flex-start',
+        }}>
+          <Crown size={18} color="#f59e0b" style={{ flexShrink: 0, marginTop: 2 }} />
+          <div style={{ flex: 1, fontSize: '0.85rem', color: colors.text }}>
+            <strong>Plano Pro permite 1 clube.</strong> Pra gerenciar mais de um clube (escolinha, projeto social, segundo time), faça upgrade pro plano Clube — múltiplos clubes, várias categorias por clube e equipe técnica compartilhando o trabalho.
+            <div style={{ marginTop: '0.5rem' }}>
+              <button
+                onClick={() => navigate('/billing')}
+                style={{
+                  padding: '0.4rem 0.875rem', backgroundColor: '#f59e0b',
+                  color: '#fff', border: 'none', borderRadius: '0.375rem',
+                  fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer',
+                }}
+              >
+                Fazer upgrade pro Clube
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {clubs.length === 0 ? (
         <div style={{
@@ -474,6 +529,25 @@ export function ClubConfigPage() {
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   placeholder="Descrição do clube"
                 />
+              </div>
+
+              <div style={formGroupStyle}>
+                <label style={labelStyle}>Modalidade *</label>
+                <select
+                  style={inputStyle}
+                  value={formData.modality}
+                  onChange={(e) => setFormData({ ...formData, modality: e.target.value })}
+                  required
+                >
+                  <option value="football_11">Futebol 11 (11 jogadores · 2x45 min)</option>
+                  <option value="football_7">Futebol 7 (7 jogadores · 2x25 min)</option>
+                  <option value="futsal">Futsal (5 jogadores · 2x20 min)</option>
+                </select>
+                {editingClub && editingClub.modality && editingClub.modality !== formData.modality && (
+                  <div style={{ fontSize: '0.72rem', color: '#f59e0b', marginTop: '0.3rem' }}>
+                    ⚠ Ao salvar, as posições dos atletas deste clube serão limpas.
+                  </div>
+                )}
               </div>
 
               <div style={modalActionsStyle}>

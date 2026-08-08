@@ -16,6 +16,31 @@ export const authService = {
     return { data: { message: 'Logout realizado com sucesso' } };
   },
 
+  async register({ email, password, name, phone, accept_terms }) {
+    const data = await api.post('/auth/register', { email, password, name, phone, accept_terms: accept_terms ? 'true' : 'false' });
+    return { user: data.user, token: data.token };
+  },
+
+  async googleLogin(credential) {
+    const data = await api.post('/auth/google', { credential });
+    return { user: data.user, token: data.token };
+  },
+
+  async forgotPassword(email) {
+    return await api.post('/auth/forgot', { email });
+  },
+
+  async resetPassword(token, password) {
+    return await api.post('/auth/reset', { token, password });
+  },
+
+  async deleteMe(password) {
+    // Backend: DELETE /api/auth/me — exige senha atual quando a conta tem senha;
+    // apaga/anonimiza dados e cancela assinatura ativa (LGPD).
+    const body = password ? { password } : {};
+    return await api.delete('/auth/me', body);
+  },
+
   async me() {
     const data = await api.get('/auth/me');
     return {
@@ -29,6 +54,7 @@ export const authService = {
         profile_photo: data.profile_photo,
         phone: data.phone,
         bio: data.bio,
+        requires_password: !!data.requires_password,
       },
       tenant: null,
     };

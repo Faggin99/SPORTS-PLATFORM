@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { Building2, ArrowRight } from 'lucide-react';
 import { useTheme } from '../../contexts/ThemeContext';
+import { MODALITIES, MODALITY_LABELS, MODALITY_DESCRIPTIONS } from '../../lib/sportConfig';
 
 export function ClubOnboardingModal({ onCreateClub }) {
   const { colors } = useTheme();
   const [clubName, setClubName] = useState('');
+  const [modality, setModality] = useState('football_11');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -20,7 +22,7 @@ export function ClubOnboardingModal({ onCreateClub }) {
     setError('');
 
     try {
-      await onCreateClub({ name: clubName.trim() });
+      await onCreateClub({ name: clubName.trim(), modality });
     } catch (err) {
       setError(err.message || 'Erro ao criar clube');
       setLoading(false);
@@ -39,6 +41,8 @@ export function ClubOnboardingModal({ onCreateClub }) {
     justifyContent: 'center',
     zIndex: 9999,
     padding: '1rem',
+    // Overlay pode rolar em telas pequenas se o modal for mais alto que a viewport
+    overflowY: 'auto',
   };
 
   const modalStyle = {
@@ -46,41 +50,44 @@ export function ClubOnboardingModal({ onCreateClub }) {
     borderRadius: '0.75rem',
     width: '100%',
     maxWidth: '500px',
-    padding: '2rem',
+    // Limita altura em ~90vh e rola conteúdo interno em vez de vazar
+    maxHeight: 'calc(100vh - 2rem)',
+    overflowY: 'auto',
+    padding: '1.75rem',
     boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
   };
 
   const headerStyle = {
     textAlign: 'center',
-    marginBottom: '2rem',
+    marginBottom: '1.25rem',
   };
 
   const iconContainerStyle = {
-    width: '80px',
-    height: '80px',
+    width: '56px',
+    height: '56px',
     borderRadius: '50%',
     backgroundColor: colors.primary + '20',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    margin: '0 auto 1.5rem',
+    margin: '0 auto 0.85rem',
   };
 
   const titleStyle = {
-    fontSize: '1.75rem',
+    fontSize: '1.4rem',
     fontWeight: '700',
     color: colors.text,
-    marginBottom: '0.5rem',
+    marginBottom: '0.35rem',
   };
 
   const subtitleStyle = {
-    fontSize: '0.95rem',
+    fontSize: '0.88rem',
     color: colors.textSecondary,
-    lineHeight: '1.5',
+    lineHeight: '1.4',
   };
 
   const formStyle = {
-    marginTop: '1.5rem',
+    marginTop: '1rem',
   };
 
   const labelStyle = {
@@ -164,13 +171,49 @@ export function ClubOnboardingModal({ onCreateClub }) {
                 setClubName(e.target.value);
                 setError('');
               }}
-              placeholder="Ex: Clube de Futebol ABC"
+              placeholder="Ex: Atlético Bola Pra Frente"
               style={inputStyle}
               autoFocus
               disabled={loading}
               required
             />
             {error && <div style={errorStyle}>{error}</div>}
+          </div>
+
+          <div style={{ marginTop: '1.25rem' }}>
+            <label style={labelStyle}>Modalidade *</label>
+            <div style={{ display: 'grid', gap: '0.5rem' }}>
+              {MODALITIES.map((m) => {
+                const active = modality === m;
+                return (
+                  <label
+                    key={m}
+                    style={{
+                      display: 'flex', alignItems: 'flex-start', gap: '0.6rem',
+                      padding: '0.75rem 0.875rem',
+                      backgroundColor: active ? `${colors.primary}15` : colors.surface,
+                      border: `2px solid ${active ? colors.primary : colors.border}`,
+                      borderRadius: '0.5rem',
+                      cursor: loading ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="modality"
+                      value={m}
+                      checked={active}
+                      onChange={() => setModality(m)}
+                      disabled={loading}
+                      style={{ marginTop: 3 }}
+                    />
+                    <div>
+                      <div style={{ fontSize: '0.95rem', fontWeight: 600, color: colors.text }}>{MODALITY_LABELS[m]}</div>
+                      <div style={{ fontSize: '0.78rem', color: colors.textSecondary, marginTop: 2 }}>{MODALITY_DESCRIPTIONS[m]}</div>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
           </div>
 
           <button

@@ -52,6 +52,46 @@ export const FOOTBALL_11_FORMATIONS = {
   },
 };
 
+// Formações de Futebol 7 (7 jogadores: 1 GR + 6 linha)
+export const FOOTBALL_7_FORMATIONS = {
+  '1-3-2-1': {
+    label: '3-2-1 (clássica)',
+    positions: [
+      { x: 5,  y: 50, jerseyNumber: 1, name: 'GR' },
+      { x: 25, y: 20, jerseyNumber: 2, name: 'Z' },
+      { x: 25, y: 50, jerseyNumber: 3, name: 'Z' },
+      { x: 25, y: 80, jerseyNumber: 4, name: 'Z' },
+      { x: 50, y: 30, jerseyNumber: 5, name: 'M' },
+      { x: 50, y: 70, jerseyNumber: 6, name: 'M' },
+      { x: 75, y: 50, jerseyNumber: 7, name: 'A' },
+    ],
+  },
+  '1-2-3-1': {
+    label: '2-3-1',
+    positions: [
+      { x: 5,  y: 50, jerseyNumber: 1, name: 'GR' },
+      { x: 25, y: 30, jerseyNumber: 2, name: 'Z' },
+      { x: 25, y: 70, jerseyNumber: 3, name: 'Z' },
+      { x: 50, y: 20, jerseyNumber: 4, name: 'LD' },
+      { x: 50, y: 50, jerseyNumber: 5, name: 'M' },
+      { x: 50, y: 80, jerseyNumber: 6, name: 'LE' },
+      { x: 75, y: 50, jerseyNumber: 7, name: 'A' },
+    ],
+  },
+  '1-3-1-2': {
+    label: '3-1-2',
+    positions: [
+      { x: 5,  y: 50, jerseyNumber: 1, name: 'GR' },
+      { x: 25, y: 20, jerseyNumber: 2, name: 'Z' },
+      { x: 25, y: 50, jerseyNumber: 3, name: 'Z' },
+      { x: 25, y: 80, jerseyNumber: 4, name: 'Z' },
+      { x: 50, y: 50, jerseyNumber: 5, name: 'M' },
+      { x: 75, y: 30, jerseyNumber: 6, name: 'A' },
+      { x: 75, y: 70, jerseyNumber: 7, name: 'A' },
+    ],
+  },
+};
+
 export const FUTSAL_FORMATIONS = {
   '1-2-2': {
     label: '1-2-2',
@@ -87,5 +127,6 @@ export const FUTSAL_FORMATIONS = {
 
 export function getFormationsForFieldType(fieldType) {
   if (fieldType === 'futsal') return FUTSAL_FORMATIONS;
+  if (fieldType === 'football_7') return FOOTBALL_7_FORMATIONS;
   return FOOTBALL_11_FORMATIONS;
 }

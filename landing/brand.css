@@ -1,0 +1,43 @@
+/* TactiPlan brand palette (aligned to logo: navy #0f172a + lime #c8ff00).
+   Loaded after tailwind.css in each landing page. Overrides utility
+   classes composed at compile time so we can tweak brand without
+   recompiling tailwind. */
+:root {
+  --brand-navy: #0f172a;
+  --brand-navy-deep: #0a1220;
+  --brand-lime: #c8ff00;
+  --brand-lime-soft: rgba(200, 255, 0, 0.15);
+  --brand-blue: #2563eb;
+}
+.bg-mesh {
+  background-color: var(--brand-navy);
+  background-image:
+    radial-gradient(at 20% 15%, rgba(37, 99, 235, 0.18) 0, transparent 55%),
+    radial-gradient(at 80% 25%, rgba(200, 255, 0, 0.08) 0, transparent 45%),
+    radial-gradient(at 50% 100%, rgba(37, 99, 235, 0.12) 0, transparent 55%);
+}
+.gradient-text {
+  background: linear-gradient(135deg, #60a5fa 0%, var(--brand-lime) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+.pulse-brand {
+  background-color: var(--brand-lime);
+  box-shadow: 0 0 0 0 rgba(200, 255, 0, 0.6);
+  animation: pulseBrand 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+@keyframes pulseBrand {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(200, 255, 0, 0.55); }
+  50%      { box-shadow: 0 0 0 6px rgba(200, 255, 0, 0); }
+}
+.btn-brand-primary {
+  position: relative;
+  background-color: var(--brand-blue);
+  transition: background-color .2s ease, transform .2s ease, box-shadow .2s ease;
+}
+.btn-brand-primary:hover {
+  background-color: #1d4ed8;
+  box-shadow: 0 0 0 2px var(--brand-lime-soft), 0 10px 30px -8px rgba(37, 99, 235, 0.5);
+}

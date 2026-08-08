@@ -2,17 +2,55 @@ const express = require('express');
 const { query } = require('../config/database');
 const authMiddleware = require('../middleware/auth');
 const { uploadClubLogo } = require('../middleware/upload');
+const billing = require('../services/billing');
+const { isAdmin, isLifetime } = require('../config/specialUsers');
+
+// Quantos clubes a workspace ativa ainda pode criar? Retorna { allowed, limit, current }.
+async function canCreateClub(user) {
+  if (user.role === 'admin' || isAdmin?.(user.email) || isLifetime?.(user.email)) {
+    return { allowed: true, limit: -1 };
+  }
+  if (!user.workspaceId) return { allowed: false, limit: 0, current: 0 };
+
+  const sub = await billing.getSubscriptionForWorkspace(user.workspaceId);
+  const planLimit = sub?.features?.max_clubs;
+  if (planLimit === undefined || planLimit === -1) return { allowed: true, limit: planLimit ?? -1 };
+
+  // Add-on: slots avulsos vendidos diretamente na subscription. Plano Clube hoje
+  // vem com 3 slots inclusos; cada compra adicional incrementa extra_club_slots.
+  const extraSlots = Number(sub?.extra_club_slots || 0);
+  const limit = planLimit + (Number.isFinite(extraSlots) ? extraSlots : 0);
+
+  const existing = await query(
+    'SELECT COUNT(*)::int AS n FROM clubs WHERE workspace_id = $1',
+    [user.workspaceId]
+  );
+  const current = existing.rows[0].n;
+  return { allowed: current < limit, limit, current, planLimit, extraSlots };
+}
 
 const router = express.Router();
 
 router.use(authMiddleware);
 
-// GET /api/clubs
+// GET /api/clubs — clubes acessíveis (todas as workspaces que o user participa)
 router.get('/', async (req, res) => {
   try {
+    const workspaceIds = req.user.workspaceIds || [];
+    if (workspaceIds.length === 0) return res.json([]);
     const result = await query(
-      'SELECT * FROM clubs WHERE tenant_id = $1 ORDER BY created_at ASC',
-      [req.user.id]
+      `SELECT c.*,
+              CASE WHEN w.owner_id = $1 THEN 'owner' ELSE COALESCE(m.role, 'coach') END AS my_role,
+              (w.owner_id = $1) AS is_owner
+         FROM clubs c
+         JOIN workspaces w ON w.id = c.workspace_id
+         LEFT JOIN workspace_members m
+                ON m.workspace_id = w.id
+               AND m.user_id = $1
+               AND m.accepted_at IS NOT NULL
+        WHERE c.workspace_id = ANY($2)
+        ORDER BY is_owner DESC, c.created_at ASC`,
+      [req.user.id, workspaceIds]
     );
     res.json(result.rows);
   } catch (err) {
@@ -21,12 +59,22 @@ router.get('/', async (req, res) => {
   }
 });
 
-// GET /api/clubs/:id
+// GET /api/clubs/:id — acessível se o user pode ver a workspace
 router.get('/:id', async (req, res) => {
   try {
+    const workspaceIds = req.user.workspaceIds || [];
+    if (workspaceIds.length === 0) return res.status(404).json({ error: 'Club not found' });
     const result = await query(
-      'SELECT * FROM clubs WHERE id = $1 AND tenant_id = $2',
-      [req.params.id, req.user.id]
+      `SELECT c.*,
+              CASE WHEN w.owner_id = $2 THEN 'owner' ELSE COALESCE(m.role, 'coach') END AS my_role
+         FROM clubs c
+         JOIN workspaces w ON w.id = c.workspace_id
+         LEFT JOIN workspace_members m
+                ON m.workspace_id = w.id
+               AND m.user_id = $2
+               AND m.accepted_at IS NOT NULL
+        WHERE c.id = $1 AND c.workspace_id = ANY($3)`,
+      [req.params.id, req.user.id, workspaceIds]
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Club not found' });
@@ -38,22 +86,63 @@ router.get('/:id', async (req, res) => {
   }
 });
 
+const VALID_MODALITIES = ['football_11', 'football_7', 'futsal'];
+
 // POST /api/clubs
 router.post('/', async (req, res) => {
   try {
-    const { name, description } = req.body;
+    const { name, description, modality } = req.body;
     if (!name) {
       return res.status(400).json({ error: 'Club name is required' });
     }
+    if (modality && !VALID_MODALITIES.includes(modality)) {
+      return res.status(400).json({ error: 'Modalidade inválida' });
+    }
+
+    if (!req.user.workspaceId) {
+      return res.status(400).json({ error: 'Nenhuma workspace ativa' });
+    }
+    if (!req.user.canWriteWorkspace(req.user.workspaceId)) {
+      return res.status(403).json({ error: 'Sem permissão de escrita nesta workspace' });
+    }
+
+    // Gate por plano: Pro = 1; Clube = 3 (+ extra_club_slots avulsos); admin/lifetime = ilimitado.
+    const gate = await canCreateClub(req.user);
+    if (!gate.allowed) {
+      const upgradeHint = gate.planLimit === 1
+        ? 'Faça upgrade pro plano Clube (até 3 clubes incluídos) pra criar mais.'
+        : 'Você atingiu o teto do seu plano. Entre em contato pra liberar slots adicionais.';
+      return res.status(402).json({
+        error: `Seu plano permite ${gate.limit} clube${gate.limit === 1 ? '' : 's'} (já em uso: ${gate.current}). ${upgradeHint}`,
+        code: 'PLAN_REQUIRED',
+        required_feature: 'max_clubs',
+        current: gate.current,
+        limit: gate.limit,
+        plan_limit: gate.planLimit,
+        extra_slots: gate.extraSlots,
+      });
+    }
 
     const result = await query(
-      `INSERT INTO clubs (name, description, tenant_id)
-       VALUES ($1, $2, $3)
+      `INSERT INTO clubs (name, description, workspace_id, modality)
+       VALUES ($1, $2, $3, $4)
        RETURNING *`,
-      [name, description || null, req.user.id]
+      [name, description || null, req.user.workspaceId, modality || 'football_11']
     );
+    const club = result.rows[0];
 
-    res.status(201).json(result.rows[0]);
+    // Cria categoria default
+    try {
+      await query(
+        `INSERT INTO categories (workspace_id, club_id, name, display_order)
+         VALUES ($1, $2, $3, 0)`,
+        [req.user.workspaceId, club.id, 'Categoria Principal']
+      );
+    } catch (catErr) {
+      console.error('Default category create failed:', catErr?.message);
+    }
+
+    res.status(201).json(club);
   } catch (err) {
     console.error('Create club error:', err);
     res.status(500).json({ error: 'Failed to create club' });
@@ -63,16 +152,62 @@ router.post('/', async (req, res) => {
 // PUT /api/clubs/:id
 router.put('/:id', async (req, res) => {
   try {
-    const { name, description } = req.body;
+    if (!req.user.can('club_settings:manage')) return res.status(403).json({ error: 'Sem permissão' });
+    const { name, description, modality, primary_color, secondary_color } = req.body;
+    if (modality && !VALID_MODALITIES.includes(modality)) {
+      return res.status(400).json({ error: 'Modalidade inválida' });
+    }
+    // Cores em formato HEX #RRGGBB ou #RRGGBBAA, vazio = remove
+    const HEX_RE = /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/;
+    const validColor = (v) => v === '' || v === null ? null : (HEX_RE.test(v) ? v : undefined);
+    const pc = primary_color === undefined ? undefined : validColor(primary_color);
+    const sc = secondary_color === undefined ? undefined : validColor(secondary_color);
+    if (pc === undefined && primary_color !== undefined) {
+      return res.status(400).json({ error: 'primary_color em formato inválido (esperado #RRGGBB)' });
+    }
+    if (sc === undefined && secondary_color !== undefined) {
+      return res.status(400).json({ error: 'secondary_color em formato inválido (esperado #RRGGBB)' });
+    }
+
+    // Se a modalidade mudar, zera position dos atletas do clube (decisão de produto:
+    // posições legadas não fazem sentido em outra modalidade — usuário recadastra).
+    let modalityChanged = false;
+    if (modality) {
+      const cur = await query('SELECT modality FROM clubs WHERE id = $1 AND workspace_id = ANY($2)',
+        [req.params.id, req.user.workspaceIds || []]);
+      if (cur.rows.length > 0 && cur.rows[0].modality !== modality) {
+        modalityChanged = true;
+      }
+    }
+
     const result = await query(
-      `UPDATE clubs SET name = $1, description = $2, updated_at = NOW()
-       WHERE id = $3 AND tenant_id = $4
-       RETURNING *`,
-      [name, description || null, req.params.id, req.user.id]
+      `UPDATE clubs
+          SET name = $1,
+              description = $2,
+              modality = COALESCE($3, modality),
+              primary_color = CASE WHEN $4::text = 'KEEP' THEN primary_color ELSE NULLIF($4, '') END,
+              secondary_color = CASE WHEN $5::text = 'KEEP' THEN secondary_color ELSE NULLIF($5, '') END,
+              updated_at = NOW()
+        WHERE id = $6 AND workspace_id = ANY($7)
+        RETURNING *`,
+      [
+        name,
+        description || null,
+        modality || null,
+        primary_color === undefined ? 'KEEP' : (pc || ''),
+        secondary_color === undefined ? 'KEEP' : (sc || ''),
+        req.params.id,
+        req.user.workspaceIds || [],
+      ]
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Club not found' });
     }
+
+    if (modalityChanged) {
+      await query('UPDATE athletes SET position = NULL WHERE club_id = $1', [req.params.id]);
+    }
+
     res.json(result.rows[0]);
   } catch (err) {
     console.error('Update club error:', err);
@@ -83,9 +218,10 @@ router.put('/:id', async (req, res) => {
 // DELETE /api/clubs/:id
 router.delete('/:id', async (req, res) => {
   try {
+    if (!req.user.can('club_settings:manage')) return res.status(403).json({ error: 'Sem permissão' });
     const result = await query(
-      'DELETE FROM clubs WHERE id = $1 AND tenant_id = $2 RETURNING id',
-      [req.params.id, req.user.id]
+      'DELETE FROM clubs WHERE id = $1 AND workspace_id = ANY($2) RETURNING id',
+      [req.params.id, req.user.workspaceIds || []]
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Club not found' });
@@ -99,6 +235,7 @@ router.delete('/:id', async (req, res) => {
 
 // POST /api/clubs/:id/logo
 router.post('/:id/logo', (req, res) => {
+  if (!req.user.can('club_settings:manage')) return res.status(403).json({ error: 'Sem permissão' });
   uploadClubLogo(req, res, async (err) => {
     if (err) {
       return res.status(400).json({ error: err.message });
@@ -111,9 +248,9 @@ router.post('/:id/logo', (req, res) => {
       const logoPath = `/uploads/club-logos/${req.file.filename}`;
       const result = await query(
         `UPDATE clubs SET logo_path = $1, updated_at = NOW()
-         WHERE id = $2 AND tenant_id = $3
+         WHERE id = $2 AND workspace_id = ANY($3)
          RETURNING *`,
-        [logoPath, req.params.id, req.user.id]
+        [logoPath, req.params.id, req.user.workspaceIds || []]
       );
 
       if (result.rows.length === 0) {
@@ -128,32 +265,27 @@ router.post('/:id/logo', (req, res) => {
   });
 });
 
-// POST /api/clubs/:id/migrate-data
-// Migrate orphaned data (microcycles/athletes without club_id) to this club
+// POST /api/clubs/:id/migrate-data — orphans → este clube (na mesma workspace)
 router.post('/:id/migrate-data', async (req, res) => {
   try {
     const clubId = req.params.id;
-    const tenantId = req.user.id;
+    const wsId = req.user.workspaceId;
+    if (!wsId) return res.status(400).json({ error: 'Nenhuma workspace ativa' });
 
-    // Migrate training_microcycles without club_id
     await query(
       `UPDATE training_microcycles SET club_id = $1
-       WHERE tenant_id = $2 AND club_id IS NULL`,
-      [clubId, tenantId]
+       WHERE workspace_id = $2 AND club_id IS NULL`,
+      [clubId, wsId]
     );
-
-    // Migrate athletes without club_id
     await query(
       `UPDATE athletes SET club_id = $1
-       WHERE tenant_id = $2 AND club_id IS NULL`,
-      [clubId, tenantId]
+       WHERE workspace_id = $2 AND club_id IS NULL`,
+      [clubId, wsId]
     );
-
-    // Migrate tactical_plays without club_id
     await query(
       `UPDATE tactical_plays SET club_id = $1
-       WHERE tenant_id = $2 AND club_id IS NULL`,
-      [clubId, tenantId]
+       WHERE workspace_id = $2 AND club_id IS NULL`,
+      [clubId, wsId]
     );
 
     res.json({ message: 'Data migrated successfully' });

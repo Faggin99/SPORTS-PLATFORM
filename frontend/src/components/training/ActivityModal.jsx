@@ -6,9 +6,12 @@ import { MultiSelect } from '../common/MultiSelect';
 import { Select } from '../common/Select';
 import { Textarea } from '../common/Textarea';
 import { trainingService } from '../../services/trainingService';
+import { useClub } from '../../contexts/ClubContext';
 import { CreateTitleModal } from './CreateTitleModal';
 
 export function ActivityModal({ isOpen, onClose, onSave, block, onDelete }) {
+  const { selectedClub } = useClub();
+  const modality = selectedClub?.modality || 'football_11';
   const [loading, setLoading] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [contents, setContents] = useState([]);
@@ -47,12 +50,12 @@ export function ActivityModal({ isOpen, onClose, onSave, block, onDelete }) {
     try {
       const [contentsRes, stagesRes, titlesRes] = await Promise.all([
         trainingService.getContents(),
-        trainingService.getStages(),
+        trainingService.getStages(null, modality),
         trainingService.getTitles(),
       ]);
 
-      const loadedContents = contentsRes?.data || [];
-      const loadedStages = stagesRes?.data || [];
+      const loadedContents = (contentsRes?.data || []).filter(c => c.active !== false);
+      const loadedStages = (stagesRes?.data || []).filter(s => s.active !== false);
       const loadedTitles = titlesRes?.data || [];
 
       setContents(loadedContents);
@@ -63,13 +66,16 @@ export function ActivityModal({ isOpen, onClose, onSave, block, onDelete }) {
       const activity = block?.activity;
 
       if (activity) {
-        // Map saved stage_names to stage IDs
+        // Prefer stage_id (novo), fallback no stage_name (legado)
         const stageIds = activity.stages
           ?.map(activityStage => {
-            const globalStage = loadedStages.find(s => s.name === activityStage.stage_name);
-            return globalStage?.id;
+            if (activityStage.stage_id && loadedStages.some(s => s.id === activityStage.stage_id)) {
+              return activityStage.stage_id;
+            }
+            const byName = loadedStages.find(s => s.name === activityStage.stage_name);
+            return byName?.id;
           })
-          .filter(id => id) || []; // Remove nulls
+          .filter(id => id) || [];
 
         setFormData({
           selectedContents: activity.contents?.map((c) => c.id) || [],
@@ -177,11 +183,20 @@ export function ActivityModal({ isOpen, onClose, onSave, block, onDelete }) {
             />
 
           <MultiSelect
-            label="Etapas"
-            options={stages.map((s) => ({ value: s.id, label: s.name }))}
+            label="Submomentos"
+            options={(() => {
+              if (!formData.selectedContents?.length) return [];
+              const set = new Set(formData.selectedContents);
+              const filtered = stages.filter((s) => set.has(s.content_id));
+              const multi = formData.selectedContents.length > 1;
+              return filtered.map((s) => ({
+                value: s.id,
+                label: multi && s.content_name ? `${s.content_name} · ${s.name}` : s.name,
+              }));
+            })()}
             value={formData.selectedStages}
             onChange={(value) => setFormData({ ...formData, selectedStages: value })}
-            placeholder="Selecione etapas..."
+            placeholder={formData.selectedContents?.length ? 'Selecione submomentos...' : 'Selecione um conteúdo primeiro'}
           />
 
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end' }}>

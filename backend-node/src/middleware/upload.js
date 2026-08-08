@@ -67,8 +67,15 @@ const uploadSessionFile = multer({
   fileFilter
 }).single('file');
 
+const uploadAthletePhoto = multer({
+  storage: createStorage('athlete-photos'),
+  limits: { fileSize: MAX_FILE_SIZE },
+  fileFilter
+}).single('photo');
+
 module.exports = {
   uploadProfilePhoto,
   uploadClubLogo,
-  uploadSessionFile
+  uploadSessionFile,
+  uploadAthletePhoto
 };
