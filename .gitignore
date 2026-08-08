@@ -21,11 +21,17 @@ uploads/
 landing/downloads/
 pwa-cache-dump.json
 
-# Capacitor — pastas nativas geradas por `cap add`.
-# NÃO commitar: são geradas do capacitor.config.json + assets/. Cada dev roda `cap add` na sua máquina.
-frontend/ios/
-frontend/android/
-
-# Pra não trackear keystore Android (SEMPRE fazer backup separado — se perder, não atualiza mais o app publicado)
+# Mobile: NÃO commitar keystore (backup fora do repo!) e nem builds
 frontend/android/**/*.keystore
 frontend/android/keystore.properties
+frontend/android/app/build/
+frontend/android/build/
+frontend/android/.gradle/
+frontend/ios/App/build/
+frontend/ios/Pods/
+frontend/ios/App/Podfile.lock
+
+# AAB/APK gerados vão pro repo pra facilitar download (temporário)
+# Se ficar grande demais, remover:
+# frontend/mobile-artifacts/*.aab
+# frontend/mobile-artifacts/*.apk
