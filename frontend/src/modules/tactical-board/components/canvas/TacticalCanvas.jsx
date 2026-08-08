@@ -386,7 +386,7 @@ const TacticalCanvas = forwardRef(function TacticalCanvas({
       case 'ball':
         return <BallToken key={element.id} {...commonProps} />;
       case 'marker':
-        return <MarkerToken key={element.id} {...commonProps} markerType={element.markerType} />;
+        return <MarkerToken key={element.id} {...commonProps} markerType={element.markerType} rotation={element.rotation || 0} />;
       default:
         return null;
     }

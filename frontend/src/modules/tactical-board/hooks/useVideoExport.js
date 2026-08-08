@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import { interpolateElements } from '../utils/interpolation';
-import { generateVideoFilename, getSupportedMimeType } from '../utils/exportHelpers';
+import { generateVideoFilename, getSupportedMimeType, deliverVideo } from '../utils/exportHelpers';
 
 const EXPORT_FPS = 30;
 const FRAME_DURATION_MS = 1500;
@@ -66,18 +66,18 @@ export function useVideoExport(stageRef, frames, fieldType) {
       };
 
       const downloadPromise = new Promise((resolve) => {
-        recorder.onstop = () => {
+        recorder.onstop = async () => {
           // Export cancelado: descarta os chunks, não baixa vídeo parcial
           if (abortRef.current) { resolve(); return; }
-          const blob = new Blob(chunks, { type: mimeType });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = generateVideoFilename(playName);
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
+          try {
+            const blob = new Blob(chunks, { type: mimeType });
+            // Web: download direto; app nativo: share sheet (WhatsApp etc)
+            await deliverVideo(blob, generateVideoFilename(playName, mimeType));
+          } catch (err) {
+            console.error('Erro ao entregar vídeo:', err);
+            const { notify } = await import('../../../lib/notify');
+            notify.error('Vídeo gerado, mas houve erro ao salvar. Tente de novo.');
+          }
           resolve();
         };
       });

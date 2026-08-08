@@ -3,7 +3,7 @@ import {
   Users, UserPlus, ArrowRight, Pencil, LayoutGrid,
   Save, FolderOpen, Film, Undo2, Redo2, Trash2, Eye, Maximize2, Minimize2,
   Keyboard, Pause, Plus, X, Cone, Smartphone,
-  PenLine, Square as SquareIcon, Circle as CircleIcon, Type,
+  PenLine, Square as SquareIcon, Circle as CircleIcon, Type, RotateCcw, RotateCw,
 } from 'lucide-react';
 import { useTheme } from '../../../contexts/ThemeContext';
 import { useClub } from '../../../contexts/ClubContext';
@@ -11,6 +11,7 @@ import { useIsMobile } from '../../../hooks/useIsMobile';
 import { useSportConfig } from '../../../hooks/useSportConfig';
 import { notify } from '../../../lib/notify';
 import TacticalCanvas from '../components/canvas/TacticalCanvas';
+import { ROTATABLE_MARKERS } from '../components/canvas/MarkerToken';
 import FrameControls from '../components/toolbar/FrameControls';
 import PlaybackControls from '../components/toolbar/PlaybackControls';
 import PlayerPalette from '../components/toolbar/PlayerPalette';
@@ -824,12 +825,43 @@ function SelectionPanel({ element, drawing, teamAColor, teamBColor, onPatchEleme
     );
   }
 
-  // Bola / marcador — só remover
+  // Bola / marcador
+  const canRotate = element?.type === 'marker' && ROTATABLE_MARKERS.has(element.markerType);
+  const rot = ((element?.rotation || 0) % 360 + 360) % 360;
+  const rotate = (delta) => {
+    const next = (((element.rotation || 0) + delta) % 360 + 360) % 360;
+    onPatchElement({ rotation: next });
+  };
+  const rotBtnStyle = {
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+    width: 28, height: 28, borderRadius: '0.3rem', cursor: 'pointer',
+    border: '1px solid rgba(255,255,255,0.18)', backgroundColor: 'rgba(255,255,255,0.07)',
+    color: '#fff',
+  };
   return (
     <div style={panelStyle}>
       <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.6)' }}>
         {element?.type === 'ball' ? 'Bola' : 'Objeto'}
       </span>
+      {canRotate && (
+        <>
+          <button onClick={() => rotate(-45)} title="Girar 45° anti-horário" style={rotBtnStyle}>
+            <RotateCcw size={13} />
+          </button>
+          <input
+            type="range" min={0} max={345} step={15} value={rot}
+            onChange={(e) => onPatchElement({ rotation: Number(e.target.value) })}
+            title="Rotação fina (passos de 15°)"
+            style={{ width: 84 }}
+          />
+          <button onClick={() => rotate(45)} title="Girar 45° horário" style={rotBtnStyle}>
+            <RotateCw size={13} />
+          </button>
+          <span style={{ fontSize: '0.68rem', color: 'rgba(255,255,255,0.55)', fontVariantNumeric: 'tabular-nums', minWidth: 30, textAlign: 'right' }}>
+            {rot}°
+          </span>
+        </>
+      )}
       <button onClick={onRemove}
         style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '0.3rem 0.55rem', background: 'rgba(239,68,68,0.18)', color: '#fca5a5', border: '1px solid rgba(239,68,68,0.4)', borderRadius: '0.3rem', fontSize: '0.72rem', cursor: 'pointer' }}>
         <Trash2 size={12} /> Remover

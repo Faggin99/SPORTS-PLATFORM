@@ -1,9 +1,13 @@
 import { Group, Line, Rect, Circle, RegularPolygon, Text, Shape } from 'react-konva';
 
+// Objetos sem simetria radial — pra esses faz sentido girar
+export const ROTATABLE_MARKERS = new Set(['barrier', 'pole', 'flag', 'ladder', 'mannequin', 'mini_goal']);
+
 export default function MarkerToken({
   x,
   y,
   markerType = 'cone',
+  rotation = 0,
   isSelected = false,
   draggable = true,
   onDragEnd,
@@ -14,6 +18,7 @@ export default function MarkerToken({
     <Group
       x={x}
       y={y}
+      rotation={rotation}
       draggable={draggable}
       onDragEnd={onDragEnd}
       onClick={onClick}
