@@ -1,3 +1,15 @@
+/* TactiPlan brand tokens — alinhados ao logo (navy #0f172a + lime #c8ff00).
+   Disponíveis globalmente pra uso em componentes que precisem do accent lime
+   (destaques, badges, glow em botão promocional, etc). */
+:root {
+  --brand-navy: #0f172a;
+  --brand-navy-deep: #0a1220;
+  --brand-lime: #c8ff00;
+  --brand-lime-soft: rgba(200, 255, 0, 0.15);
+  --brand-blue: #2563eb;
+  --brand-blue-hover: #1d4ed8;
+}
+
 * {
   margin: 0;
   padding: 0;

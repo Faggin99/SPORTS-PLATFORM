@@ -34,9 +34,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TactiPlan — Gestão de Treinos para Treinadores de Futebol e Futsal</title>
 <meta name="description" content="Plataforma profissional para treinadores de futebol e futsal. Microciclos, plantel, quadro tático, estatísticas e tema do mês — tudo em um só lugar.">
-<meta name="theme-color" content="#2563eb">
+<meta name="theme-color" content="#0f172a">
 <meta name="author" content="TactiPlan">
 <link rel="icon" type="image/svg+xml" href="/icon.svg">
+<link rel="icon" type="image/png" sizes="192x192" href="/favicon.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon-180.png">
 <link rel="canonical" href="https://tactiplan.faggin.com.br/">
 
 <!-- Open Graph / Facebook -->
@@ -62,6 +64,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/dist/tailwind.css">
+<link rel="stylesheet" href="/brand.css">
 </head>
 <body class="font-sans bg-mesh text-slate-100 min-h-screen antialiased">
 
@@ -77,7 +80,7 @@
       <a href="#diferenciais" class="text-slate-300 hover:text-white transition">Diferenciais</a>
       <a href="#precos" class="text-slate-300 hover:text-white transition">Preços</a>
       <a href="#faq" class="text-slate-300 hover:text-white transition">FAQ</a>
-      <a href="https://app.tactiplan.faggin.com.br/#/register" data-analytics="Signup" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg font-medium transition">Começar grátis</a>
+      <a href="https://app.tactiplan.faggin.com.br/#/register" data-analytics="Signup" class="px-4 py-2 btn-brand-primary bg-blue-600 hover:bg-blue-700 rounded-lg font-medium transition">Começar grátis</a>
     </nav>
     <button id="mobileMenuToggle" aria-label="Abrir menu" class="md:hidden p-2 rounded-lg hover:bg-white/5">
       <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
@@ -91,7 +94,7 @@
       <a href="#precos" class="text-slate-300 hover:text-white transition py-2">Preços</a>
       <a href="#faq" class="text-slate-300 hover:text-white transition py-2">FAQ</a>
       <a href="https://app.tactiplan.faggin.com.br/#/login" class="text-slate-300 hover:text-white transition py-2">Entrar</a>
-      <a href="https://app.tactiplan.faggin.com.br/#/register" data-analytics="Signup" class="px-4 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg font-medium transition text-center">Começar grátis</a>
+      <a href="https://app.tactiplan.faggin.com.br/#/register" data-analytics="Signup" class="px-4 py-3 btn-brand-primary bg-blue-600 hover:bg-blue-700 rounded-lg font-medium transition text-center">Começar grátis</a>
     </div>
   </div>
   <script>
@@ -112,7 +115,7 @@
 <section class="relative pt-40 pb-24 px-6 overflow-hidden">
   <div class="max-w-7xl mx-auto text-center relative z-10">
     <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full glass mb-8 animate-fade-in-up">
-      <span class="w-2 h-2 bg-emerald-400 rounded-full animate-pulse-slow"></span>
+      <span class="w-2 h-2 pulse-brand rounded-full"></span>
       <span class="text-sm text-slate-300">Cadastros abertos · 30 dias grátis no plano Clube</span>
     </div>
 
@@ -126,7 +129,7 @@
     </p>
 
     <div class="flex flex-wrap items-center justify-center gap-4 animate-fade-in-up">
-      <a href="https://app.tactiplan.faggin.com.br/#/register" data-analytics="Signup" class="group px-8 py-4 bg-blue-600 hover:bg-blue-700 rounded-xl font-semibold flex items-center gap-2 transition transform hover:scale-105">
+      <a href="https://app.tactiplan.faggin.com.br/#/register" data-analytics="Signup" class="group px-8 py-4 btn-brand-primary bg-blue-600 hover:bg-blue-700 rounded-xl font-semibold flex items-center gap-2 transition transform hover:scale-105">
         Começar grátis
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
       </a>
@@ -432,7 +435,7 @@
           </div>
         </div>
 
-        <a href="/downloads/TactiPlan-Setup.exe" download class="block w-full text-center px-6 py-4 bg-blue-600 hover:bg-blue-700 rounded-xl font-semibold transition transform hover:scale-[1.02]">
+        <a href="/downloads/TactiPlan-Setup.exe" download class="block w-full text-center px-6 py-4 btn-brand-primary bg-blue-600 hover:bg-blue-700 rounded-xl font-semibold transition transform hover:scale-[1.02]">
           Baixar Instalador
         </a>
         <p class="text-xs text-center text-slate-500 mt-3">Windows pode exibir aviso - clique em "Mais informações" e "Executar mesmo assim"</p>
@@ -556,7 +559,7 @@
             <li class="flex items-start gap-2"><svg class="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>Mobile + Desktop + Web</li>
             <li class="flex items-start gap-2"><svg class="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>Suporte por email e WhatsApp</li>
           </ul>
-          <a href="https://app.tactiplan.faggin.com.br/#/register?plan=pro" data-analytics="Signup_Pro" class="block text-center w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 rounded-xl font-semibold text-sm transition">Começar 30 dias grátis</a>
+          <a href="https://app.tactiplan.faggin.com.br/#/register?plan=pro" data-analytics="Signup_Pro" class="block text-center w-full px-4 py-3 btn-brand-primary bg-blue-600 hover:bg-blue-700 rounded-xl font-semibold text-sm transition">Começar 30 dias grátis</a>
           <p class="text-center text-xs text-slate-500 mt-3">Sem cartão. Cancele quando quiser.</p>
         </div>
       </div>
@@ -759,7 +762,7 @@
     <div class="mt-10 text-center">
       <p class="text-slate-400 mb-4">Ficou alguma dúvida?</p>
       <div class="flex flex-wrap items-center justify-center gap-3">
-        <a href="https://app.tactiplan.faggin.com.br/#/register" data-analytics="Signup" class="px-6 py-3 bg-blue-600 hover:bg-blue-700 rounded-xl font-semibold text-sm transition inline-flex items-center gap-2">
+        <a href="https://app.tactiplan.faggin.com.br/#/register" data-analytics="Signup" class="px-6 py-3 btn-brand-primary bg-blue-600 hover:bg-blue-700 rounded-xl font-semibold text-sm transition inline-flex items-center gap-2">
           Começar grátis agora
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
         </a>
@@ -777,7 +780,7 @@
       <div class="relative">
         <h2 class="text-4xl md:text-5xl font-black mb-4">Pronto para elevar seus treinos?</h2>
         <p class="text-xl text-slate-400 mb-8">Junte-se aos treinadores que já usam TactiPlan para planejamento profissional.</p>
-        <a href="https://app.tactiplan.faggin.com.br/#/register" data-analytics="Signup" class="inline-flex items-center gap-2 px-8 py-4 bg-blue-600 hover:bg-blue-700 rounded-xl font-bold text-lg transition transform hover:scale-105">
+        <a href="https://app.tactiplan.faggin.com.br/#/register" data-analytics="Signup" class="inline-flex items-center gap-2 px-8 py-4 btn-brand-primary bg-blue-600 hover:bg-blue-700 rounded-xl font-bold text-lg transition transform hover:scale-105">
           Começar grátis
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
         </a>
@@ -853,7 +856,7 @@
     <svg class="w-5 h-5 text-blue-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
     <div class="flex-1 text-sm">
       <p class="text-slate-300 leading-relaxed">Usamos armazenamento local apenas para manter sua sessão e preferências. Não usamos cookies de rastreamento. Saiba mais na <a href="/privacidade.html" class="text-blue-400 hover:underline">Política de Privacidade</a>.</p>
-      <button id="lgpdAccept" class="mt-3 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-semibold transition">Entendi</button>
+      <button id="lgpdAccept" class="mt-3 px-4 py-2 btn-brand-primary bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-semibold transition">Entendi</button>
     </div>
   </div>
 </div>
