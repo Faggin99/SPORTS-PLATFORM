@@ -166,14 +166,8 @@ export function Header({ isMobile = false }) {
     width: '2rem',
     height: '2rem',
     borderRadius: '0.5rem',
-    background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
-    color: '#fff',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontWeight: 800,
-    fontSize: '1rem',
-    letterSpacing: '-0.02em',
+    display: 'block',
+    flexShrink: 0,
   };
 
   const brandTextStyle = {
@@ -326,7 +320,7 @@ export function Header({ isMobile = false }) {
             <Menu size={22} />
           </button>
           <div style={{ ...brandStyle, flex: 1 }}>
-            <div style={logoBadgeStyle}>T</div>
+            <img src="/pwa-192.svg" alt="TactiPlan" style={logoBadgeStyle} />
             <span style={brandTextStyle}>TactiPlan</span>
           </div>
           <button style={iconBtnStyle} onClick={toggleTheme} aria-label="Tema">
@@ -339,7 +333,7 @@ export function Header({ isMobile = false }) {
         <aside style={mobileDrawerStyle}>
           <div style={{ padding: '1rem', borderBottom: `1px solid ${colors.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={brandStyle}>
-              <div style={logoBadgeStyle}>T</div>
+              <img src="/pwa-192.svg" alt="TactiPlan" style={logoBadgeStyle} />
               <span style={brandTextStyle}>TactiPlan</span>
             </div>
             <button style={iconBtnStyle} onClick={() => setMobileOpen(false)} aria-label="Fechar"><X size={20} /></button>
@@ -407,7 +401,7 @@ export function Header({ isMobile = false }) {
     <header style={headerStyle}>
       {/* Brand */}
       <Link to="/home" style={{ ...brandStyle, textDecoration: 'none' }}>
-        <div style={logoBadgeStyle}>T</div>
+        <img src="/pwa-192.svg" alt="TactiPlan" style={logoBadgeStyle} />
         <span style={brandTextStyle}>TactiPlan</span>
       </Link>
 
