@@ -230,6 +230,67 @@ router.delete('/me', authMiddleware, async (req, res) => {
       // Não bloqueia a exclusão LGPD — mas registra pra reconciliação manual.
     }
 
+    // ── LGPD: purga os DADOS do tenant, não só a PII do usuário ──
+    // Antes só o registro em `users` era anonimizado; clubes, atletas (com foto),
+    // treinos, jogos e arquivos ficavam pra sempre. Aqui apagamos tudo que o
+    // usuário É DONO. Quase todas as tabelas têm ON DELETE CASCADE a partir de
+    // workspaces, então deletar as workspaces próprias cascateia o resto.
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const uploadDir = path.resolve(process.env.UPLOAD_DIR || '../uploads');
+
+      // 1) Coleta caminhos de arquivos físicos ANTES de apagar as linhas.
+      const owned = await query('SELECT id FROM workspaces WHERE owner_id = $1', [req.user.id]);
+      const ownedIds = owned.rows.map(r => r.id);
+      const filePaths = [];
+      if (ownedIds.length > 0) {
+        const f1 = await query(
+          `SELECT file_path FROM training_activity_files WHERE workspace_id = ANY($1) AND file_path IS NOT NULL`,
+          [ownedIds]
+        );
+        const f2 = await query(
+          `SELECT logo_path FROM clubs WHERE workspace_id = ANY($1) AND logo_path IS NOT NULL`,
+          [ownedIds]
+        );
+        const f3 = await query(
+          `SELECT photo_url FROM athletes WHERE workspace_id = ANY($1) AND photo_url IS NOT NULL`,
+          [ownedIds]
+        );
+        for (const row of f1.rows) filePaths.push(row.file_path);
+        for (const row of f2.rows) filePaths.push(row.logo_path);
+        for (const row of f3.rows) filePaths.push(row.photo_url);
+      }
+      // Foto de perfil do próprio usuário (capturada antes da anonimização acima —
+      // relê do banco pra garantir; já foi setada NULL, então usa a lista se houver).
+
+      // 2) Destaca a assinatura das workspaces pra ela SOBREVIVER ao cascade
+      //    (subscriptions→workspaces é CASCADE; queremos manter a linha canceled).
+      await query('UPDATE subscriptions SET workspace_id = NULL WHERE user_id = $1', [req.user.id]);
+
+      // 3) Apaga as workspaces próprias — cascateia clubes, atletas, categorias,
+      //    conteúdos, microciclos/sessões/atividades, jogos, quadro tático,
+      //    lesões, temas do mês, memberships dessas workspaces, etc.
+      await query('DELETE FROM workspaces WHERE owner_id = $1', [req.user.id]);
+
+      // 4) Remove o usuário das workspaces de OUTRAS pessoas (memberships).
+      await query('DELETE FROM workspace_members WHERE user_id = $1', [req.user.id]);
+      await query('DELETE FROM announcement_dismissals WHERE user_id = $1', [req.user.id]);
+
+      // 5) Apaga os arquivos físicos (best-effort — nunca derruba a exclusão).
+      for (const p of filePaths) {
+        try {
+          const rel = String(p).replace(/^\/uploads\//, '');
+          const abs = path.join(uploadDir, rel);
+          // Confinamento: só apaga dentro do uploadDir (evita path traversal).
+          if (abs.startsWith(uploadDir) && fs.existsSync(abs)) fs.unlinkSync(abs);
+        } catch (_) { /* ignora arquivo individual */ }
+      }
+    } catch (e) {
+      console.error('Falha na purga LGPD de dados do tenant:', e?.message);
+      // A conta já está soft-deleted (sem login). Registra pra limpeza manual.
+    }
+
     // Invalida cache de accessible workspaces/clubs pra esse user
     if (typeof authMiddleware.invalidateAccessibleCache === 'function') {
       authMiddleware.invalidateAccessibleCache(req.user.id);
@@ -435,6 +496,12 @@ router.post('/google', loginLimiter, async (req, res) => {
           );
         }
       }
+
+      // Email de boas-vindas — o cadastro via Google não disparava (só o
+      // cadastro por email/senha chamava). Fire-and-forget.
+      const appUrl = process.env.APP_BASE_URL || 'https://app.tactiplan.faggin.com.br';
+      sendWelcomeEmail({ to: user.email, name: user.name, trialDaysLeft: 30, appUrl })
+        .catch(err => console.error('sendWelcomeEmail (google) error:', err?.message));
     }
 
     user.tenant_id = user.id;

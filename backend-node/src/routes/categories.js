@@ -1,7 +1,7 @@
 const express = require('express');
 const { query } = require('../config/database');
 const authMiddleware = require('../middleware/auth');
-const { hasFeature } = require('../utils/planFeatures');
+const { hasFeature, getPlanFeatures } = require('../utils/planFeatures');
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -44,18 +44,31 @@ router.post('/categories', async (req, res) => {
       return res.status(403).json({ error: 'Sem permissão de escrita nesse clube' });
     }
 
-    // Gate: Pro permite só 1 categoria por clube; Clube libera N.
-    const canUseMulti = await hasFeature(req.user, 'multi_user');
-    if (!canUseMulti) {
+    // Gate por plano: Pro permite só 1 categoria por clube; Clube libera até
+    // max_categories (5, declarado nas features do plano); admin/lifetime = ilimitado.
+    const feats = await getPlanFeatures(req.user);
+    if (feats && !feats.__unlimited) {
       const existing = await query(
         'SELECT COUNT(*)::int AS n FROM categories WHERE workspace_id = $1 AND club_id = $2',
         [wsId, club_id]
       );
-      if (existing.rows[0].n >= 1) {
+      const count = existing.rows[0].n;
+      const canUseMulti = feats.multi_user === true;
+
+      if (!canUseMulti && count >= 1) {
         return res.status(402).json({
           error: 'Múltiplas categorias por clube requerem o plano Clube. Faça upgrade pra liberar.',
           code: 'PLAN_REQUIRED',
           required_feature: 'multi_user',
+        });
+      }
+
+      const maxCat = feats.max_categories != null ? Number(feats.max_categories) : null;
+      if (canUseMulti && Number.isFinite(maxCat) && count >= maxCat) {
+        return res.status(402).json({
+          error: `Seu plano permite até ${maxCat} categorias por clube.`,
+          code: 'LIMIT_REACHED',
+          required_feature: 'max_categories',
         });
       }
     }

@@ -20,4 +20,20 @@ async function hasFeature(user, feature) {
   return !!(plan?.features?.[feature]);
 }
 
-module.exports = { hasFeature };
+// Retorna o objeto de features do plano ativo (pra limites numéricos como
+// max_categories). Admin/lifetime → { __unlimited: true }. Sem plano → null.
+async function getPlanFeatures(user) {
+  if (!user) return null;
+  if (user.role === 'admin' || isAdmin?.(user.email) || isLifetime?.(user.email)) {
+    return { __unlimited: true };
+  }
+  let sub = null;
+  if (user.workspaceId) sub = await billing.getSubscriptionForWorkspace(user.workspaceId);
+  if (!sub) sub = await billing.getActiveSubscription(user.id);
+  if (!sub) return null;
+  if (sub.is_admin) return { __unlimited: true };
+  const plan = await billing.getPlan(sub.plan_id);
+  return plan?.features || {};
+}
+
+module.exports = { hasFeature, getPlanFeatures };

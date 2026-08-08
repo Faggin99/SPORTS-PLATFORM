@@ -74,6 +74,18 @@ async function notifyPaymentEvent(payload) {
 
     const baseUrl = process.env.APP_BASE_URL || 'https://app.tactiplan.faggin.com.br';
 
+    // Dedup: o Mercado Pago reenvia o mesmo evento de pagamento várias vezes.
+    // Se já mandamos e-mail pra este payment id, não manda de novo (senão o
+    // "Pagamento confirmado" chega em duplicata).
+    const already = await query(
+      `SELECT 1 FROM billing_events
+        WHERE mp_resource_id = $1
+          AND type IN ('payment.approved.email_sent','payment.rejected.email_sent')
+        LIMIT 1`,
+      [String(resourceId)]
+    );
+    if (already.rows.length > 0) return;
+
     if (approved) {
       const amountBRL = Number(payment.transaction_amount || 0);
       await sendPaymentApprovedEmail({

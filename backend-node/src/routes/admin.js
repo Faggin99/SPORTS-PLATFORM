@@ -5,6 +5,7 @@ const { query } = require('../config/database');
 const authMiddleware = require('../middleware/auth');
 const requireAdmin = require('../middleware/requireAdmin');
 const { isAdmin, isLifetime } = require('../config/specialUsers');
+const { loginLimiter } = require('../middleware/rateLimit');
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -12,8 +13,9 @@ const JWT_SECRET = process.env.JWT_SECRET;
 /**
  * POST /api/admin/auth/login
  * Login dedicado da área admin. Rejeita não-admins na própria autenticação.
+ * Rate limit dedicado (5/15min por IP) — é a conta de maior privilégio.
  */
-router.post('/auth/login', async (req, res) => {
+router.post('/auth/login', loginLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'email e password obrigatórios' });

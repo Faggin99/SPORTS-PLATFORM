@@ -31,8 +31,11 @@ async function runTrialExpiringNotifier() {
     await ensureTrialNotifiedAtColumn();
 
     // Alvo: subs em trial que acabam entre 2 e 3 dias, do plano Clube (padrão do trial).
-    // O filtro trial_notified_at IS NULL OR < NOW() - INTERVAL '20 hours' evita
-    // reenvio dentro da mesma janela mesmo se o job rodar várias vezes por dia.
+    // Envia EXATAMENTE UMA vez por trial: trial_notified_at IS NULL. A janela
+    // de aviso tem 24h de largura (2–3 dias antes do fim) e o job roda de hora
+    // em hora; a guarda antiga (< NOW()-20h) era menor que a janela, então o
+    // mesmo trial caía duas vezes e o e-mail saía em duplicata. Como
+    // trial_notified_at só é setado no envio e nunca zerado, IS NULL garante 1x.
     const target = await query(
       `SELECT s.id, s.user_id, s.plan_id, s.trial_ends_at,
               u.email, u.name
@@ -41,8 +44,7 @@ async function runTrialExpiringNotifier() {
         WHERE s.status = 'trialing'
           AND s.trial_ends_at BETWEEN NOW() + INTERVAL '2 days'
                                   AND NOW() + INTERVAL '3 days'
-          AND (s.trial_notified_at IS NULL
-               OR s.trial_notified_at < NOW() - INTERVAL '20 hours')
+          AND s.trial_notified_at IS NULL
           AND u.deleted_at IS NULL
           AND u.email IS NOT NULL`
     );

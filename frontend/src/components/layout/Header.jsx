@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { NavLink, useLocation, useNavigate, Link } from 'react-router-dom';
 import {
   Moon, Sun, LogOut, HelpCircle, Settings, ChevronDown, Menu, X,
-  Calendar, BarChart3, ClipboardList, Waypoints, Users, Building2, Target, Layers, BookOpen, User, CreditCard, LayoutGrid, UsersRound, Lock, Trophy,
+  Calendar, BarChart3, ClipboardList, Waypoints, Users, Building2, Target, Layers, BookOpen, User, CreditCard, LayoutGrid, UsersRound, Lock, Trophy, Home,
 } from 'lucide-react';
 import { usePlanFeatures } from '../../hooks/usePlanFeatures';
 import { useCan } from '../../hooks/useCan';
@@ -319,10 +319,10 @@ export function Header({ isMobile = false }) {
           <button style={iconBtnStyle} onClick={() => setMobileOpen(true)} aria-label="Abrir menu">
             <Menu size={22} />
           </button>
-          <div style={{ ...brandStyle, flex: 1 }}>
+          <Link to="/home" style={{ ...brandStyle, flex: 1, textDecoration: 'none' }}>
             <img src="/pwa-192.svg" alt="TactiPlan" style={logoBadgeStyle} />
             <span style={brandTextStyle}>TactiPlan</span>
-          </div>
+          </Link>
           <button style={iconBtnStyle} onClick={toggleTheme} aria-label="Tema">
             {isDark ? <Sun size={20} /> : <Moon size={20} />}
           </button>
@@ -343,6 +343,11 @@ export function Header({ isMobile = false }) {
             {showClubSelector && <ClubSelector />}
           </div>
           <nav style={{ flex: 1 }}>
+            {/* Início — sem isso, no mobile não havia como voltar pro dashboard */}
+            <NavLink to="/home" style={({ isActive }) => mobileLinkStyle(isActive)}>
+              <Home size={20} strokeWidth={1.5} />
+              Início
+            </NavLink>
             {mainNav.map((item) => {
               if (item.kind === 'equipe' || item.kind === 'cadastros') {
                 const items = item.kind === 'equipe' ? visibleEquipeItems : visibleCadastrosItems;
@@ -372,6 +377,11 @@ export function Header({ isMobile = false }) {
               );
             })}
             <div style={{ borderTop: `1px solid ${colors.border}`, marginTop: '0.5rem' }}>
+              {/* Assinatura — antes inalcançável no mobile */}
+              <NavLink to="/billing" style={({ isActive }) => mobileLinkStyle(isActive)}>
+                <CreditCard size={20} strokeWidth={1.5} />
+                Assinatura
+              </NavLink>
               <button
                 onClick={() => { setSettingsTab('perfil'); setSettingsSheetOpen(true); setMobileOpen(false); }}
                 style={{ ...mobileLinkStyle(false), background: 'transparent', border: 'none', width: '100%', cursor: 'pointer' }}
