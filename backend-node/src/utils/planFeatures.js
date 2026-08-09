@@ -33,7 +33,14 @@ async function getPlanFeatures(user) {
   if (!sub) return null;
   if (sub.is_admin) return { __unlimited: true };
   const plan = await billing.getPlan(sub.plan_id);
-  return plan?.features || {};
+  const features = { ...(plan?.features || {}) };
+  // Add-on de categoria: soma extra_category_slots ao limite do plano.
+  // (Clubes são tratados à parte em clubs.js/canCreateClub via extra_club_slots.)
+  const extraCats = Number(sub.extra_category_slots || 0);
+  if (typeof features.max_categories === 'number' && features.max_categories !== -1) {
+    features.max_categories += extraCats;
+  }
+  return features;
 }
 
 module.exports = { hasFeature, getPlanFeatures };

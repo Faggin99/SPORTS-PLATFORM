@@ -3,6 +3,7 @@
 // mas o ciclo de vida local (trial, status, cancel_at_period_end) continua rodando.
 
 const { query } = require('../config/database');
+const { ADDON_PRICES, ADDON_MAX, computeRecurringAmountCents } = require('../config/addons');
 
 let mpClient = null;
 let PreApproval = null;
@@ -141,7 +142,7 @@ async function getActiveSubscription(userId) {
   }
 
   const r = await query(
-    `SELECT s.*, p.name AS plan_name, p.price_cents, p.features
+    `SELECT s.*, p.name AS plan_name, p.price_cents, p.features, p.interval
      FROM subscriptions s
      JOIN plans p ON p.id = s.plan_id
      WHERE s.user_id = $1
@@ -182,7 +183,7 @@ async function getSubscriptionForWorkspace(workspaceId) {
   }
 
   const r = await query(
-    `SELECT s.*, p.name AS plan_name, p.price_cents, p.features
+    `SELECT s.*, p.name AS plan_name, p.price_cents, p.features, p.interval
      FROM subscriptions s
      JOIN plans p ON p.id = s.plan_id
      WHERE s.workspace_id = $1
@@ -576,6 +577,96 @@ async function cancelSubscription(userId, workspaceId = null) {
   };
 }
 
+// Atualiza o valor recorrente do preapproval no Mercado Pago (base + add-ons).
+// A mudança de valor no MP vale a partir do PRÓXIMO ciclo (não é proporcional).
+// Retorna true se OK; nunca lança (o estado local é atualizado de qualquer jeito).
+async function updatePreapprovalAmount(preapprovalId, amountCents) {
+  if (!isEnabled() || !preapprovalId) return false;
+  try {
+    const mp = getMP();
+    const pa = new PreApproval(mp);
+    await pa.update({ id: preapprovalId, body: { auto_recurring: { transaction_amount: amountCents / 100 } } });
+    return true;
+  } catch (err) {
+    console.error('updatePreapprovalAmount error:', err?.message);
+    return false;
+  }
+}
+
+// Define os add-ons (clubes/categorias extras) da assinatura ATIVA e ajusta o
+// valor recorrente no MP. Só funciona em assinatura paga (status='active').
+// Fase 1: planos MENSAIS. Anual (cobrança proporcional imediata) fica pra Fase 2.
+async function setAddons(userId, workspaceId, { extraClubs, extraCategories }) {
+  const selectSql = (whereCol) => `
+    SELECT s.*, p.interval, p.price_cents AS plan_price, p.features
+      FROM subscriptions s JOIN plans p ON p.id = s.plan_id
+     WHERE s.${whereCol} = $1 AND s.status = 'active' AND s.plan_id <> 'lifetime'
+     ORDER BY s.created_at DESC LIMIT 1`;
+  let sub = null;
+  if (workspaceId) sub = (await query(selectSql('workspace_id'), [workspaceId])).rows[0] || null;
+  if (!sub) sub = (await query(selectSql('user_id'), [userId])).rows[0] || null;
+  if (!sub) {
+    const err = new Error('Você precisa de uma assinatura ativa para adicionar clubes ou categorias.');
+    err.statusCode = 402; throw err;
+  }
+
+  const features = sub.features || {};
+  const isClube = features.multi_user === true;
+
+  let ec = Math.max(0, Math.min(ADDON_MAX.extra_club, Math.round(Number(extraClubs) || 0)));
+  let ecat = Math.max(0, Math.min(ADDON_MAX.extra_category, Math.round(Number(extraCategories) || 0)));
+
+  // Categoria extra só no Clube (no Pro, pra ter categorias, sobe pro Clube).
+  if (ecat > 0 && !isClube) {
+    const err = new Error('Categorias extras estão disponíveis no plano Clube. Faça upgrade primeiro.');
+    err.statusCode = 402; throw err;
+  }
+
+  // Fase 1: add-ons no plano ANUAL ainda não (precisa da cobrança proporcional).
+  const currentEc = sub.extra_club_slots || 0;
+  const currentEcat = sub.extra_category_slots || 0;
+  if (sub.interval === 'yearly' && (ec > currentEc || ecat > currentEcat)) {
+    const err = new Error('Add-ons no plano anual chegam em breve. Por enquanto, disponíveis no plano mensal.');
+    err.statusCode = 501; throw err;
+  }
+
+  // Não deixa reduzir abaixo do que já está EM USO (senão cobraria menos do que usa).
+  const wsId = sub.workspace_id;
+  if (wsId) {
+    const clubsUsed = (await query('SELECT COUNT(*)::int n FROM clubs WHERE workspace_id = $1', [wsId])).rows[0].n;
+    const planClubs = features.max_clubs === -1 ? Infinity : (features.max_clubs || 1);
+    if (Number.isFinite(planClubs)) ec = Math.max(ec, Math.max(0, clubsUsed - planClubs));
+
+    const catUsed = (await query(
+      `SELECT COALESCE(MAX(c),0)::int AS maxc FROM (
+         SELECT COUNT(*)::int c FROM categories WHERE workspace_id = $1 GROUP BY club_id
+       ) t`, [wsId])).rows[0].maxc;
+    const planCats = features.max_categories || 1;
+    ecat = Math.max(ecat, Math.max(0, catUsed - planCats));
+  }
+
+  const amountCents = computeRecurringAmountCents(
+    { price_cents: sub.plan_price, interval: sub.interval }, ec, ecat
+  );
+  const mpUpdated = await updatePreapprovalAmount(sub.mp_preapproval_id, amountCents);
+
+  await query(
+    `UPDATE subscriptions SET extra_club_slots = $2, extra_category_slots = $3, updated_at = NOW() WHERE id = $1`,
+    [sub.id, ec, ecat]
+  );
+  await logBillingEvent({
+    subscriptionId: sub.id, userId, type: 'subscription.addons_updated',
+    mpResourceId: sub.mp_preapproval_id, status: sub.status,
+    raw: { extra_clubs: ec, extra_categories: ecat, amount_cents: amountCents, interval: sub.interval, mp_updated: mpUpdated },
+  });
+
+  return {
+    extra_clubs: ec, extra_categories: ecat,
+    amount_cents: amountCents, interval: sub.interval, mp_updated: mpUpdated,
+    effective: sub.interval === 'yearly' ? 'next_renewal' : 'next_cycle',
+  };
+}
+
 module.exports = {
   isEnabled,
   getPlan,
@@ -583,6 +674,8 @@ module.exports = {
   getSubscriptionForWorkspace,
   startTrial,
   createCheckout,
+  setAddons,
+  ADDON_PRICES,
   handleWebhook,
   cancelSubscription,
   migrateToCanceled,

@@ -214,6 +214,47 @@ router.post('/checkout', authMiddleware, async (req, res) => {
 // (routes/auth.js, INSERT direto). startTrial() ainda existe no service pra
 // esse uso interno, agora com guarda contra re-trial.
 
+// GET /api/billing/addons — preços dos add-ons + quantidades atuais da assinatura
+router.get('/addons', authMiddleware, async (req, res) => {
+  try {
+    let sub = null;
+    if (req.user.workspaceId) sub = await billing.getSubscriptionForWorkspace(req.user.workspaceId);
+    if (!sub) sub = await billing.getActiveSubscription(req.user.id);
+    res.json({
+      prices: billing.ADDON_PRICES,               // { extra_club, extra_category } em centavos/mês
+      extra_clubs: sub?.extra_club_slots || 0,
+      extra_categories: sub?.extra_category_slots || 0,
+      plan_id: sub?.plan_id || null,
+      interval: sub?.interval || null,
+      is_clube: sub?.features?.multi_user === true,
+      is_admin: sub?.is_admin === true,
+      can_manage: sub?.status === 'active' && !sub?.is_admin,
+      base_price_cents: sub?.price_cents || 0,
+    });
+  } catch (err) {
+    console.error('Addons GET error:', err);
+    res.status(500).json({ error: 'Failed to load addons' });
+  }
+});
+
+// POST /api/billing/addons — define as quantidades de add-ons (clubes/categorias extras)
+router.post('/addons', authMiddleware, async (req, res) => {
+  try {
+    if (!req.user.can('billing:manage') || !req.user.isWorkspaceOwner?.(req.user.workspaceId)) {
+      return res.status(403).json({ error: 'Apenas o dono pode gerenciar add-ons' });
+    }
+    const { extra_clubs = 0, extra_categories = 0 } = req.body || {};
+    const result = await billing.setAddons(req.user.id, req.user.workspaceId, {
+      extraClubs: extra_clubs,
+      extraCategories: extra_categories,
+    });
+    res.json(result);
+  } catch (err) {
+    console.error('Addons POST error:', err);
+    res.status(err.statusCode || 500).json({ error: err.message || 'Failed to update addons' });
+  }
+});
+
 // POST /api/billing/cancel — cancela assinatura ativa da workspace ativa
 router.post('/cancel', authMiddleware, async (req, res) => {
   try {

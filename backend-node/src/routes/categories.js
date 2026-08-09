@@ -66,9 +66,11 @@ router.post('/categories', async (req, res) => {
       const maxCat = feats.max_categories != null ? Number(feats.max_categories) : null;
       if (canUseMulti && Number.isFinite(maxCat) && count >= maxCat) {
         return res.status(402).json({
-          error: `Seu plano permite até ${maxCat} categorias por clube.`,
-          code: 'LIMIT_REACHED',
+          error: `Seu plano permite ${maxCat} categorias por clube. Adicione uma categoria extra por R$5/mês.`,
+          code: 'ADDON_REQUIRED',
           required_feature: 'max_categories',
+          addon: 'extra_category',
+          limit: maxCat,
         });
       }
     }

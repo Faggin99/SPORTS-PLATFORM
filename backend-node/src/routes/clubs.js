@@ -106,16 +106,15 @@ router.post('/', async (req, res) => {
       return res.status(403).json({ error: 'Sem permissão de escrita nesta workspace' });
     }
 
-    // Gate por plano: Pro = 1; Clube = 3 (+ extra_club_slots avulsos); admin/lifetime = ilimitado.
+    // Gate por plano: Pro/Clube = 1 clube incluso; clube extra = add-on (+R$20/mês
+    // via extra_club_slots); admin/lifetime = ilimitado.
     const gate = await canCreateClub(req.user);
     if (!gate.allowed) {
-      const upgradeHint = gate.planLimit === 1
-        ? 'Faça upgrade pro plano Clube (até 3 clubes incluídos) pra criar mais.'
-        : 'Você atingiu o teto do seu plano. Entre em contato pra liberar slots adicionais.';
       return res.status(402).json({
-        error: `Seu plano permite ${gate.limit} clube${gate.limit === 1 ? '' : 's'} (já em uso: ${gate.current}). ${upgradeHint}`,
-        code: 'PLAN_REQUIRED',
+        error: `Seu plano permite ${gate.limit} clube${gate.limit === 1 ? '' : 's'} (já em uso: ${gate.current}). Adicione um clube extra por R$20/mês.`,
+        code: 'ADDON_REQUIRED',
         required_feature: 'max_clubs',
+        addon: 'extra_club',
         current: gate.current,
         limit: gate.limit,
         plan_limit: gate.planLimit,

@@ -267,6 +267,11 @@ function CurrentSubscription({ sub, colors, onCancel }) {
         </div>
       )}
 
+      {/* Add-ons (só pra assinatura paga ativa) */}
+      {sub.status === 'active' && sub.plan_id !== 'lifetime' && !sub.is_admin && (
+        <AddonsSection colors={colors} />
+      )}
+
       {/* Cancelar (só pra planos pagos não-vitalício/admin) */}
       {sub.plan_id !== 'lifetime' && !sub.is_admin && (
         <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${colors.border}`, display: 'flex', justifyContent: 'flex-end' }}>
@@ -294,6 +299,120 @@ function CurrentSubscription({ sub, colors, onCancel }) {
       )}
     </div>
   );
+}
+
+// Gerenciamento de add-ons (clubes/categorias extras) da assinatura ativa.
+function AddonsSection({ colors }) {
+  const [data, setData] = useState(null);
+  const [clubs, setClubs] = useState(0);
+  const [cats, setCats] = useState(0);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api.get('/billing/addons')
+      .then((d) => { setData(d); setClubs(d.extra_clubs || 0); setCats(d.extra_categories || 0); })
+      .catch(() => setData({ can_manage: false }));
+  }, []);
+
+  if (!data || !data.can_manage) return null;
+
+  const isAnnual = data.interval === 'yearly';
+  const isClube = data.is_clube;
+  const clubPrice = (data.prices?.extra_club ?? 2000) / 100;
+  const catPrice = (data.prices?.extra_category ?? 500) / 100;
+  const addonMonthly = clubs * clubPrice + cats * catPrice;
+  const dirty = clubs !== (data.extra_clubs || 0) || cats !== (data.extra_categories || 0);
+  const brl = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await api.post('/billing/addons', { extra_clubs: clubs, extra_categories: cats });
+      setClubs(res.extra_clubs); setCats(res.extra_categories);
+      setData((d) => ({ ...d, extra_clubs: res.extra_clubs, extra_categories: res.extra_categories }));
+      notify.success(
+        res.effective === 'next_cycle'
+          ? 'Add-ons atualizados — entram na próxima fatura.'
+          : 'Add-ons atualizados.'
+      );
+    } catch (e) {
+      notify.error(e.message || 'Não foi possível atualizar os add-ons.');
+    } finally { setSaving(false); }
+  };
+
+  const Stepper = ({ label, sub, value, setValue, unit, disabled }) => (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '0.6rem 0' }}>
+      <div>
+        <div style={{ fontSize: '0.875rem', fontWeight: 600, color: colors.text }}>{label}</div>
+        <div style={{ fontSize: '0.75rem', color: colors.textSecondary }}>{sub}</div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <button onClick={() => setValue(Math.max(0, value - 1))} disabled={disabled || value <= 0}
+          style={stepBtn(colors, disabled || value <= 0)}>−</button>
+        <span style={{ minWidth: 22, textAlign: 'center', fontWeight: 700, color: colors.text, fontVariantNumeric: 'tabular-nums' }}>{value}</span>
+        <button onClick={() => setValue(value + 1)} disabled={disabled}
+          style={stepBtn(colors, disabled)}>+</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${colors.border}` }}>
+      <div style={{ fontSize: '0.8rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: colors.textSecondary, marginBottom: 4 }}>
+        Add-ons
+      </div>
+      {isAnnual && (
+        <div style={{ fontSize: '0.72rem', color: '#f59e0b', marginBottom: 8 }}>
+          Add-ons no plano anual chegam em breve. Por enquanto, disponíveis no plano mensal.
+        </div>
+      )}
+
+      <Stepper
+        label="Clubes extras"
+        sub={`+ ${brl(clubPrice)}/mês por clube`}
+        value={clubs} setValue={setClubs}
+        disabled={isAnnual}
+      />
+      {isClube && (
+        <Stepper
+          label="Categorias extras"
+          sub={`+ ${brl(catPrice)}/mês por categoria (além das 5 do Clube)`}
+          value={cats} setValue={setCats}
+          disabled={isAnnual}
+        />
+      )}
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10, paddingTop: 10, borderTop: `1px solid ${colors.border}` }}>
+        <div style={{ fontSize: '0.8rem', color: colors.textSecondary }}>
+          Adicionais: <strong style={{ color: colors.text }}>{brl(addonMonthly)}/mês</strong>
+        </div>
+        <button
+          onClick={save}
+          disabled={!dirty || saving || isAnnual}
+          style={{
+            padding: '0.45rem 0.9rem', borderRadius: 8, border: 'none',
+            backgroundColor: (!dirty || saving || isAnnual) ? colors.border : colors.primary,
+            color: '#fff', fontSize: '0.82rem', fontWeight: 600,
+            cursor: (!dirty || saving || isAnnual) ? 'default' : 'pointer',
+          }}
+        >
+          {saving ? 'Salvando…' : 'Salvar add-ons'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function stepBtn(colors, disabled) {
+  return {
+    width: 30, height: 30, borderRadius: 6,
+    border: `1px solid ${colors.border}`,
+    backgroundColor: disabled ? 'transparent' : colors.surface,
+    color: disabled ? colors.textSecondary : colors.text,
+    fontSize: '1.1rem', fontWeight: 700, lineHeight: 1,
+    cursor: disabled ? 'default' : 'pointer',
+    opacity: disabled ? 0.5 : 1,
+  };
 }
 
 function Card({ colors, icon, title, subtitle }) {
