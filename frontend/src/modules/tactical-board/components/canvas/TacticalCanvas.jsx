@@ -65,7 +65,23 @@ const TacticalCanvas = forwardRef(function TacticalCanvas({
     updateDimensions();
     const observer = new ResizeObserver(updateDimensions);
     if (containerRef.current) observer.observe(containerRef.current);
-    return () => observer.disconnect();
+
+    // Ao girar o celular, o WebView às vezes dispara resize ANTES do layout
+    // assentar, deixando dimensões defasadas (canvas em 0 ou tamanho errado).
+    // Re-medimos algumas vezes após a rotação pra garantir o tamanho final.
+    const onOrientation = () => {
+      requestAnimationFrame(updateDimensions);
+      setTimeout(updateDimensions, 150);
+      setTimeout(updateDimensions, 400);
+    };
+    window.addEventListener('orientationchange', onOrientation);
+    window.addEventListener('resize', onOrientation);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('orientationchange', onOrientation);
+      window.removeEventListener('resize', onOrientation);
+    };
   }, [updateDimensions]);
 
   const handleDragEnd = useCallback((elementId, e) => {

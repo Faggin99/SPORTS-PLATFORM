@@ -367,9 +367,15 @@ export default function TacticalBoardPage() {
   return (
     <div ref={containerRef} style={{
       position: 'relative', width: '100%',
-      height: isFullscreen ? '100vh' : 'calc(100vh - 64px)',
-      margin: '-1.5rem',
-      backgroundColor: 'transparent', // herda o fundo do estádio do Layout
+      // Mede-se pelo PAI (o <main> flex do Layout já desconta header + banner +
+      // rotação), não por 100vh — o 100vh do WebView Android não atualiza direito
+      // ao girar e ignora a barra de status, o que deslocava o canvas e deixava
+      // aparecer o fundo do estádio (azul no futsal) = "tela azul".
+      // A altura reclama o padding do <main> (0.75rem mobile / 1.5rem desktop)
+      // pra ir edge-to-edge, e a margem negativa CASA com esse padding.
+      height: isFullscreen ? '100vh' : (isMobile ? 'calc(100% + 1.5rem)' : 'calc(100% + 3rem)'),
+      margin: isFullscreen ? 0 : (isMobile ? '-0.75rem' : '-1.5rem'),
+      backgroundColor: colors.background, // fundo próprio — não deixa vazar o estádio
       overflow: 'hidden',
       display: 'flex',
       color: colors.text,
