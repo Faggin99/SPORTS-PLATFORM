@@ -1,8 +1,9 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Users, UserPlus, ArrowRight, Pencil, LayoutGrid,
   Save, FolderOpen, Film, Undo2, Redo2, Trash2, Eye, Maximize2, Minimize2,
-  Keyboard, Pause, Plus, X, Cone, Smartphone,
+  Keyboard, Pause, Plus, X, Cone, Smartphone, ArrowLeft, ChevronUp,
   PenLine, Square as SquareIcon, Circle as CircleIcon, Type, RotateCcw, RotateCw,
 } from 'lucide-react';
 import { useTheme } from '../../../contexts/ThemeContext';
@@ -82,8 +83,17 @@ export default function TacticalBoardPage() {
   const { colors, isDark } = useTheme();
   const { selectedClub } = useClub();
   const isMobile = useIsMobile();
+  const navigate = useNavigate();
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
+
+  // Chrome imersivo: controles somem por inatividade e voltam ao mexer/tocar.
+  const [chromeVisible, setChromeVisible] = useState(true);
+  const hideTimerRef = useRef(null);
+  // Orientação — no mobile exigimos paisagem pra ter espaço de campo.
+  const [isPortrait, setIsPortrait] = useState(
+    typeof window !== 'undefined' && window.innerHeight > window.innerWidth
+  );
 
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [saveModalOpen, setSaveModalOpen] = useState(false);
@@ -363,254 +373,316 @@ export default function TacticalBoardPage() {
     board.setSelectedDrawingId(null);
   }, [board]);
 
+  // ── Chrome imersivo: revela ao mexer/tocar, some após inatividade ──
+  // Mantém FIXO visível enquanto o usuário está trabalhando (painel/ferramenta
+  // aberta, seleção, modal) pra não brigar com o auto-hide.
+  const keepChrome = !!openSection || !!drawingMode
+    || !!board.selectedElementId || !!board.selectedDrawingId
+    || paletteOpen || saveModalOpen || loadModalOpen || shortcutsOpen
+    || videoExport.isExporting;
+
+  const revealChrome = useCallback(() => {
+    setChromeVisible(true);
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    hideTimerRef.current = setTimeout(() => setChromeVisible(false), 3500);
+  }, []);
+
+  useEffect(() => {
+    revealChrome();
+    const onActivity = () => revealChrome();
+    window.addEventListener('pointermove', onActivity);
+    window.addEventListener('pointerdown', onActivity);
+    window.addEventListener('keydown', onActivity);
+    return () => {
+      window.removeEventListener('pointermove', onActivity);
+      window.removeEventListener('pointerdown', onActivity);
+      window.removeEventListener('keydown', onActivity);
+      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    };
+  }, [revealChrome]);
+
+  // Fixa o chrome visível enquanto trabalha; solta o auto-hide quando termina.
+  useEffect(() => {
+    if (keepChrome) {
+      setChromeVisible(true);
+      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    } else {
+      revealChrome();
+    }
+  }, [keepChrome, revealChrome]);
+
+  // Orientação (mobile exige paisagem).
+  useEffect(() => {
+    const upd = () => setIsPortrait(window.innerHeight > window.innerWidth);
+    window.addEventListener('resize', upd);
+    window.addEventListener('orientationchange', upd);
+    return () => {
+      window.removeEventListener('resize', upd);
+      window.removeEventListener('orientationchange', upd);
+    };
+  }, []);
+
   // ─────────────────── Renderização ───────────────────
+  const chromeStyle = {
+    opacity: chromeVisible ? 1 : 0,
+    transition: 'opacity 0.28s ease',
+    pointerEvents: chromeVisible ? 'auto' : 'none',
+  };
+
   return (
     <div ref={containerRef} style={{
-      position: 'relative', width: '100%',
-      // Mede-se pelo PAI (o <main> flex do Layout já desconta header + banner +
-      // rotação), não por 100vh — o 100vh do WebView Android não atualiza direito
-      // ao girar e ignora a barra de status, o que deslocava o canvas e deixava
-      // aparecer o fundo do estádio (azul no futsal) = "tela azul".
-      // A altura reclama o padding do <main> (0.75rem mobile / 1.5rem desktop)
-      // pra ir edge-to-edge, e a margem negativa CASA com esse padding.
-      height: isFullscreen ? '100vh' : (isMobile ? 'calc(100% + 1.5rem)' : 'calc(100% + 3rem)'),
-      margin: isFullscreen ? 0 : (isMobile ? '-0.75rem' : '-1.5rem'),
-      backgroundColor: colors.background, // fundo próprio — não deixa vazar o estádio
+      // IMERSIVO: ocupa a tela inteira (a rota não usa o Layout, sem header).
+      // position:fixed + inset:0 preenche a viewport e ACOMPANHA a rotação
+      // sozinho — sem depender de 100vh (que não atualizava no WebView e
+      // causava a "tela azul").
+      position: 'fixed', inset: 0,
+      backgroundColor: '#0b1220',
       overflow: 'hidden',
-      display: 'flex',
       color: colors.text,
-      touchAction: isMobile ? 'none' : 'auto',
+      touchAction: 'none',
     }}>
       <TourGuide isOpen={tour.isOpen} onClose={tour.stop} steps={tourSteps} storageKey={tour.storageKey} />
-      {isMobile && <MobileRotateHint colors={colors} />}
 
-      {/* ─── SIDEBAR ─── */}
-      <Sidebar
-        openSection={openSection}
-        setOpenSection={(s) => { setOpenSection(s); clearDrawingMode(); }}
-        canUndo={board.canUndo}
-        canRedo={board.canRedo}
-        onUndo={board.undo}
-        onRedo={board.redo}
-        onSave={handleSaveClick}
-        onLoad={() => setLoadModalOpen(true)}
-        onExport={() => board.totalFrames > 1 && !videoExport.isExporting && videoExport.startExport(currentPlayName || 'jogada')}
-        canExport={board.totalFrames > 1 && !videoExport.isExporting}
-        exporting={videoExport.isExporting}
-        onReset={handleReset}
-        primary={colors.primary}
-      />
+      {/* ═══ CANVAS — camada base, campo ocupa TODO o espaço ═══ */}
+      <div style={{ position: 'absolute', inset: 0, zIndex: 0 }}>
+        <TacticalCanvas
+          ref={canvasRef}
+          fieldType={board.fieldType}
+          fieldView={board.fieldView}
+          elements={displayElements}
+          drawings={displayDrawings}
+          nextFrameElements={nextFrameElements}
+          teamAColor={board.teamAColor}
+          teamBColor={board.teamBColor}
+          isPlaying={playback.isPlaying || videoExport.isExporting}
+          drawingMode={drawingMode}
+          drawingColor={drawingColor}
+          drawingDash={drawingDash}
+          drawingStrokeWidth={drawingStrokeWidth}
+          onElementMove={board.updateElementPosition}
+          onElementSelect={handleSelectElement}
+          onElementEdit={handleElementEdit}
+          onDrawingSelect={handleSelectDrawing}
+          onDrawingComplete={handleDrawingComplete}
+          onDrawingUpdate={board.updateDrawing}
+          selectedElementId={board.selectedElementId}
+          selectedDrawingId={board.selectedDrawingId}
+        />
+      </div>
 
-      {/* ─── FLYOUT (painel da seção aberta) ─── */}
-      {openSection && (
-        <Flyout
-          title={SECTIONS_TITLES[openSection]}
-          onClose={() => setOpenSection(null)}
-        >
-          {openSection === 'players' && (
-            <PlayersFlyout
-              teamAColor={board.teamAColor} teamBColor={board.teamBColor}
-              setTeamAColor={board.setTeamAColor} setTeamBColor={board.setTeamBColor}
-              onAddA={() => handleAddPlayer('A')} onAddB={() => handleAddPlayer('B')}
-              onAddGKA={() => handleAddGoalkeeper('A')} onAddGKB={() => handleAddGoalkeeper('B')}
-              onAddBall={handleAddBall}
-              onOpenPalette={() => { setPaletteOpen(true); setOpenSection(null); }}
-            />
-          )}
-          {openSection === 'arrows' && (
-            <ArrowsFlyout
-              activeToolId={activeToolId}
-              onActivate={(t) => activateDrawingTool(t.id, t.mode, t.dash, t.color)}
-              drawingColor={drawingColor}
-              setDrawingColor={setDrawingColor}
-            />
-          )}
-          {openSection === 'draw' && (
-            <DrawFlyout
-              activeToolId={activeToolId}
-              onActivate={activateDrawingTool}
-              drawingColor={drawingColor}
-              setDrawingColor={setDrawingColor}
-            />
-          )}
-          {openSection === 'objects' && (
-            <ObjectsFlyout onAdd={handleAddMarker} isMobile={isMobile} />
-          )}
-          {openSection === 'formations' && (
-            <FormationsFlyout
-              formations={formations}
-              target={formationTarget}
-              setTarget={setFormationTarget}
-              teamAColor={board.teamAColor}
-              teamBColor={board.teamBColor}
-              onApply={handleApplyFormation}
-              isMobile={isMobile}
-            />
-          )}
-          {openSection === 'view' && (
-            <ViewFlyout
-              fieldType={board.fieldType} setFieldType={handleSetFieldType}
-              fieldView={board.fieldView} setFieldView={board.setFieldView}
-            />
-          )}
-        </Flyout>
+      {/* Indicador de modo de desenho (sempre visível quando ativo) */}
+      {drawingMode && !videoExport.isExporting && (
+        <div style={{
+          position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 30,
+          backgroundColor: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)', borderRadius: '0.5rem',
+          padding: '0.3rem 0.8rem', display: 'flex', alignItems: 'center', gap: '0.5rem',
+          border: '1px solid rgba(255,255,255,0.15)', fontSize: '0.75rem', color: 'white',
+        }}>
+          <PenLine size={13} style={{ opacity: 0.7 }} />
+          <span style={{ fontWeight: 600 }}>{describeMode(drawingMode)}</span>
+          <button onClick={clearDrawingMode}
+            style={{ border: 'none', background: 'rgba(239,68,68,0.3)', color: '#fca5a5', borderRadius: '0.25rem', cursor: 'pointer', padding: '0.15rem 0.4rem', fontSize: '0.7rem' }}>
+            Sair (Esc)
+          </button>
+        </div>
       )}
 
-      {/* ─── ÁREA PRINCIPAL ─── */}
-      <div style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column', minWidth: 0, zIndex: 1 }}>
-        {/* TOP BAR — compacto pra dar espaço ao campo */}
+      {/* Progresso do export de vídeo */}
+      {videoExport.isExporting && (
         <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '0.3rem 0.65rem',
-          backgroundColor: 'rgba(15,23,42,0.5)',
-          backdropFilter: 'blur(8px)',
-          borderBottom: '1px solid rgba(255,255,255,0.08)',
-          gap: '0.5rem',
-          minHeight: 36,
-          flexShrink: 0,
+          position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 31,
+          backgroundColor: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)', borderRadius: '0.5rem',
+          padding: '0.35rem 0.9rem', display: 'flex', alignItems: 'center', gap: '0.6rem',
+          border: '1px solid rgba(200,255,0,0.35)', fontSize: '0.78rem', color: 'white',
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
-            <span style={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.55)', fontWeight: 600 }}>Jogada:</span>
-            <span
-              onClick={() => setSaveModalOpen(true)}
-              title="Renomear / salvar como nova jogada"
-              style={{ fontSize: '0.9rem', color: '#fff', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 280, cursor: 'pointer', textDecoration: 'underline dotted rgba(255,255,255,0.35)', textUnderlineOffset: 3 }}>
-              {currentPlayName || 'Sem nome'}
-            </span>
-            {board.isDirty && (
-              <span title="Alterações não salvas" style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#fbbf24', flexShrink: 0 }} />
-            )}
-            {board.totalFrames > 1 && (
-              <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.45)', padding: '0.1rem 0.4rem', backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 999 }}>
-                {board.totalFrames} frames
-              </span>
-            )}
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-            <TopBtn onClick={() => setOpenSection('view')} title="Vista / tipo de campo" active={openSection === 'view'}>
-              <Eye size={16} />
-            </TopBtn>
-            <TopBtn onClick={() => setShortcutsOpen(true)} title="Atalhos de teclado">
-              <Keyboard size={16} />
-            </TopBtn>
-            <TopBtn onClick={toggleFullscreen} title={isFullscreen ? 'Sair tela cheia (F11)' : 'Tela cheia (F11)'}>
-              {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
-            </TopBtn>
-          </div>
+          <Film size={14} style={{ color: '#c8ff00' }} />
+          <span style={{ fontWeight: 600 }}>Gerando vídeo… {Math.round(videoExport.progress)}%</span>
+          <button onClick={videoExport.cancelExport}
+            style={{ border: 'none', background: 'rgba(239,68,68,0.3)', color: '#fca5a5', borderRadius: '0.25rem', cursor: 'pointer', padding: '0.15rem 0.45rem', fontSize: '0.7rem' }}>
+            Cancelar
+          </button>
         </div>
+      )}
 
-        {/* CANVAS */}
-        <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
-          <TacticalCanvas
-            ref={canvasRef}
-            fieldType={board.fieldType}
-            fieldView={board.fieldView}
-            elements={displayElements}
-            drawings={displayDrawings}
-            nextFrameElements={nextFrameElements}
-            teamAColor={board.teamAColor}
-            teamBColor={board.teamBColor}
-            isPlaying={playback.isPlaying || videoExport.isExporting}
-            drawingMode={drawingMode}
-            drawingColor={drawingColor}
-            drawingDash={drawingDash}
-            drawingStrokeWidth={drawingStrokeWidth}
-            onElementMove={board.updateElementPosition}
-            onElementSelect={handleSelectElement}
-            onElementEdit={handleElementEdit}
-            onDrawingSelect={handleSelectDrawing}
-            onDrawingComplete={handleDrawingComplete}
-            onDrawingUpdate={board.updateDrawing}
-            selectedElementId={board.selectedElementId}
-            selectedDrawingId={board.selectedDrawingId}
-          />
+      {/* Painel de propriedades da seleção (parte do "trabalhar" — sempre visível) */}
+      {(selectedElement || selectedDrawing) && !playback.isPlaying && !videoExport.isExporting && (
+        <SelectionPanel
+          element={selectedElement}
+          drawing={selectedDrawing}
+          teamAColor={board.teamAColor}
+          teamBColor={board.teamBColor}
+          onPatchElement={(patch) => board.updateElementProps(selectedElement.id, patch)}
+          onPatchDrawing={(patch) => board.updateDrawing(selectedDrawing.id, patch)}
+          onRemove={handleRemoveSelected}
+          isMobile={isMobile}
+        />
+      )}
 
-          {/* Indicador de modo de desenho */}
-          {drawingMode && !videoExport.isExporting && (
-            <div style={{
-              position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 25,
-              backgroundColor: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)', borderRadius: '0.5rem',
-              padding: '0.3rem 0.8rem', display: 'flex', alignItems: 'center', gap: '0.5rem',
-              border: '1px solid rgba(255,255,255,0.15)', fontSize: '0.75rem', color: 'white',
-            }}>
-              <PenLine size={13} style={{ opacity: 0.7 }} />
-              <span style={{ fontWeight: 600 }}>{describeMode(drawingMode)}</span>
-              <button onClick={clearDrawingMode}
-                style={{ border: 'none', background: 'rgba(239,68,68,0.3)', color: '#fca5a5', borderRadius: '0.25rem', cursor: 'pointer', padding: '0.15rem 0.4rem', fontSize: '0.7rem' }}>
-                Sair (Esc)
-              </button>
-            </div>
-          )}
-
-          {/* Progresso do export de vídeo */}
-          {videoExport.isExporting && (
-            <div style={{
-              position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 26,
-              backgroundColor: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)', borderRadius: '0.5rem',
-              padding: '0.35rem 0.9rem', display: 'flex', alignItems: 'center', gap: '0.6rem',
-              border: '1px solid rgba(200,255,0,0.35)', fontSize: '0.78rem', color: 'white',
-            }}>
-              <Film size={14} style={{ color: '#c8ff00' }} />
-              <span style={{ fontWeight: 600 }}>Gerando vídeo… {Math.round(videoExport.progress)}%</span>
-              <button onClick={videoExport.cancelExport}
-                style={{ border: 'none', background: 'rgba(239,68,68,0.3)', color: '#fca5a5', borderRadius: '0.25rem', cursor: 'pointer', padding: '0.15rem 0.45rem', fontSize: '0.7rem' }}>
-                Cancelar
-              </button>
-            </div>
-          )}
-
-          {/* Painel de propriedades da seleção */}
-          {(selectedElement || selectedDrawing) && !playback.isPlaying && !videoExport.isExporting && (
-            <SelectionPanel
-              element={selectedElement}
-              drawing={selectedDrawing}
-              teamAColor={board.teamAColor}
-              teamBColor={board.teamBColor}
-              onPatchElement={(patch) => board.updateElementProps(selectedElement.id, patch)}
-              onPatchDrawing={(patch) => board.updateDrawing(selectedDrawing.id, patch)}
-              onRemove={handleRemoveSelected}
-              isMobile={isMobile}
-            />
-          )}
-        </div>
-
-        {/* BOTTOM BAR — playback + frames */}
+      {/* ═══ CHROME FLUTUANTE (auto-hide) ═══ */}
+      {/* Topo-esquerda: voltar + nome da jogada */}
+      <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 25, display: 'flex', alignItems: 'center', gap: 8, ...chromeStyle }}>
+        <FloatBtn onClick={() => navigate('/home')} title="Voltar ao início">
+          <ArrowLeft size={18} />
+        </FloatBtn>
         <div style={{
-          flexShrink: 0,
-          backgroundColor: '#0f172a',
-          borderTop: '1px solid rgba(255,255,255,0.08)',
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '0.4rem 0.7rem', borderRadius: 10,
+          backgroundColor: 'rgba(11,18,32,0.72)', backdropFilter: 'blur(10px)',
+          border: '1px solid rgba(255,255,255,0.1)',
         }}>
-          <div style={{ display: 'flex', justifyContent: 'center', padding: '0.15rem 0' }}>
-            <PlaybackControls
-              isPlaying={playback.isPlaying}
-              speed={playback.speed}
-              currentFrameIndex={board.currentFrameIndex}
-              totalFrames={board.totalFrames}
-              onPlay={playback.play}
-              onPause={playback.pause}
-              onRewind={playback.rewind}
-              onSpeedChange={playback.setSpeed}
-            />
-          </div>
-          <div style={{ borderTop: '1px solid rgba(255,255,255,0.04)' }}>
-            <FrameControls
-              currentFrameIndex={board.currentFrameIndex}
-              totalFrames={board.totalFrames}
-              onAddFrame={board.addFrame}
-              onDeleteFrame={board.deleteFrame}
-              onGoToFrame={board.goToFrame}
-              onGoToPrevFrame={board.goToPrevFrame}
-              onGoToNextFrame={board.goToNextFrame}
-            />
-          </div>
+          <span
+            onClick={() => setSaveModalOpen(true)}
+            title="Renomear / salvar como nova jogada"
+            style={{ fontSize: '0.85rem', color: '#fff', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: isMobile ? 130 : 240, cursor: 'pointer' }}>
+            {currentPlayName || 'Sem nome'}
+          </span>
+          {board.isDirty && <span title="Alterações não salvas" style={{ width: 7, height: 7, borderRadius: '50%', backgroundColor: '#fbbf24', flexShrink: 0 }} />}
         </div>
       </div>
+
+      {/* Topo-direita: vista, atalhos, tela cheia */}
+      <div style={{ position: 'absolute', top: 10, right: 10, zIndex: 25, display: 'flex', gap: 6, ...chromeStyle }}>
+        <FloatBtn onClick={() => setOpenSection(openSection === 'view' ? null : 'view')} title="Vista / tipo de campo" active={openSection === 'view'}>
+          <Eye size={17} />
+        </FloatBtn>
+        {!isMobile && (
+          <FloatBtn onClick={() => setShortcutsOpen(true)} title="Atalhos de teclado">
+            <Keyboard size={17} />
+          </FloatBtn>
+        )}
+        <FloatBtn onClick={toggleFullscreen} title={isFullscreen ? 'Sair tela cheia (F11)' : 'Tela cheia (F11)'}>
+          {isFullscreen ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
+        </FloatBtn>
+      </div>
+
+      {/* Rail de ferramentas — esquerda, centralizado vertical */}
+      <div style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', zIndex: 25, ...chromeStyle }}>
+        <Sidebar
+          openSection={openSection}
+          setOpenSection={(s) => { setOpenSection(s); clearDrawingMode(); }}
+          canUndo={board.canUndo}
+          canRedo={board.canRedo}
+          onUndo={board.undo}
+          onRedo={board.redo}
+          onSave={handleSaveClick}
+          onLoad={() => setLoadModalOpen(true)}
+          onExport={() => board.totalFrames > 1 && !videoExport.isExporting && videoExport.startExport(currentPlayName || 'jogada')}
+          canExport={board.totalFrames > 1 && !videoExport.isExporting}
+          exporting={videoExport.isExporting}
+          onReset={handleReset}
+          primary={colors.primary}
+        />
+      </div>
+
+      {/* Barra inferior flutuante — playback + frames */}
+      <div style={{
+        position: 'absolute', bottom: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 25,
+        maxWidth: 'calc(100vw - 20px)',
+        backgroundColor: 'rgba(11,18,32,0.82)', backdropFilter: 'blur(10px)',
+        border: '1px solid rgba(255,255,255,0.1)', borderRadius: 12,
+        boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+        ...chromeStyle,
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'center' }}>
+          <PlaybackControls
+            isPlaying={playback.isPlaying}
+            speed={playback.speed}
+            currentFrameIndex={board.currentFrameIndex}
+            totalFrames={board.totalFrames}
+            onPlay={playback.play}
+            onPause={playback.pause}
+            onRewind={playback.rewind}
+            onSpeedChange={playback.setSpeed}
+          />
+        </div>
+        <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+          <FrameControls
+            currentFrameIndex={board.currentFrameIndex}
+            totalFrames={board.totalFrames}
+            onAddFrame={board.addFrame}
+            onDeleteFrame={board.deleteFrame}
+            onGoToFrame={board.goToFrame}
+            onGoToPrevFrame={board.goToPrevFrame}
+            onGoToNextFrame={board.goToNextFrame}
+          />
+        </div>
+      </div>
+
+      {/* Dica pra reexibir os controles quando escondidos */}
+      {!chromeVisible && !(isMobile && isPortrait) && (
+        <div style={{
+          position: 'absolute', bottom: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 24,
+          display: 'flex', alignItems: 'center', gap: 6,
+          padding: '0.3rem 0.7rem', borderRadius: 999,
+          backgroundColor: 'rgba(11,18,32,0.6)', color: 'rgba(255,255,255,0.6)',
+          fontSize: '0.72rem', pointerEvents: 'none',
+        }}>
+          <ChevronUp size={13} /> {isMobile ? 'Toque' : 'Mova o mouse'} para ver os controles
+        </div>
+      )}
+
+      {/* ═══ FLYOUT (painel da seção aberta) — flutuante à esquerda ═══ */}
+      {openSection && (
+        <div style={{ position: 'absolute', left: 62, top: 10, bottom: 10, zIndex: 40, display: 'flex' }}>
+          <Flyout
+            title={SECTIONS_TITLES[openSection]}
+            onClose={() => setOpenSection(null)}
+            floating
+          >
+            {openSection === 'players' && (
+              <PlayersFlyout
+                teamAColor={board.teamAColor} teamBColor={board.teamBColor}
+                setTeamAColor={board.setTeamAColor} setTeamBColor={board.setTeamBColor}
+                onAddA={() => handleAddPlayer('A')} onAddB={() => handleAddPlayer('B')}
+                onAddGKA={() => handleAddGoalkeeper('A')} onAddGKB={() => handleAddGoalkeeper('B')}
+                onAddBall={handleAddBall}
+                onOpenPalette={() => { setPaletteOpen(true); setOpenSection(null); }}
+              />
+            )}
+            {openSection === 'arrows' && (
+              <ArrowsFlyout
+                activeToolId={activeToolId}
+                onActivate={(t) => activateDrawingTool(t.id, t.mode, t.dash, t.color)}
+                drawingColor={drawingColor}
+                setDrawingColor={setDrawingColor}
+              />
+            )}
+            {openSection === 'draw' && (
+              <DrawFlyout
+                activeToolId={activeToolId}
+                onActivate={activateDrawingTool}
+                drawingColor={drawingColor}
+                setDrawingColor={setDrawingColor}
+              />
+            )}
+            {openSection === 'objects' && (
+              <ObjectsFlyout onAdd={handleAddMarker} isMobile={isMobile} />
+            )}
+            {openSection === 'formations' && (
+              <FormationsFlyout
+                formations={formations}
+                target={formationTarget}
+                setTarget={setFormationTarget}
+                teamAColor={board.teamAColor}
+                teamBColor={board.teamBColor}
+                onApply={handleApplyFormation}
+                isMobile={isMobile}
+              />
+            )}
+            {openSection === 'view' && (
+              <ViewFlyout
+                fieldType={board.fieldType} setFieldType={handleSetFieldType}
+                fieldView={board.fieldView} setFieldView={board.setFieldView}
+              />
+            )}
+          </Flyout>
+        </div>
+      )}
 
       {/* PALETTE (drawer direito) */}
       {paletteOpen && (
         <div style={{
-          position: 'absolute', top: 0, right: 0, bottom: 0, zIndex: 25,
+          position: 'absolute', top: 0, right: 0, bottom: 0, zIndex: 45,
           boxShadow: '-4px 0 20px rgba(0,0,0,0.3)',
         }}>
           <PlayerPalette
@@ -625,6 +697,9 @@ export default function TacticalBoardPage() {
           />
         </div>
       )}
+
+      {/* Gate de paisagem no mobile */}
+      {isMobile && isPortrait && <LandscapeGate onBack={() => navigate('/home')} />}
 
       {/* Modais */}
       <SavePlayModal
@@ -710,11 +785,13 @@ function SelectionPanel({ element, drawing, teamAColor, teamBColor, onPatchEleme
 
   const panelStyle = isMobile
     ? {
-        position: 'absolute', bottom: 8, left: '50%', transform: 'translateX(-50%)', zIndex: 22,
+        // No mobile fica no TOPO-centro (abaixo do chrome) pra não colidir com a
+        // barra de playback, que fica embaixo-centro.
+        position: 'absolute', top: 58, left: '50%', transform: 'translateX(-50%)', zIndex: 26,
         backgroundColor: 'rgba(12,12,28,0.94)', backdropFilter: 'blur(14px)',
         borderRadius: '0.6rem', border: '1px solid rgba(255,255,255,0.12)',
         padding: '0.55rem 0.7rem', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap',
-        boxShadow: '0 8px 24px rgba(0,0,0,0.45)', maxWidth: 'calc(100% - 24px)',
+        boxShadow: '0 8px 24px rgba(0,0,0,0.45)', maxWidth: 'calc(100vw - 24px)',
       }
     : {
         position: 'absolute', bottom: 12, right: 12, zIndex: 22,
@@ -925,14 +1002,17 @@ function Sidebar({ openSection, setOpenSection, canUndo, canRedo, onUndo, onRedo
     <div style={{
       width: 44,
       flexShrink: 0,
-      backgroundColor: 'rgba(15,23,42,0.55)',
+      backgroundColor: 'rgba(11,18,32,0.82)',
       backdropFilter: 'blur(10px)',
-      borderRight: '1px solid rgba(255,255,255,0.08)',
+      border: '1px solid rgba(255,255,255,0.1)',
+      borderRadius: 12,
+      boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
       display: 'flex',
       flexDirection: 'column',
       paddingTop: '0.3rem',
       paddingBottom: '0.3rem',
-      zIndex: 30,
+      maxHeight: 'calc(100dvh - 20px)',
+      overflowY: 'auto',
     }}>
       {item('players',    UserPlus,   'Peças')}
       {item('formations', LayoutGrid, 'Formações')}
@@ -946,35 +1026,84 @@ function Sidebar({ openSection, setOpenSection, canUndo, canRedo, onUndo, onRedo
       {divider}
       {item(null, Undo2, 'Desfazer (Ctrl+Z)', onUndo, { disabled: !canUndo })}
       {item(null, Redo2, 'Refazer (Ctrl+Y)',  onRedo, { disabled: !canRedo })}
-      <div style={{ flex: 1 }} />
+      {divider}
       {item(null, Trash2, 'Limpar tudo', onReset)}
     </div>
   );
 }
 
-// ── Flyout (painel ao lado da sidebar) ──
+// Botão flutuante do chrome imersivo (sobre o campo).
+function FloatBtn({ children, onClick, title, active }) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      style={{
+        width: 40, height: 40, flexShrink: 0,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        borderRadius: 10, cursor: 'pointer',
+        backgroundColor: active ? 'rgba(200,255,0,0.16)' : 'rgba(11,18,32,0.72)',
+        backdropFilter: 'blur(10px)',
+        border: `1px solid ${active ? 'rgba(200,255,0,0.5)' : 'rgba(255,255,255,0.12)'}`,
+        color: active ? '#c8ff00' : '#fff',
+        boxShadow: '0 4px 14px rgba(0,0,0,0.35)',
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+// Gate de paisagem no mobile — o campo precisa de tela deitada pra ser usável.
+function LandscapeGate({ onBack }) {
+  return (
+    <div style={{
+      position: 'absolute', inset: 0, zIndex: 90,
+      backgroundColor: '#0b1220',
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      gap: '1.1rem', padding: '2rem', textAlign: 'center',
+    }}>
+      <div style={{
+        width: 76, height: 76, borderRadius: '50%',
+        backgroundColor: 'rgba(200,255,0,0.12)', color: '#c8ff00',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        animation: 'tp-rotate-hint 2.4s ease-in-out infinite',
+      }}>
+        <RotateCw size={36} />
+      </div>
+      <div style={{ color: '#fff', fontSize: '1.05rem', fontWeight: 700 }}>Gire o celular</div>
+      <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.85rem', maxWidth: 300 }}>
+        O Quadro Tático usa a tela deitada (paisagem) pra o campo caber inteiro.
+      </div>
+      <button onClick={onBack}
+        style={{
+          marginTop: 6, display: 'inline-flex', alignItems: 'center', gap: 6,
+          padding: '0.5rem 0.9rem', borderRadius: 8, cursor: 'pointer',
+          backgroundColor: 'transparent', border: '1px solid rgba(255,255,255,0.18)', color: 'rgba(255,255,255,0.8)',
+          fontSize: '0.82rem',
+        }}>
+        <ArrowLeft size={15} /> Voltar
+      </button>
+      <style>{`@keyframes tp-rotate-hint { 0%,100%{transform:rotate(0)} 50%{transform:rotate(-90deg)} }`}</style>
+    </div>
+  );
+}
+
+// ── Flyout (painel flutuante ao lado do rail de ferramentas) ──
 function Flyout({ title, onClose, children }) {
   const isMobile = useIsMobile();
-  const containerStyle = isMobile
-    ? {
-        position: 'absolute',
-        top: 0, left: 44, bottom: 0,
-        width: 'min(280px, calc(100vw - 60px))',
-        backgroundColor: 'rgba(15,23,42,0.92)',
-        backdropFilter: 'blur(14px)',
-        boxShadow: '4px 0 20px rgba(0,0,0,0.5)',
-        display: 'flex', flexDirection: 'column',
-        zIndex: 40,
-      }
-    : {
-        width: 250, flexShrink: 0,
-        backgroundColor: 'rgba(15,23,42,0.82)',
-        backdropFilter: 'blur(14px)',
-        borderRight: '1px solid rgba(255,255,255,0.08)',
-        boxShadow: '4px 0 20px rgba(0,0,0,0.3)',
-        display: 'flex', flexDirection: 'column',
-        zIndex: 29,
-      };
+  // No modo imersivo o wrapper já posiciona o Flyout; aqui é só o cartão.
+  const containerStyle = {
+    width: isMobile ? 'min(260px, calc(100vw - 84px))' : 260,
+    maxHeight: '100%',
+    backgroundColor: 'rgba(11,18,32,0.92)',
+    backdropFilter: 'blur(14px)',
+    border: '1px solid rgba(255,255,255,0.1)',
+    borderRadius: 12,
+    boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
+    display: 'flex', flexDirection: 'column',
+    overflow: 'hidden',
+  };
   return (
     <div style={containerStyle}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.55rem 0.75rem', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>

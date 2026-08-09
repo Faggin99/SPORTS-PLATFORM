@@ -249,13 +249,13 @@ function AppRoutes() {
         }
       />
       <Route path="/accept-invite/:token" element={<AcceptInvitePage />} />
+      {/* Quadro Tático: experiência imersiva em tela cheia — SEM o Layout
+          (header/nav) pra o campo ocupar a tela inteira. */}
       <Route
         path="/tactical-board"
         element={
           <ProtectedRoute>
-            <Layout>
-              <TacticalBoardPage />
-            </Layout>
+            <TacticalBoardPage />
           </ProtectedRoute>
         }
       />
