@@ -352,8 +352,10 @@ async function fetchPayment(paymentId) {
   }
 }
 
-async function syncSubscriptionFromPreapproval(preapprovalId) {
-  const pa = await fetchPreapproval(preapprovalId);
+async function syncSubscriptionFromPreapproval(preapprovalId, paOverride = null) {
+  // paOverride: usado em testes pra injetar o preapproval sem chamar o MP.
+  // Em produção nunca é passado (busca o preapproval real no MP).
+  const pa = paOverride || await fetchPreapproval(preapprovalId);
   if (!pa) return null;
 
   const mappedStatus = mapMpStatus(pa.status);
@@ -610,6 +612,22 @@ async function updatePreapprovalAmount(preapprovalId, amountCents) {
   }
 }
 
+// Atualiza o valor do PLANO (preapproval_plan). Como criamos um plano por
+// assinante, atualizar o plano é a forma canônica de mudar o valor recorrente
+// da assinatura linkada. Fazemos os dois (plano + preapproval) por robustez.
+async function updatePlanAmount(planId, amountCents) {
+  if (!isEnabled() || !planId) return false;
+  try {
+    const mp = getMP();
+    const pap = new PreApprovalPlan(mp);
+    await pap.update({ id: planId, body: { auto_recurring: { transaction_amount: amountCents / 100 } } });
+    return true;
+  } catch (err) {
+    console.error('updatePlanAmount error:', err?.message);
+    return false;
+  }
+}
+
 // Define os add-ons (clubes/categorias extras) da assinatura ATIVA e ajusta o
 // valor recorrente no MP. Só funciona em assinatura paga (status='active').
 // Fase 1: planos MENSAIS. Anual (cobrança proporcional imediata) fica pra Fase 2.
@@ -665,7 +683,10 @@ async function setAddons(userId, workspaceId, { extraClubs, extraCategories }) {
   const amountCents = computeRecurringAmountCents(
     { price_cents: sub.plan_price, interval: sub.interval }, ec, ecat
   );
-  const mpUpdated = await updatePreapprovalAmount(sub.mp_preapproval_id, amountCents);
+  // Atualiza o plano E o preapproval (robustez — a assinatura é linkada ao plano).
+  const planUpdated = await updatePlanAmount(sub.mp_preapproval_plan_id, amountCents);
+  const paUpdated = await updatePreapprovalAmount(sub.mp_preapproval_id, amountCents);
+  const mpUpdated = planUpdated || paUpdated;
 
   await query(
     `UPDATE subscriptions SET extra_club_slots = $2, extra_category_slots = $3, updated_at = NOW() WHERE id = $1`,
