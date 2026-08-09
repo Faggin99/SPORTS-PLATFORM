@@ -35,3 +35,4 @@ frontend/ios/App/Podfile.lock
 # Se ficar grande demais, remover:
 # frontend/mobile-artifacts/*.aab
 # frontend/mobile-artifacts/*.apk
+ota/

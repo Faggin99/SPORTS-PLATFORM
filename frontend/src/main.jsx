@@ -5,9 +5,14 @@ import './styles/responsive.css'
 import './styles/lucide-fix.css'
 // import './registerSW' // Desabilitado temporariamente para testar login com Supabase
 import App from './App.jsx'
+import { initOtaUpdates } from './lib/otaUpdater'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <App />
   </StrictMode>,
 )
+
+// Atualização OTA do app nativo (no-op na web). Não bloqueia o render.
+initOtaUpdates()
+

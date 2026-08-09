@@ -9,6 +9,12 @@
     "cleartext": false
   },
   "plugins": {
+    "CapacitorUpdater": {
+      "autoUpdate": false,
+      "appReadyTimeout": 15000,
+      "responseTimeout": 20,
+      "directUpdate": false
+    },
     "SplashScreen": {
       "launchShowDuration": 1500,
       "launchAutoHide": true,
