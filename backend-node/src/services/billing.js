@@ -7,15 +7,17 @@ const { ADDON_PRICES, ADDON_MAX, computeRecurringAmountCents } = require('../con
 
 let mpClient = null;
 let PreApproval = null;
+let PreApprovalPlan = null;
 let Payment = null;
 
 function getMP() {
   if (mpClient) return mpClient;
   if (!process.env.MP_ACCESS_TOKEN) return null;
 
-  const { MercadoPagoConfig, PreApproval: PA, Payment: PAY } = require('mercadopago');
+  const { MercadoPagoConfig, PreApproval: PA, PreApprovalPlan: PAP, Payment: PAY } = require('mercadopago');
   mpClient = new MercadoPagoConfig({ accessToken: process.env.MP_ACCESS_TOKEN });
   PreApproval = PA;
+  PreApprovalPlan = PAP;
   Payment = PAY;
   return mpClient;
 }
@@ -268,12 +270,19 @@ async function createCheckout({ userId, planId, payerEmail, workspaceId = null }
   );
 
   const mp = getMP();
-  const pa = new PreApproval(mp);
+  const paPlan = new PreApprovalPlan(mp);
 
+  // Fluxo baseado em PLANO (preapproval_plan): a conta MP recusa preapproval
+  // direto (500), mas plano funciona e gera init_point (checkout por redirect).
+  // Criamos um plano por checkout com o valor BASE do plano (add-ons são
+  // comprados depois, via setAddons, que ajusta o valor). external_reference
+  // = "userId|planId" pra vincular; guardamos o id do plano na sub pendente e,
+  // quando a assinatura (preapproval) resultante chega no webhook, linkamos.
   const baseUrl = process.env.APP_BASE_URL || 'https://app.tactiplan.faggin.com.br';
-  const result = await pa.create({
+  const result = await paPlan.create({
     body: {
       reason: `${plan.name} — TactiPlan`,
+      external_reference: `${userId}|${planId}`,
       auto_recurring: {
         frequency: plan.interval === 'yearly' ? 12 : 1,
         frequency_type: 'months',
@@ -281,16 +290,12 @@ async function createCheckout({ userId, planId, payerEmail, workspaceId = null }
         currency_id: plan.currency || 'BRL',
       },
       back_url: `${baseUrl}/#/billing/callback`,
-      payer_email: payerEmail,
-      external_reference: `${userId}|${planId}`,
-      status: 'pending',
     },
   });
 
-  // Sub nasce 'pending' — NÃO conta como ativa (fora do índice único e dos
-  // lookups de acesso). Só vira 'active' quando o pagamento for confirmado.
+  // Sub nasce 'pending' guardando o id do PLANO (o preapproval real vem depois).
   const ins = await query(
-    `INSERT INTO subscriptions (user_id, workspace_id, plan_id, status, mp_preapproval_id, mp_status)
+    `INSERT INTO subscriptions (user_id, workspace_id, plan_id, status, mp_preapproval_plan_id, mp_status)
      VALUES ($1, $2, $3, 'pending', $4, $5)
      RETURNING id`,
     [userId, workspaceId, planId, result.id, result.status]
@@ -302,10 +307,10 @@ async function createCheckout({ userId, planId, payerEmail, workspaceId = null }
     type: 'subscription.checkout_started',
     mpResourceId: result.id,
     status: result.status,
-    raw: { plan_id: planId, workspace_id: workspaceId },
+    raw: { plan_id: planId, workspace_id: workspaceId, preapproval_plan_id: result.id },
   });
 
-  return { init_point: result.init_point, preapproval_id: result.id };
+  return { init_point: result.init_point, preapproval_plan_id: result.id };
 }
 
 // Mapeia status do Mercado Pago para nosso schema interno
@@ -361,32 +366,43 @@ async function syncSubscriptionFromPreapproval(preapprovalId) {
 
   // Próxima data de cobrança
   const nextPaymentDate = pa.next_payment_date ? new Date(pa.next_payment_date) : null;
+  // A assinatura (preapproval) criada pelo comprador vem LINKADA ao nosso plano.
+  const planRef = pa.preapproval_plan_id || null;
 
-  // Atualiza por preapproval_id se já existir
-  const existing = await query(
+  // Acha a sub local: (1) já linkada por preapproval_id; senão (2) a pendente
+  // pelo id do PLANO que criamos no checkout; senão (3) por external_reference.
+  let existing = await query(
     'SELECT id, user_id, plan_id, status, cancel_at_period_end, current_period_end FROM subscriptions WHERE mp_preapproval_id = $1',
     [preapprovalId]
   );
+  if (existing.rows.length === 0 && planRef) {
+    existing = await query(
+      `SELECT id, user_id, plan_id, status, cancel_at_period_end, current_period_end
+         FROM subscriptions WHERE mp_preapproval_plan_id = $1
+        ORDER BY created_at DESC LIMIT 1`,
+      [planRef]
+    );
+  }
 
   if (existing.rows.length > 0) {
     const local = existing.rows[0];
 
     if (mappedStatus === 'active') {
-      // PAGAMENTO CONFIRMADO. É AQUI (e só aqui) que a troca de plano se
-      // efetiva: esta sub vira a ativa e as OUTRAS ativas do user são
-      // canceladas no MP + localmente. Checkout abandonado nunca chega aqui,
-      // então a assinatura anterior fica intacta.
+      // PAGAMENTO CONFIRMADO. Vincula o preapproval real, ativa a sub e cancela
+      // as OUTRAS ativas do user (troca de plano só se efetiva aqui). Checkout
+      // abandonado nunca chega neste ponto.
       await _hardCancelActiveSubsForUser(local.user_id, 'plan_switch_confirmed', local.id);
       await query(
         `UPDATE subscriptions SET
            status = 'active',
-           mp_status = $2,
-           mp_payer_id = COALESCE($3, mp_payer_id),
-           current_period_end = COALESCE($4, current_period_end),
+           mp_preapproval_id = $2,
+           mp_status = $3,
+           mp_payer_id = COALESCE($4, mp_payer_id),
+           current_period_end = COALESCE($5, current_period_end),
            cancel_at_period_end = FALSE,
            updated_at = now()
          WHERE id = $1`,
-        [local.id, pa.status, pa.payer_id ? String(pa.payer_id) : null, nextPaymentDate]
+        [local.id, preapprovalId, pa.status, pa.payer_id ? String(pa.payer_id) : null, nextPaymentDate]
       );
     } else {
       // Não rebaixa uma sub em período de graça (cancelou mas período ainda
@@ -397,12 +413,13 @@ async function syncSubscriptionFromPreapproval(preapprovalId) {
       await query(
         `UPDATE subscriptions SET
            status = COALESCE($2, status),
-           mp_status = $3,
-           mp_payer_id = COALESCE($4, mp_payer_id),
-           current_period_end = COALESCE($5, current_period_end),
+           mp_preapproval_id = COALESCE(mp_preapproval_id, $3),
+           mp_status = $4,
+           mp_payer_id = COALESCE($5, mp_payer_id),
+           current_period_end = COALESCE($6, current_period_end),
            updated_at = now()
          WHERE id = $1`,
-        [local.id, nextStatus, pa.status, pa.payer_id ? String(pa.payer_id) : null, nextPaymentDate]
+        [local.id, nextStatus, preapprovalId, pa.status, pa.payer_id ? String(pa.payer_id) : null, nextPaymentDate]
       );
     }
   } else if (userId && planId) {
