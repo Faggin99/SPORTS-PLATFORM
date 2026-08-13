@@ -21,7 +21,7 @@ workflows:
           - tactiplan-dist
         provisioning_profiles:
           - tactiplan-appstore
-      node: 20.19.0
+      node: 22
       xcode: latest
       cocoapods: default
       vars:
