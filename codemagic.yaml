@@ -14,8 +14,13 @@ workflows:
       app_store_connect: tactiplan
     environment:
       ios_signing:
-        distribution_type: app_store
-        bundle_identifier: com.faggin.tactiplan
+        # Identidades ARMAZENADAS no Codemagic (Settings → Code signing
+        # identities): certificado gerado via integração + profile App Store
+        # criado no portal da Apple e enviado com esses reference names.
+        certificates:
+          - tactiplan-dist
+        provisioning_profiles:
+          - tactiplan-appstore
       node: 20.19.0
       xcode: latest
       cocoapods: default
