@@ -171,6 +171,11 @@ export default function TacticalBoardPage() {
   const exitToHome = leaveBoard;
 
   const requestFs = useCallback(() => {
+    // iOS (iPhone/iPad): a Fullscreen API sobrepõe um "✕" NATIVO do sistema
+    // (não removível) que cobre nosso botão voltar. E no iOS o layout
+    // fixed inset:0 já ocupa a tela inteira — fullscreen não acrescenta nada.
+    // Então não pedimos fullscreen lá.
+    if (/iPhone|iPad|iPod/i.test(navigator.userAgent)) return;
     const el = document.documentElement;
     if (!document.fullscreenElement && el?.requestFullscreen) {
       el.requestFullscreen().catch(() => {});
