@@ -4,11 +4,20 @@ import { generateVideoFilename, getSupportedMimeType, deliverVideo } from '../ut
 
 const EXPORT_FPS = 30;
 const FRAME_DURATION_MS = 1500;
-// H.264 baseline 3.1 (compatível com tudo) suporta até 1280x720@30 — o frame
-// do export é reduzido pra caber nesse envelope (e dimensões PARES, exigência
-// do codec).
-const MAX_W = 1280;
-const MAX_H = 720;
+// Perfis tentados em ordem: 1080p High (nítido) → 720p Baseline (fallback
+// universal). Dimensões sempre PARES (exigência do H.264).
+const PROFILES = [
+  { maxW: 1920, maxH: 1080, codec: 'avc1.640028', bitrate: 8_000_000 }, // High 4.0
+  { maxW: 1280, maxH: 720,  codec: 'avc1.42001f', bitrate: 4_000_000 }, // Baseline 3.1
+];
+
+function fitEven(srcW, srcH, maxW, maxH) {
+  const scale = Math.min(1, maxW / srcW, maxH / srcH);
+  return {
+    w: Math.floor((srcW * scale) / 2) * 2,
+    h: Math.floor((srcH * scale) / 2) * 2,
+  };
+}
 
 function waitFrame() {
   return new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
@@ -18,22 +27,28 @@ function waitFrame() {
 // com timestamp exato e monta o MP4 nós mesmos — determinístico em Chrome,
 // Android e Safari/iOS 16.4+. (O MediaRecorder do Safari gerava MP4 corrompido
 // — preto e 0s — a partir de canvas.captureStream.)
-async function createWebCodecsRecorder(width, height) {
+async function createWebCodecsRecorder(srcW, srcH) {
   if (typeof window === 'undefined' || typeof window.VideoEncoder === 'undefined' || typeof window.VideoFrame === 'undefined') return null;
-  const config = {
-    codec: 'avc1.42001f', // H.264 Baseline 3.1
-    width,
-    height,
-    bitrate: 2_500_000,
-    framerate: EXPORT_FPS,
-    avc: { format: 'avc' },
-  };
-  try {
-    const support = await window.VideoEncoder.isConfigSupported(config);
-    if (!support?.supported) return null;
-  } catch {
-    return null;
+  // Escolhe o melhor perfil suportado pelo aparelho (1080p → 720p)
+  let config = null;
+  let width = 0;
+  let height = 0;
+  for (const prof of PROFILES) {
+    const dims = fitEven(srcW, srcH, prof.maxW, prof.maxH);
+    const candidate = {
+      codec: prof.codec,
+      width: dims.w,
+      height: dims.h,
+      bitrate: prof.bitrate,
+      framerate: EXPORT_FPS,
+      avc: { format: 'avc' },
+    };
+    try {
+      const support = await window.VideoEncoder.isConfigSupported(candidate);
+      if (support?.supported) { config = candidate; width = dims.w; height = dims.h; break; }
+    } catch { /* tenta o próximo */ }
   }
+  if (!config) return null;
   const { Muxer, ArrayBufferTarget } = await import('mp4-muxer');
   const muxer = new Muxer({
     target: new ArrayBufferTarget(),
@@ -53,6 +68,8 @@ async function createWebCodecsRecorder(width, height) {
   return {
     kind: 'webcodecs',
     mimeType: 'video/mp4',
+    width,
+    height,
     addFrame(canvas) {
       if (encodeError) throw encodeError;
       const vf = new window.VideoFrame(canvas, {
@@ -98,7 +115,7 @@ function createMediaRecorderFallback(canvas) {
       else if (typeof stream.requestFrame === 'function') stream.requestFrame();
     } catch { /* noop */ }
   };
-  const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2_500_000 });
+  const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 6_000_000 });
   const chunks = [];
   recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
   const stopped = new Promise((resolve) => { recorder.onstop = resolve; });
@@ -153,9 +170,11 @@ export function useVideoExport(stageRef, frames, fieldType) {
       const firstCanvas = firstLayer.getCanvas()._canvas;
       const srcW = firstCanvas.width;
       const srcH = firstCanvas.height;
-      const scale = Math.min(1, MAX_W / srcW, MAX_H / srcH);
-      const w = Math.floor((srcW * scale) / 2) * 2;
-      const h = Math.floor((srcH * scale) / 2) * 2;
+      // WebCodecs escolhe o melhor perfil (1080p→720p); fallback usa 1080p
+      const wcRec = await createWebCodecsRecorder(srcW, srcH);
+      const fallbackDims = fitEven(srcW, srcH, 1920, 1080);
+      const w = wcRec ? wcRec.width : fallbackDims.w;
+      const h = wcRec ? wcRec.height : fallbackDims.h;
 
       const offscreen = document.createElement('canvas');
       offscreen.width = w;
@@ -169,7 +188,7 @@ export function useVideoExport(stageRef, frames, fieldType) {
       const ctx = offscreen.getContext('2d');
 
       // Gravador: WebCodecs (preferido) ou MediaRecorder (fallback)
-      const rec = (await createWebCodecsRecorder(w, h)) || createMediaRecorderFallback(offscreen);
+      const rec = wcRec || createMediaRecorderFallback(offscreen);
       if (!rec) {
         const { notify } = await import('../../../lib/notify');
         notify.error('Seu navegador não suporta exportação de vídeo.');
