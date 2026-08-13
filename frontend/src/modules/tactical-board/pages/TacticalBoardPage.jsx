@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Users, UserPlus, ArrowRight, Pencil, LayoutGrid,
-  Save, FolderOpen, Film, Undo2, Redo2, Trash2, Eye, Maximize2, Minimize2,
+  Save, FolderOpen, Film, Undo2, Redo2, Trash2, Eye,
   Keyboard, Pause, Plus, X, Cone, Smartphone, ArrowLeft, ChevronUp,
   PenLine, Square as SquareIcon, Circle as CircleIcon, Type, RotateCcw, RotateCw,
 } from 'lucide-react';
@@ -11,6 +11,7 @@ import { useClub } from '../../../contexts/ClubContext';
 import { useIsMobile } from '../../../hooks/useIsMobile';
 import { useSportConfig } from '../../../hooks/useSportConfig';
 import { notify } from '../../../lib/notify';
+import { onNativeBackButton } from '../../../lib/platform';
 import TacticalCanvas from '../components/canvas/TacticalCanvas';
 import { ROTATABLE_MARKERS } from '../components/canvas/MarkerToken';
 import FrameControls from '../components/toolbar/FrameControls';
@@ -149,16 +150,55 @@ export default function TacticalBoardPage() {
   const displayDrawings = board.currentFrame.drawings || [];
   const nextFrameElements = board.nextFrame?.elements || null;
 
-  // ── Fullscreen ──
-  const toggleFullscreen = useCallback(() => {
-    if (!document.fullscreenElement) containerRef.current?.requestFullscreen?.().then(() => setIsFullscreen(true)).catch(() => {});
-    else document.exitFullscreen?.().then(() => setIsFullscreen(false)).catch(() => {});
+  // ── Tela cheia / Saída ──
+  // Ao ENTRAR pedimos tela cheia de verdade (Fullscreen API) onde há suporte —
+  // navegador, notebook, TV, tablet. Pedimos no <html> (document.documentElement),
+  // NÃO só no container do quadro: assim modais e toasts (react-modal /
+  // react-hot-toast, que renderizam via portal no <body>) ficam DENTRO do
+  // elemento em tela cheia e aparecem normalmente. (Fullscreen só no container
+  // escondia Salvar/Carregar/Exportar e os avisos — bug reportado.)
+  // Perder a tela cheia (Esc, modal, gesto do SO) NÃO fecha o quadro: ele segue
+  // ocupando a tela via layout fixed inset:0 e 100% funcional. Sair é só pelo
+  // botão voltar — evita perder trabalho não salvo por um Esc acidental.
+  const leavingRef = useRef(false);
+
+  const leaveBoard = useCallback(() => {
+    if (leavingRef.current) return;
+    leavingRef.current = true;
+    if (document.fullscreenElement) { try { document.exitFullscreen?.(); } catch { /* noop */ } }
+    navigate('/home');
+  }, [navigate]);
+  const exitToHome = leaveBoard;
+
+  const requestFs = useCallback(() => {
+    const el = document.documentElement;
+    if (!document.fullscreenElement && el?.requestFullscreen) {
+      el.requestFullscreen().catch(() => {});
+    }
   }, []);
+
+  // Pede tela cheia ao entrar. Browsers exigem gesto do usuário, então tentamos
+  // no mount E no primeiro toque/clique no quadro (garantido).
+  useEffect(() => {
+    requestFs();
+    const onFirstGesture = () => { requestFs(); window.removeEventListener('pointerdown', onFirstGesture); };
+    window.addEventListener('pointerdown', onFirstGesture);
+    return () => window.removeEventListener('pointerdown', onFirstGesture);
+  }, [requestFs]);
+
+  // Só acompanha o estado da tela cheia (referência interna). NÃO navegamos ao
+  // perdê-la — ver comentário acima: o quadro segue funcional em modo janela.
   useEffect(() => {
     const handler = () => setIsFullscreen(!!document.fullscreenElement);
     document.addEventListener('fullscreenchange', handler);
     return () => document.removeEventListener('fullscreenchange', handler);
   }, []);
+
+  // Botão físico "voltar" do celular (app nativo): sai do quadro.
+  useEffect(() => {
+    const cleanup = onNativeBackButton(() => { leaveBoard(); });
+    return cleanup;
+  }, [leaveBoard]);
 
   // ── Aviso de alterações não salvas ao fechar a aba ──
   useEffect(() => {
@@ -329,11 +369,10 @@ export default function TacticalBoardPage() {
       else if (e.key === 'ArrowRight') board.goToNextFrame();
       else if (e.key === 'ArrowLeft')  board.goToPrevFrame();
       else if (e.key === 'Escape') { setPaletteOpen(false); setOpenSection(null); clearDrawingMode(); setShortcutsOpen(false); }
-      else if (e.key === 'F11') { e.preventDefault(); toggleFullscreen(); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [board, playback, handleRemoveSelected, toggleFullscreen, clearDrawingMode, handleSaveClick]);
+  }, [board, playback, handleRemoveSelected, clearDrawingMode, handleSaveClick]);
 
   const formations = getFormationsForFieldType(board.fieldType);
   const selectedElement = useMemo(
@@ -387,15 +426,36 @@ export default function TacticalBoardPage() {
     hideTimerRef.current = setTimeout(() => setChromeVisible(false), 3500);
   }, []);
 
+  // Toque no campo vazio ALTERNA o chrome: some pra deixar só o campo; toca de
+  // novo e ele volta. Diferente do reveal por atividade (que só mostra).
+  // IMPORTANTE: no touch, o Konva dispara onTap E onClick pro mesmo toque, então
+  // deduplicamos chamadas em <400ms (senão alternaria 2x e voltaria ao mesmo).
+  const lastTapRef = useRef(0);
+  const toggleChromeOnTap = useCallback(() => {
+    const now = Date.now();
+    if (now - lastTapRef.current < 400) return;
+    lastTapRef.current = now;
+    setChromeVisible((v) => {
+      const next = !v;
+      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+      if (next) hideTimerRef.current = setTimeout(() => setChromeVisible(false), 3500);
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     revealChrome();
-    const onActivity = () => revealChrome();
+    // NÃO revelamos no pointerdown nem no toque — senão o toque no campo (que
+    // serve pra ESCONDER a barra) a re-revelaria. Só o MOUSE se movendo (desktop)
+    // e o teclado revelam.
+    const onActivity = (e) => {
+      if (e && e.type === 'pointermove' && e.pointerType !== 'mouse') return;
+      revealChrome();
+    };
     window.addEventListener('pointermove', onActivity);
-    window.addEventListener('pointerdown', onActivity);
     window.addEventListener('keydown', onActivity);
     return () => {
       window.removeEventListener('pointermove', onActivity);
-      window.removeEventListener('pointerdown', onActivity);
       window.removeEventListener('keydown', onActivity);
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
     };
@@ -465,6 +525,7 @@ export default function TacticalBoardPage() {
           onDrawingSelect={handleSelectDrawing}
           onDrawingComplete={handleDrawingComplete}
           onDrawingUpdate={board.updateDrawing}
+          onBackgroundTap={toggleChromeOnTap}
           selectedElementId={board.selectedElementId}
           selectedDrawingId={board.selectedDrawingId}
         />
@@ -521,7 +582,7 @@ export default function TacticalBoardPage() {
       {/* ═══ CHROME FLUTUANTE (auto-hide) ═══ */}
       {/* Topo-esquerda: voltar + nome da jogada */}
       <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 25, display: 'flex', alignItems: 'center', gap: 8, ...chromeStyle }}>
-        <FloatBtn onClick={() => navigate('/home')} title="Voltar ao início">
+        <FloatBtn onClick={exitToHome} title="Voltar ao início">
           <ArrowLeft size={18} />
         </FloatBtn>
         <div style={{
@@ -540,7 +601,7 @@ export default function TacticalBoardPage() {
         </div>
       </div>
 
-      {/* Topo-direita: vista, atalhos, tela cheia */}
+      {/* Topo-direita: vista, atalhos */}
       <div style={{ position: 'absolute', top: 10, right: 10, zIndex: 25, display: 'flex', gap: 6, ...chromeStyle }}>
         <FloatBtn onClick={() => setOpenSection(openSection === 'view' ? null : 'view')} title="Vista / tipo de campo" active={openSection === 'view'}>
           <Eye size={17} />
@@ -550,9 +611,6 @@ export default function TacticalBoardPage() {
             <Keyboard size={17} />
           </FloatBtn>
         )}
-        <FloatBtn onClick={toggleFullscreen} title={isFullscreen ? 'Sair tela cheia (F11)' : 'Tela cheia (F11)'}>
-          {isFullscreen ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
-        </FloatBtn>
       </div>
 
       {/* Rail de ferramentas — esquerda, centralizado vertical */}
@@ -699,7 +757,7 @@ export default function TacticalBoardPage() {
       )}
 
       {/* Gate de paisagem no mobile */}
-      {isMobile && isPortrait && <LandscapeGate onBack={() => navigate('/home')} />}
+      {isMobile && isPortrait && <LandscapeGate onBack={exitToHome} />}
 
       {/* Modais */}
       <SavePlayModal

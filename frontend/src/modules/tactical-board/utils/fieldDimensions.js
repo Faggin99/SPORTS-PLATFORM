@@ -99,15 +99,21 @@ export function toPercent(pixel, totalPixels) {
   return (pixel / totalPixels) * 100;
 }
 
-// Get aspect ratio for a given field type and view
+// Get aspect ratio for a given field type and view.
+// TODOS os campos usam a proporção do FUTSAL (2:1) — assim qualquer modalidade
+// preenche a tela inteira no modo imersivo (sem barras pretas nas laterais),
+// como o futsal já fazia. As marcações (desenhadas em % 0-100) se ajustam à
+// largura maior; o círculo central usa raio pela ALTURA, então continua redondo.
+// (decisão do dono, 2026-08)
 export function getAspectRatio(fieldType, fieldView = FIELD_VIEWS.FULL) {
+  const ft = FIELD_TYPES.FUTSAL;
   if (fieldView === FIELD_VIEWS.LEFT_HALF || fieldView === FIELD_VIEWS.RIGHT_HALF) {
-    return HALF_FIELD_ASPECT_RATIOS[fieldType];
+    return HALF_FIELD_ASPECT_RATIOS[ft];
   }
   if (fieldView === FIELD_VIEWS.THIRD_LEFT || fieldView === FIELD_VIEWS.THIRD_RIGHT) {
-    return THIRD_FIELD_ASPECT_RATIOS[fieldType];
+    return THIRD_FIELD_ASPECT_RATIOS[ft];
   }
-  return FIELD_ASPECT_RATIOS[fieldType];
+  return FIELD_ASPECT_RATIOS[ft];
 }
 
 // Calculate canvas dimensions that fit a container while maintaining aspect ratio

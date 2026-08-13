@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ícone do splash como VECTOR (nítido em qualquer densidade/tamanho — o
+     mipmap PNG de 432px era ampliado pelo sistema no Android 12+ e ficava
+     desfocado). Glifo "T" + faísca da marca, dentro da zona segura do círculo
+     do splash (Ø 72dp do viewport 108). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Barra do T -->
+    <path android:fillColor="#FFFFFF" android:pathData="M29.1,38.8 h39.4 v10.8 h-39.4 z"/>
+    <!-- Haste do T -->
+    <path android:fillColor="#FFFFFF" android:pathData="M43.1,38.8 h11.4 v38.5 h-11.4 z"/>
+    <!-- Faísca lime -->
+    <path android:fillColor="#C8FF00" android:pathData="M70.3,30.7 L70.3,41.5 L78.9,36.1 Z"/>
+</vector>

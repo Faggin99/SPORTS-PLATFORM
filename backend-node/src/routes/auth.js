@@ -15,6 +15,13 @@ const { OAuth2Client } = require('google-auth-library');
 
 const googleClient = process.env.GOOGLE_CLIENT_ID ? new OAuth2Client(process.env.GOOGLE_CLIENT_ID) : null;
 
+// Sign in with Apple: valida o identityToken (JWT RS256) contra o JWKS público
+// da Apple. Audience = bundle id do app (login nativo iOS); o Services ID
+// (login web, opcional) entra via APPLE_SERVICES_ID no .env quando existir.
+const { createRemoteJWKSet, jwtVerify } = require('jose');
+const APPLE_JWKS = createRemoteJWKSet(new URL('https://appleid.apple.com/auth/keys'));
+const APPLE_AUDIENCES = ['com.faggin.tactiplan', process.env.APPLE_SERVICES_ID].filter(Boolean);
+
 const router = express.Router();
 
 function generateToken(user) {
@@ -511,6 +518,103 @@ router.post('/google', loginLimiter, async (req, res) => {
   } catch (err) {
     console.error('Google auth error:', err?.message);
     res.status(401).json({ error: 'Falha ao autenticar com Google' });
+  }
+});
+
+// POST /api/auth/apple — Sign in with Apple (obrigatório na App Store por
+// oferecermos login Google). Recebe o identityToken do fluxo nativo iOS,
+// valida assinatura/iss/aud e autentica/cria conta — espelho do /google.
+router.post('/apple', loginLimiter, async (req, res) => {
+  try {
+    const { identityToken, name: givenName } = req.body || {};
+    if (!identityToken) return res.status(400).json({ error: 'Missing identityToken' });
+
+    let payload;
+    try {
+      const verified = await jwtVerify(identityToken, APPLE_JWKS, {
+        issuer: 'https://appleid.apple.com',
+        audience: APPLE_AUDIENCES,
+      });
+      payload = verified.payload;
+    } catch (e) {
+      console.error('Apple token verify error:', e?.message);
+      return res.status(401).json({ error: 'Token da Apple inválido' });
+    }
+
+    const appleId = payload.sub;
+    // Apple manda o email no token (real ou relay @privaterelay.appleid.com);
+    // email_verified pode vir como boolean ou string "true".
+    const email = String(payload.email || '').toLowerCase();
+    const emailVerified = payload.email_verified === true || payload.email_verified === 'true';
+    if (!appleId) return res.status(401).json({ error: 'Token da Apple sem subject' });
+
+    // Procura por apple_id; senão vincula por email verificado (LGPD: ignora removidas)
+    let userRes = await query(
+      `SELECT id, email, name, phone, bio, profile_photo, role FROM users
+       WHERE deleted_at IS NULL AND (apple_id = $1 OR ($2 <> '' AND $3 = TRUE AND email = $2))
+       LIMIT 1`,
+      [appleId, email, emailVerified]
+    );
+
+    let user;
+    if (userRes.rows.length > 0) {
+      user = userRes.rows[0];
+      await query(
+        `UPDATE users SET apple_id = COALESCE(apple_id, $1),
+                auth_provider = CASE WHEN apple_id IS NULL AND google_id IS NULL THEN 'apple' ELSE auth_provider END
+         WHERE id = $2`,
+        [appleId, user.id]
+      );
+    } else {
+      if (!email) {
+        // Sem email não dá pra criar conta (caso raro: usuário revogou o compartilhamento)
+        return res.status(401).json({ error: 'A Apple não compartilhou seu email. Remova o app em Ajustes > Apple ID > Início de Sessão e Segurança e tente de novo.' });
+      }
+      const name = (givenName || '').trim() || email.split('@')[0];
+      const role = isAdmin(email) ? 'admin' : 'coach';
+      const insertRes = await query(
+        `INSERT INTO users (email, name, apple_id, auth_provider, role, terms_accepted_at, terms_version)
+         VALUES ($1, $2, $3, 'apple', $4, now(), '2026-05-11')
+         RETURNING id, email, name, phone, bio, profile_photo, role`,
+        [email, name, appleId, role]
+      );
+      user = insertRes.rows[0];
+
+      const wsName = name || 'Minha conta';
+      const wsRes = await query(
+        `INSERT INTO workspaces (name, owner_id) VALUES ($1, $2) RETURNING id`,
+        [wsName, user.id]
+      );
+      const workspaceId = wsRes.rows[0].id;
+
+      if (role !== 'admin') {
+        if (isLifetime(email)) {
+          await query(
+            `INSERT INTO subscriptions (user_id, workspace_id, plan_id, status, current_period_start, current_period_end)
+             VALUES ($1, $2, 'lifetime', 'active', now(), now() + interval '100 years')`,
+            [user.id, workspaceId]
+          );
+        } else {
+          const trialEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+          await query(
+            `INSERT INTO subscriptions (user_id, workspace_id, plan_id, status, trial_ends_at, current_period_start, current_period_end)
+             VALUES ($1, $2, 'pro', 'trialing', $3, now(), $3)`,
+            [user.id, workspaceId, trialEnd]
+          );
+        }
+      }
+
+      const appUrl = process.env.APP_BASE_URL || 'https://app.tactiplan.faggin.com.br';
+      sendWelcomeEmail({ to: user.email, name: user.name, trialDaysLeft: 30, appUrl })
+        .catch(err => console.error('sendWelcomeEmail (apple) error:', err?.message));
+    }
+
+    user.tenant_id = user.id;
+    const token = generateToken(user);
+    res.json({ token, user });
+  } catch (err) {
+    console.error('Apple auth error:', err?.message);
+    res.status(401).json({ error: 'Falha ao autenticar com Apple' });
   }
 });
 

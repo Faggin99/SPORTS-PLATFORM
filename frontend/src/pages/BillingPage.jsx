@@ -5,7 +5,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { Button } from '../components/common/Button';
 import { api } from '../services/api';
 import { notify } from '../lib/notify';
-import { openExternalUrl } from '../lib/platform';
+import { openExternalUrl, isNative, getPlatform } from '../lib/platform';
 
 function formatPrice(cents, currency = 'BRL') {
   if (!cents) return 'Grátis';
@@ -45,6 +45,10 @@ export function BillingPage() {
   }, []);
 
   async function startCheckout(planId) {
+    // Compliance lojas (Apple 3.1.1 / Google): não vendemos assinatura digital
+    // DENTRO do app. As CTAs de compra ficam escondidas no nativo; este guard
+    // é só cinto de segurança caso algo chame o checkout.
+    if (isNative()) return;
     // Se o usuário está testando o Clube e quer assinar Pro, alerta o que perde.
     const isTryingClube = sub?.plan_id === 'clube' || sub?.plan_id === 'clube_annual';
     const isPickingPro = planId === 'pro' || planId === 'pro_annual';
@@ -95,6 +99,8 @@ export function BillingPage() {
     return <div style={{ padding: 32, color: colors.textSecondary }}>Carregando…</div>;
   }
 
+  const native = isNative();
+
   return (
     <div style={{ padding: '1.5rem 2rem', maxWidth: 960, margin: '0 auto', width: '100%' }}>
       <h1 style={{ fontSize: '1.5rem', fontWeight: 700, color: colors.text, margin: 0 }}>Assinatura</h1>
@@ -102,9 +108,11 @@ export function BillingPage() {
         Gerencie seu plano e pagamentos.
       </p>
 
-      <CurrentSubscription sub={sub} colors={colors} onCancel={cancelSubscription} />
+      <CurrentSubscription sub={sub} colors={colors} onCancel={cancelSubscription} native={native} />
 
-      {(() => {
+      {native && <NativeManageNotice colors={colors} />}
+
+      {!native && (() => {
         const paidPlans = plans.filter(p =>
           p.id !== 'lifetime'
           && p.id !== 'free'
@@ -137,7 +145,36 @@ export function BillingPage() {
         );
       })()}
 
-      <AdvancedActions colors={colors} />
+      {!native && <AdvancedActions colors={colors} />}
+    </div>
+  );
+}
+
+// Aviso no app NATIVO no lugar da grade de planos. As lojas (Apple 3.1.1 /
+// Google Play) não permitem vender assinatura digital dentro do app nem levar
+// a checkout externo. Então no app só informamos (texto puro, sem botão/link).
+// No iOS a Apple é MAIS rígida: nem citar o site/URL de compra — texto 100%
+// neutro. No Android citamos o site (tolerado pelo Play).
+function NativeManageNotice({ colors }) {
+  const isIos = getPlatform() === 'ios';
+  return (
+    <div style={{ marginTop: 24, padding: 16, backgroundColor: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 12 }}>
+      <div style={{ fontSize: '0.9rem', fontWeight: 600, color: colors.text, marginBottom: 6 }}>
+        Planos e pagamentos
+      </div>
+      {isIos ? (
+        <p style={{ fontSize: '0.85rem', color: colors.textSecondary, margin: 0, lineHeight: 1.55 }}>
+          A assinatura da sua conta é gerenciada fora do app. Seu acesso é liberado
+          automaticamente aqui assim que a assinatura estiver ativa.
+        </p>
+      ) : (
+        <p style={{ fontSize: '0.85rem', color: colors.textSecondary, margin: 0, lineHeight: 1.55 }}>
+          As assinaturas do TactiPlan são gerenciadas no site. Acesse{' '}
+          <strong style={{ color: colors.text }}>tactiplan.faggin.com.br</strong> pelo navegador
+          para assinar ou trocar de plano. Seu acesso é liberado automaticamente aqui no app
+          assim que a assinatura estiver ativa.
+        </p>
+      )}
     </div>
   );
 }
@@ -192,7 +229,7 @@ function AdvancedActions({ colors }) {
   );
 }
 
-function CurrentSubscription({ sub, colors, onCancel }) {
+function CurrentSubscription({ sub, colors, onCancel, native }) {
   if (!sub) {
     return (
       <div style={{ padding: 20, backgroundColor: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 12 }}>
@@ -201,7 +238,9 @@ function CurrentSubscription({ sub, colors, onCancel }) {
           <strong style={{ color: colors.text }}>Sem assinatura ativa</strong>
         </div>
         <p style={{ fontSize: '0.875rem', color: colors.textSecondary, margin: 0 }}>
-          Escolha um plano abaixo para começar a usar todos os recursos.
+          {native
+            ? 'Sua assinatura é gerenciada no site — veja como continuar logo abaixo.'
+            : 'Escolha um plano abaixo para começar a usar todos os recursos.'}
         </p>
       </div>
     );
@@ -267,8 +306,9 @@ function CurrentSubscription({ sub, colors, onCancel }) {
         </div>
       )}
 
-      {/* Add-ons (só pra assinatura paga ativa) */}
-      {sub.status === 'active' && sub.plan_id !== 'lifetime' && !sub.is_admin && (
+      {/* Add-ons (só pra assinatura paga ativa) — escondidos no app nativo
+          (compra de add-on também é venda digital: fica só na web). */}
+      {!native && sub.status === 'active' && sub.plan_id !== 'lifetime' && !sub.is_admin && (
         <AddonsSection colors={colors} />
       )}
 

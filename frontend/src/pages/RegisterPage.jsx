@@ -6,6 +6,7 @@ import { Input } from '../components/common/Input';
 import { Button } from '../components/common/Button';
 import { authService } from '../services/authService';
 import { GoogleSignInButton } from '../components/auth/GoogleSignInButton';
+import { AppleSignInButton } from '../components/auth/AppleSignInButton';
 
 export function RegisterPage() {
   const { colors } = useTheme();
@@ -121,6 +122,9 @@ export function RegisterPage() {
                 disabledMessage="Aceite os Termos e a Política de Privacidade acima antes de continuar com Google."
                 onDisabledClick={flashAcceptRequirement}
               />
+            </div>
+            <div style={{ marginBottom: '1rem' }}>
+              <AppleSignInButton label="Cadastrar com a Apple" />
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: '1rem', color: colors.textSecondary, fontSize: '0.75rem' }}>
               <div style={{ flex: 1, height: 1, backgroundColor: colors.border }} />

@@ -39,7 +39,30 @@ function hexRgb(hex) {
   return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
 }
 
-export function generateClubReportPDF({
+// Entrega do PDF: no navegador baixa direto; no app nativo (Capacitor WebView o
+// `doc.save()` não funciona) grava em Cache e abre a folha de compartilhamento.
+async function deliverPdf(doc, filename) {
+  const { isNative } = await import('../lib/platform');
+  if (isNative()) {
+    const [{ Filesystem, Directory }, { Share }] = await Promise.all([
+      import('@capacitor/filesystem'),
+      import('@capacitor/share'),
+    ]);
+    const dataUri = doc.output('datauristring'); // data:application/pdf;...;base64,XXXX
+    const base64 = dataUri.slice(dataUri.indexOf('base64,') + 'base64,'.length);
+    const written = await Filesystem.writeFile({ path: filename, data: base64, directory: Directory.Cache });
+    try {
+      await Share.share({ title: filename, url: written.uri, dialogTitle: 'Compartilhar relatório' });
+    } catch (err) {
+      // Usuário fechou o share sheet — não é erro
+      if (!/cancel/i.test(String(err?.message || err))) throw err;
+    }
+    return;
+  }
+  doc.save(filename);
+}
+
+export async function generateClubReportPDF({
   athletes = [],
   trainingStats = null,
   gameStats = null,
@@ -273,6 +296,6 @@ export function generateClubReportPDF({
 
   paginate(doc);
   const safe = (s) => String(s || '').replace(/\s+/g, '_').replace(/[^\w-]/g, '');
-  doc.save(`Relatorio_${safe(clubName)}_${safe(periodLabel || 'periodo')}.pdf`);
+  await deliverPdf(doc, `Relatorio_${safe(clubName)}_${safe(periodLabel || 'periodo')}.pdf`);
   } finally { resetColor(); }
 }

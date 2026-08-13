@@ -91,12 +91,23 @@ const VALID_MODALITIES = ['football_11', 'football_7', 'futsal'];
 // POST /api/clubs
 router.post('/', async (req, res) => {
   try {
-    const { name, description, modality } = req.body;
+    const { name, description, modality, primary_color, secondary_color } = req.body;
     if (!name) {
       return res.status(400).json({ error: 'Club name is required' });
     }
     if (modality && !VALID_MODALITIES.includes(modality)) {
       return res.status(400).json({ error: 'Modalidade inválida' });
+    }
+    // Cores em formato HEX #RRGGBB ou #RRGGBBAA, vazio/null = sem cor
+    const HEX_RE = /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/;
+    const validColor = (v) => v === '' || v === null || v === undefined ? null : (HEX_RE.test(v) ? v : undefined);
+    const pc = validColor(primary_color);
+    const sc = validColor(secondary_color);
+    if (pc === undefined) {
+      return res.status(400).json({ error: 'primary_color em formato inválido (esperado #RRGGBB)' });
+    }
+    if (sc === undefined) {
+      return res.status(400).json({ error: 'secondary_color em formato inválido (esperado #RRGGBB)' });
     }
 
     if (!req.user.workspaceId) {
@@ -123,10 +134,10 @@ router.post('/', async (req, res) => {
     }
 
     const result = await query(
-      `INSERT INTO clubs (name, description, workspace_id, modality)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO clubs (name, description, workspace_id, modality, primary_color, secondary_color)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
-      [name, description || null, req.user.workspaceId, modality || 'football_11']
+      [name, description || null, req.user.workspaceId, modality || 'football_11', pc, sc]
     );
     const club = result.rows[0];
 

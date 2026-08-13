@@ -34,7 +34,10 @@ export function Layout({ children }) {
     flexDirection: 'column',
     minHeight: '100vh',
     ...(fixedViewport ? { height: '100vh' } : {}),
-    backgroundColor: 'transparent',
+    // Rotas de viewport fixo (ex: Programação) usam fundo OPACO pra o conteúdo
+    // preencher a tela toda — sem o gramado do StadiumBackground aparecendo na
+    // metade de baixo quando o conteúdo é curto (efeito de "tela dividida").
+    backgroundColor: fixedViewport ? colors.background : 'transparent',
   };
 
   const contentStyle = {

@@ -374,7 +374,13 @@ export function TrainingPage() {
     gridTemplateColumns: isMobile ? undefined : 'repeat(7, 1fr)',
     gridAutoRows: isMobile ? undefined : '1fr',
     gap: isMobile ? '0.35rem' : '0.5rem',
-    height: isMobile ? 'auto' : '100%',
+    // Mobile também preenche a altura disponível (flex:1): os blocos do dia
+    // (que já têm flex:1) distribuem o espaço em telas altas (tablet/iPhone
+    // grande) em vez de deixar um vazio embaixo. Em telas curtas o conteúdo
+    // passa da altura e o scroll segue normal.
+    flex: isMobile ? 1 : undefined,
+    minHeight: 0,
+    height: isMobile ? undefined : '100%',
     overflow: 'auto',
     width: '100%',
   };
@@ -384,7 +390,8 @@ export function TrainingPage() {
     flexDirection: 'column',
     gap: '0.3rem',
     minHeight: 0,
-    height: isMobile ? 'auto' : '100%',
+    flex: isMobile ? 1 : undefined,
+    height: isMobile ? undefined : '100%',
     width: '100%',
   };
 

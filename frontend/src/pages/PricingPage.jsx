@@ -5,6 +5,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/common/Button';
 import { api } from '../services/api';
+import { isNative } from '../lib/platform';
 
 function formatPrice(cents, currency = 'BRL') {
   if (!cents) return 'Grátis';
@@ -35,6 +36,12 @@ export function PricingPage() {
   }, [isAuthenticated]);
 
   async function handleSelect(plan) {
+    // App nativo: não vendemos assinatura dentro do app (Apple 3.1.1 / Google).
+    // Manda pra tela de Assinatura, que mostra como assinar no site.
+    if (isNative()) {
+      navigate('/billing');
+      return;
+    }
     // Não logado: vai pro cadastro
     if (!isAuthenticated) {
       navigate('/register');

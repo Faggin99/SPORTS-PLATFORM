@@ -203,7 +203,8 @@ export function TrainingStatsPage() {
 
   // Styles
   const pageStyle = {
-    display: 'flex', flexDirection: 'column', minHeight: '100%',
+    // flex:1 — preenche a altura do main em telas altas (sem vazio embaixo).
+    display: 'flex', flexDirection: 'column', minHeight: '100%', flex: 1,
     padding: isMobile ? '0.75rem 0.5rem' : '0.75rem 1rem', gap: '0.5rem',
   };
   const titleStyle = { fontSize: '1.25rem', fontWeight: 700, color: colors.text, margin: 0 };
@@ -234,7 +235,9 @@ export function TrainingStatsPage() {
   const statContentStyle = { flex: 1, minWidth: 0 };
   const statLabelStyle = { fontSize: isMobile ? '0.8rem' : '0.7rem', color: colors.textSecondary, marginBottom: '0.15rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
   const statValueStyle = { fontSize: isMobile ? '1.35rem' : '1.25rem', fontWeight: 700, color: colors.text, lineHeight: 1 };
-  const chartsGridStyle = { display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(280px, 1fr))', gap: '0.75rem' };
+  // flex:1 + auto-rows 1fr: os cards de gráfico esticam pra preencher a altura
+  // que sobrar (telas altas), em vez de deixar um vazio com só o fundo.
+  const chartsGridStyle = { display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(280px, 1fr))', gridAutoRows: '1fr', gap: '0.75rem', flex: 1, minHeight: 0 };
   const chartCardStyle = { padding: '0.75rem', display: 'flex', flexDirection: 'column', minHeight: '280px', position: 'relative' };
   const chartTitleStyle = { fontSize: '0.875rem', fontWeight: 600, color: colors.text, marginBottom: '0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 };
   const chartContentStyle = { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'visible' };

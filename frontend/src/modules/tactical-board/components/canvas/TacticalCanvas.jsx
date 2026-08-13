@@ -27,6 +27,7 @@ const TacticalCanvas = forwardRef(function TacticalCanvas({
   onDrawingSelect,
   onDrawingComplete,
   onDrawingUpdate,
+  onBackgroundTap,
   selectedElementId,
   selectedDrawingId,
 }, ref) {
@@ -111,8 +112,10 @@ const TacticalCanvas = forwardRef(function TacticalCanvas({
     if (e.target === stageRef.current || e.target.getParent()?.attrs?.name === 'field-background') {
       if (onElementSelect) onElementSelect(null);
       if (onDrawingSelect) onDrawingSelect(null);
+      // Toque no campo vazio: alterna o chrome (esconde a barra, deixa só o campo).
+      if (onBackgroundTap) onBackgroundTap();
     }
-  }, [onElementSelect, onDrawingSelect, drawingMode]);
+  }, [onElementSelect, onDrawingSelect, onBackgroundTap, drawingMode]);
 
   // ── Draft helpers ──
   const cancelDraft = useCallback(() => {

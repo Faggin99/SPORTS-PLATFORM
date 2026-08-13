@@ -36,3 +36,4 @@ frontend/ios/App/Podfile.lock
 # frontend/mobile-artifacts/*.aab
 # frontend/mobile-artifacts/*.apk
 ota/
+frontend/mobile-artifacts/
