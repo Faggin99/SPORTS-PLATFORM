@@ -95,6 +95,10 @@ export function TrainingSummaryModal({ isOpen, onClose, session }) {
   };
 
   // Styles
+  // Telas estreitas (qualquer celular): a "folha A4" vira fluida e as duas
+  // colunas empilham — em mm fixo o conteúdo estourava a largura e cortava.
+  const isNarrow = typeof window !== 'undefined' && window.matchMedia('(max-width: 640px)').matches;
+
   const overlayStyle = {
     position: 'fixed',
     top: 0,
@@ -112,7 +116,7 @@ export function TrainingSummaryModal({ isOpen, onClose, session }) {
   const modalStyle = {
     backgroundColor: '#f5f5f5',
     borderRadius: '0.5rem',
-    width: '210mm',
+    width: 'min(210mm, 100%)',
     height: '95vh',
     maxWidth: '95vw',
     display: 'flex',
@@ -155,10 +159,12 @@ export function TrainingSummaryModal({ isOpen, onClose, session }) {
   };
 
   const pageStyle = {
-    width: '180mm', // Largura do conteúdo (210mm - 30mm de margem)
+    width: '100%',
+    maxWidth: '180mm', // "Folha A4" no desktop; fluida no celular
+    boxSizing: 'border-box',
     backgroundColor: '#ffffff',
     color: '#000000',
-    padding: '10mm 15mm 15mm 15mm', // Reduzido padding-top de 15mm para 10mm
+    padding: isNarrow ? '14px 14px 18px' : '10mm 15mm 15mm 15mm',
     boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
   };
 
@@ -209,18 +215,22 @@ export function TrainingSummaryModal({ isOpen, onClose, session }) {
 
   const twoColumnsStyle = {
     display: 'flex',
-    gap: '12px',
+    flexDirection: isNarrow ? 'column' : 'row',
+    gap: isNarrow ? '8px' : '12px',
     padding: '10px 12px',
     backgroundColor: '#f9fafb',
   };
 
-  const leftColumnStyle = {
+  const leftColumnStyle = isNarrow ? {
+    borderBottom: '2px solid #d1d5db',
+    paddingBottom: '8px',
+  } : {
     flex: 1,
     paddingRight: '12px',
     borderRight: '2px solid #d1d5db',
   };
 
-  const rightColumnStyle = {
+  const rightColumnStyle = isNarrow ? {} : {
     flex: 1,
     paddingLeft: '12px',
   };
