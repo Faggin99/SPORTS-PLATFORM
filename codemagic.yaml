@@ -23,8 +23,7 @@ workflows:
           - tactiplan-appstore
       node: 22
       xcode: latest
-      cocoapods: default
-      vars:
+            vars:
         # App da LOJA aponta pro backend de PRODUÇÃO
         VITE_API_URL: "https://app.tactiplan.faggin.com.br/api"
         APP_VERSION: "1.0.3"
@@ -42,10 +41,6 @@ workflows:
         script: |
           cd frontend
           npx cap sync ios
-      - name: CocoaPods
-        script: |
-          cd frontend/ios/App
-          pod install
       - name: Versão e número de build
         script: |
           cd frontend/ios/App
@@ -57,7 +52,7 @@ workflows:
       - name: Build IPA
         script: |
           xcode-project build-ipa \
-            --workspace frontend/ios/App/App.xcworkspace \
+            --project frontend/ios/App/App.xcodeproj \
             --scheme App
     artifacts:
       - build/ios/ipa/*.ipa
