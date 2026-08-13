@@ -65,6 +65,16 @@ export function useVideoExport(stageRef, frames, fieldType) {
       // Capture stream from the offscreen composite canvas
       const stream = offscreen.captureStream(EXPORT_FPS);
       captureStreamRef = stream;
+      // Safari/iOS: a captura "automática" por fps é bugada (gerava MP4 de 0s).
+      // requestFrame() captura o bitmap do canvas DIRETO a cada draw — método
+      // garantido em todos os browsers (no Chrome só adiciona frames extras).
+      const videoTrack = stream.getVideoTracks()[0];
+      const pushFrame = () => {
+        try {
+          if (videoTrack && typeof videoTrack.requestFrame === 'function') videoTrack.requestFrame();
+          else if (typeof stream.requestFrame === 'function') stream.requestFrame();
+        } catch { /* noop */ }
+      };
       const recorder = new MediaRecorder(stream, {
         mimeType,
         videoBitsPerSecond: 2500000,
@@ -82,6 +92,13 @@ export function useVideoExport(stageRef, frames, fieldType) {
           if (abortRef.current) { resolve(); return; }
           try {
             const blob = new Blob(chunks, { type: mimeType });
+            if (blob.size < 20000) {
+              // Gravação veio vazia (só cabeçalho) — não entrega arquivo inútil
+              const { notify } = await import('../../../lib/notify');
+              notify.error(`A gravação saiu vazia (${blob.size}b). Tente de novo; se persistir, reporte "erro V2".`);
+              resolve();
+              return;
+            }
             // Web: download direto; app nativo: share sheet (WhatsApp etc)
             await deliverVideo(blob, generateVideoFilename(playName, mimeType));
           } catch (err) {
@@ -103,6 +120,9 @@ export function useVideoExport(stageRef, frames, fieldType) {
         }
       }
 
+      // Desenha e captura o 1º frame ANTES de iniciar o recorder
+      compositeFrame();
+      pushFrame();
       recorder.start();
 
       const totalTransitions = frames.length - 1;
@@ -128,6 +148,7 @@ export function useVideoExport(stageRef, frames, fieldType) {
 
           // Composite all layers onto offscreen canvas
           compositeFrame();
+          pushFrame();
         }
 
         setProgress(((frameIdx + 1) / totalTransitions) * 100);
@@ -137,6 +158,7 @@ export function useVideoExport(stageRef, frames, fieldType) {
       const holdSteps = EXPORT_FPS;
       for (let i = 0; i < holdSteps && !abortRef.current; i++) {
         compositeFrame();
+        pushFrame();
         await waitFrame();
       }
 
