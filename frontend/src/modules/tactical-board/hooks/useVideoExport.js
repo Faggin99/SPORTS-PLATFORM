@@ -38,6 +38,9 @@ export function useVideoExport(stageRef, frames, fieldType) {
     setIsExporting(true);
     setProgress(0);
 
+    let offscreenEl = null;
+    let captureStreamRef = null;
+
     try {
       await new Promise((r) => setTimeout(r, 200));
 
@@ -50,10 +53,18 @@ export function useVideoExport(stageRef, frames, fieldType) {
       const offscreen = document.createElement('canvas');
       offscreen.width = w;
       offscreen.height = h;
+      // Safari/iOS só captura frames (captureStream) de canvas QUE ESTÁ no
+      // DOM e composita — fora do documento o MediaRecorder gera vídeo de 0s.
+      // Anexamos invisível (1px, quase transparente) durante a gravação.
+      offscreen.style.cssText =
+        'position:fixed;bottom:0;right:0;width:2px;height:2px;opacity:0.01;pointer-events:none;z-index:-1;';
+      document.body.appendChild(offscreen);
+      offscreenEl = offscreen;
       const ctx = offscreen.getContext('2d');
 
       // Capture stream from the offscreen composite canvas
       const stream = offscreen.captureStream(EXPORT_FPS);
+      captureStreamRef = stream;
       const recorder = new MediaRecorder(stream, {
         mimeType,
         videoBitsPerSecond: 2500000,
@@ -136,6 +147,11 @@ export function useVideoExport(stageRef, frames, fieldType) {
       const { notify } = await import('../../../lib/notify');
       notify.error('Erro ao exportar vídeo. Tente novamente.');
     } finally {
+      // Remove o canvas invisível e libera a stream de captura
+      try {
+        captureStreamRef?.getTracks?.().forEach((t) => t.stop());
+        if (offscreenEl?.parentNode) offscreenEl.parentNode.removeChild(offscreenEl);
+      } catch { /* noop */ }
       exportingRef.current = false;
       setIsExporting(false);
       setProgress(0);
