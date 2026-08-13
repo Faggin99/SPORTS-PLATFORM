@@ -60,4 +60,5 @@ workflows:
     publishing:
       app_store_connect:
         auth: integration
-        submit_to_testflight: true
+        # Submissão à revisão beta (só p/ testadores EXTERNOS) — ligar quando abrirmos beta externo
+        submit_to_testflight: false
