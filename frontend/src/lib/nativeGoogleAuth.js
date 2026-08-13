@@ -11,6 +11,11 @@ import { isNative } from './platform';
 let initialized = false;
 
 const WEB_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+// Client OAuth tipo iOS (bundle com.faggin.tactiplan) — exigido pelo Google no
+// login nativo do iOS. O idToken continua com audience = webClientId (via
+// iOSServerClientId), então o backend não muda.
+const IOS_CLIENT_ID = import.meta.env.VITE_GOOGLE_IOS_CLIENT_ID
+  || '415077581451-rino5jidptr0dun60s6qtp5q7v0ahbuv.apps.googleusercontent.com';
 
 async function ensureInit() {
   if (initialized) return;
@@ -20,6 +25,8 @@ async function ensureInit() {
       // webClientId é usado nos DOIS (Android e iOS) pra gerar o idToken com
       // a audience que o backend espera.
       webClientId: WEB_CLIENT_ID,
+      iOSClientId: IOS_CLIENT_ID,
+      iOSServerClientId: WEB_CLIENT_ID,
     },
   });
   initialized = true;
