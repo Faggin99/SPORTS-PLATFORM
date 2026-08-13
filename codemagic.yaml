@@ -23,7 +23,7 @@ workflows:
           - tactiplan-appstore
       node: 22
       xcode: latest
-            vars:
+      vars:
         # App da LOJA aponta pro backend de PRODUÇÃO
         VITE_API_URL: "https://app.tactiplan.faggin.com.br/api"
         APP_VERSION: "1.0.3"
