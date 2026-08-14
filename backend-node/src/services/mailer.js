@@ -95,12 +95,12 @@ async function sendTrialExpiringEmail({ to, name, daysLeft, appUrl, billingUrl }
   const url = appUrl || 'https://app.tactiplan.faggin.com.br';
   const bUrl = billingUrl || `${url.replace(/\/$/, '')}/#/billing`;
   const subject = `Seu teste grátis acaba em ${days} ${days === 1 ? 'dia' : 'dias'} — TactiPlan`;
-  const text = `Olá, ${name || ''}.\n\nSeu período de avaliação termina em ${days} ${days === 1 ? 'dia' : 'dias'}. Pra continuar sem interrupção, ative a assinatura:\n\n${bUrl}\n\nSe preferir, é só ignorar — a conta segue disponível, mas os recursos pagos param até você assinar.\n\n— TactiPlan`;
+  const text = `Olá, ${name || ''}.\n\nSeu período de avaliação termina em ${days} ${days === 1 ? 'dia' : 'dias'}. Pra continuar sem interrupção, ative a assinatura:\n\n${bUrl}\n\nSe não assinar, tudo bem: seus dados (treinos, jogos, plantel, jogadas) continuam salvos e você retoma quando quiser — o acesso só fica pausado até a assinatura.\n\n— TactiPlan`;
   const bodyHtml = `
     <p style="line-height: 1.5;">Olá, <strong>${name || ''}</strong>.</p>
     <p style="line-height: 1.5;">Seu período de avaliação termina em <strong>${days} ${days === 1 ? 'dia' : 'dias'}</strong>. Pra continuar com tudo funcionando (treinos, jogos, plantel, quadro tático), ative sua assinatura:</p>
     ${button(bUrl, 'Ativar assinatura')}
-    <p style="line-height: 1.5; color: #64748b; font-size: 13px;">Se preferir, é só ignorar — a conta segue disponível, mas os recursos pagos ficam bloqueados até você assinar.</p>
+    <p style="line-height: 1.5; color: #64748b; font-size: 13px;">Se não assinar, tudo bem: <strong>seus dados continuam salvos</strong> (treinos, jogos, plantel, jogadas) e você retoma quando quiser — o acesso só fica pausado até a assinatura.</p>
   `;
   return sendMail({ to, subject, html: wrap({ title: `Seu teste acaba em ${days} ${days === 1 ? 'dia' : 'dias'}`, bodyHtml }), text });
 }
