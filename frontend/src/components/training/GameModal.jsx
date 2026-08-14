@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { deliverPdf } from '../../lib/deliverFile';
 import { X, Trophy, Users, Plus, Trash2, Goal, Shield, AlertTriangle, Clock, Edit2, UserPlus, Download, FileText } from 'lucide-react';
 import { useTheme } from '../../contexts/ThemeContext';
 import { Button } from '../common/Button';
@@ -335,7 +336,7 @@ export function GameModal({ isOpen, onClose, session, onSave }) {
 
     paginate(doc);
     const fileName = `Convocacao_${opponent.replace(/\s+/g, '_')}_${gameDate.replace(/\//g, '-')}.pdf`;
-    doc.save(fileName);
+    deliverPdf(doc, fileName);
     } finally { resetColor(); }
   };
 

@@ -215,7 +215,7 @@ export function generateGameStatsPDF(gameStats, opts = {}) {
   paginate(doc);
   const safe = (s) => String(s).replace(/\s+/g, '_').replace(/[^\w-]/g, '');
   const fileName = `Desempenho_${safe(clubName)}_${safe(periodLabel || 'periodo')}.pdf`;
-  doc.save(fileName);
+  deliverPdf(doc, fileName);
   } finally { resetColor(); }
 }
 

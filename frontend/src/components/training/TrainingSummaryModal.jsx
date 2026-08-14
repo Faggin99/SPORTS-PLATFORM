@@ -4,6 +4,8 @@ import { useTheme } from '../../contexts/ThemeContext';
 import html2pdf from 'html2pdf.js';
 import { newWorkbook, addSheet, saveWorkbook, addMetaSheet, formatMinutes } from '../../utils/excelTheme';
 import { ExportMenu } from '../common/ExportMenu';
+import { deliverFile } from '../../lib/deliverFile';
+import { isNative } from '../../lib/platform';
 
 export function TrainingSummaryModal({ isOpen, onClose, session }) {
   const { colors } = useTheme();
@@ -84,7 +86,13 @@ export function TrainingSummaryModal({ isOpen, onClose, session }) {
         pagebreak: { mode: 'avoid-all', avoid: '.avoid-break' }
       };
 
-      await html2pdf().set(opt).from(element).save();
+      if (isNative()) {
+        // WebView não baixa arquivos: gera o blob e abre a folha de compartilhar
+        const blob = await html2pdf().set(opt).from(element).outputPdf('blob');
+        await deliverFile(blob, opt.filename, 'Compartilhar PDF');
+      } else {
+        await html2pdf().set(opt).from(element).save();
+      }
 
       // Show buttons again
       buttons.forEach(btn => btn.style.display = '');
@@ -98,6 +106,7 @@ export function TrainingSummaryModal({ isOpen, onClose, session }) {
   // Telas estreitas (qualquer celular): a "folha A4" vira fluida e as duas
   // colunas empilham — em mm fixo o conteúdo estourava a largura e cortava.
   const isNarrow = typeof window !== 'undefined' && window.matchMedia('(max-width: 640px)').matches;
+  const dvhOk = typeof CSS !== 'undefined' && CSS.supports?.('height', '100dvh');
 
   const overlayStyle = {
     position: 'fixed',
@@ -117,7 +126,7 @@ export function TrainingSummaryModal({ isOpen, onClose, session }) {
     backgroundColor: '#f5f5f5',
     borderRadius: '0.5rem',
     width: 'min(210mm, 100%)',
-    height: '95vh',
+    height: dvhOk ? '92dvh' : '88vh',
     maxWidth: '95vw',
     display: 'flex',
     flexDirection: 'column',
