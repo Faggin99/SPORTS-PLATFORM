@@ -296,13 +296,17 @@ function CurrentSubscription({ sub, colors, onCancel, native }) {
       {isTrial && trialDays === 0 && (
         <div style={{ marginTop: 16, padding: 14, backgroundColor: '#ef444415', borderRadius: 8, border: '1px solid #ef444440', fontSize: '0.875rem', color: colors.text }}>
           <strong style={{ color: '#ef4444' }}>Seu período de avaliação terminou.</strong>{' '}
-          Escolha um dos planos abaixo para continuar usando o TactiPlan com todos os recursos.
+          {native
+            ? 'Assim que sua assinatura estiver ativa, o acesso é liberado automaticamente aqui no app.'
+            : 'Escolha um dos planos abaixo para continuar usando o TactiPlan com todos os recursos.'}
         </div>
       )}
 
       {isTrial && trialDays > 0 && (
         <div style={{ marginTop: 16, padding: 12, backgroundColor: '#f59e0b15', borderRadius: 8, border: '1px solid #f59e0b40', fontSize: '0.8125rem', color: colors.text }}>
-          <strong>Você está no período de avaliação</strong> — após {trialDays} dia{trialDays === 1 ? '' : 's'} é necessário escolher um plano (Pro ou Clube) pra continuar.
+          <strong>Você está no período de avaliação</strong> — {native
+            ? `restam ${trialDays} dia${trialDays === 1 ? '' : 's'} de acesso completo.`
+            : `após ${trialDays} dia${trialDays === 1 ? '' : 's'} é necessário escolher um plano (Pro ou Clube) pra continuar.`}
         </div>
       )}
 
