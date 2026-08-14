@@ -87,7 +87,7 @@ export function PricingPage() {
         <div style={{ textAlign: 'center', marginTop: 24, marginBottom: 40 }}>
           <h1 style={{ fontSize: '2rem', fontWeight: 800, color: colors.text, margin: 0 }}>Escolha seu plano</h1>
           <p style={{ fontSize: '1rem', color: colors.textSecondary, marginTop: 8 }}>
-            30 dias grátis pra experimentar tudo. Cancele quando quiser.
+            15 dias grátis pra experimentar tudo. Cancele quando quiser.
           </p>
         </div>
 

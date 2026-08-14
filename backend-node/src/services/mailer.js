@@ -76,7 +76,7 @@ async function sendPasswordResetEmail({ to, name, resetUrl }) {
 
 // Boas-vindas — disparado logo após signup. Menciona os 30d de trial (plano Pro).
 async function sendWelcomeEmail({ to, name, trialDaysLeft, appUrl }) {
-  const days = Number.isFinite(trialDaysLeft) ? trialDaysLeft : 30;
+  const days = Number.isFinite(trialDaysLeft) ? trialDaysLeft : 15;
   const url = appUrl || 'https://app.tactiplan.faggin.com.br';
   const subject = `Bem-vindo ao TactiPlan, ${name || 'treinador'}!`;
   const text = `Olá, ${name || ''}.\n\nSua conta no TactiPlan está pronta. Você já começa com ${days} dias grátis pra testar o TactiPlan — treinos, jogos, plantel e o quadro tático.\n\nComece agora: ${url}\n\nBons treinos!\n— TactiPlan`;
@@ -103,6 +103,21 @@ async function sendTrialExpiringEmail({ to, name, daysLeft, appUrl, billingUrl }
     <p style="line-height: 1.5; color: #64748b; font-size: 13px;">Se preferir, é só ignorar — a conta segue disponível, mas os recursos pagos ficam bloqueados até você assinar.</p>
   `;
   return sendMail({ to, subject, html: wrap({ title: `Seu teste acaba em ${days} ${days === 1 ? 'dia' : 'dias'}`, bodyHtml }), text });
+}
+
+// Trial terminou — convite pra assinar e continuar de onde parou.
+async function sendTrialExpiredEmail({ to, name, appUrl, billingUrl }) {
+  const url = appUrl || 'https://app.tactiplan.faggin.com.br';
+  const bUrl = billingUrl || `${url.replace(/\/$/, '')}/#/billing`;
+  const subject = 'Seu teste grátis terminou — continue de onde parou · TactiPlan';
+  const text = `Olá, ${name || ''}.\n\nSeu período de avaliação do TactiPlan terminou. Seus treinos, jogos e jogadas continuam salvos — é só ativar a assinatura pra retomar de onde parou:\n\n${bUrl}\n\n— TactiPlan`;
+  const bodyHtml = `
+    <p style="line-height: 1.5;">Olá, <strong>${name || ''}</strong>.</p>
+    <p style="line-height: 1.5;">Seu período de avaliação terminou — mas nada se perdeu: <strong>seus treinos, jogos, plantel e jogadas continuam salvos</strong>. Ative a assinatura e retome exatamente de onde parou:</p>
+    ${button(bUrl, 'Ativar assinatura')}
+    <p style="line-height: 1.5; color: #64748b; font-size: 13px;">Ficou com alguma dúvida ou precisa de mais tempo pra avaliar? Responde este e-mail que a gente conversa.</p>
+  `;
+  return sendMail({ to, subject, html: wrap({ title: 'Seu teste terminou — seus dados continuam salvos', bodyHtml }), text });
 }
 
 // Pagamento aprovado.
@@ -143,6 +158,7 @@ module.exports = {
   sendPasswordResetEmail,
   sendWelcomeEmail,
   sendTrialExpiringEmail,
+  sendTrialExpiredEmail,
   sendPaymentApprovedEmail,
   sendPaymentFailedEmail,
 };

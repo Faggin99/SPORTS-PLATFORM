@@ -10,7 +10,7 @@
 // função pura pra permitir chamada manual (endpoint admin/testes).
 
 const { query } = require('../config/database');
-const { sendTrialExpiringEmail } = require('../services/mailer');
+const { sendTrialExpiringEmail, sendTrialExpiredEmail } = require('../services/mailer');
 
 let columnEnsured = false;
 
@@ -19,6 +19,9 @@ async function ensureTrialNotifiedAtColumn() {
   try {
     await query(
       `ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS trial_notified_at TIMESTAMPTZ`
+    );
+    await query(
+      `ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS trial_expired_notified_at TIMESTAMPTZ`
     );
     columnEnsured = true;
   } catch (err) {
@@ -100,10 +103,53 @@ async function runTrialExpiringNotifier() {
       }
     }
 
-    if (notified > 0 || failed > 0) {
-      console.log(`[trial-expiring] notificados=${notified} falhas=${failed}`);
+    // ── Etapa 2 da régua: trial EXPIROU (até 2 dias atrás, 1 email só) ──
+    const expired = await query(
+      `SELECT s.id, s.user_id, s.plan_id, s.trial_ends_at,
+              u.email, u.name
+         FROM subscriptions s
+         JOIN users u ON u.id = s.user_id
+        WHERE s.status = 'trialing'
+          AND s.trial_ends_at BETWEEN NOW() - INTERVAL '2 days' AND NOW()
+          AND s.trial_expired_notified_at IS NULL
+          AND u.deleted_at IS NULL
+          AND u.email IS NOT NULL`
+    );
+
+    let expiredNotified = 0;
+    for (const sub of expired.rows) {
+      try {
+        await sendTrialExpiredEmail({
+          to: sub.email,
+          name: sub.name,
+          appUrl: baseUrl,
+          billingUrl,
+        });
+        await query(
+          `UPDATE subscriptions SET trial_expired_notified_at = NOW(), updated_at = NOW() WHERE id = $1`,
+          [sub.id]
+        );
+        try {
+          await query(
+            `INSERT INTO billing_events (subscription_id, user_id, type, status, raw)
+             VALUES ($1, $2, $3, $4, $5)`,
+            [sub.id, sub.user_id, 'trial.expired.email_sent', 'trialing',
+             { to: sub.email, plan_id: sub.plan_id, trial_ends_at: sub.trial_ends_at }]
+          );
+        } catch (e) {
+          console.error('[trial-expired] event log failed:', e?.message);
+        }
+        expiredNotified++;
+      } catch (err) {
+        failed++;
+        console.error('[trial-expired] send failed for', sub.email, ':', err?.message);
+      }
     }
-    return { ok: true, notified, failed };
+
+    if (notified > 0 || expiredNotified > 0 || failed > 0) {
+      console.log(`[trial-expiring] avisados=${notified} expirados=${expiredNotified} falhas=${failed}`);
+    }
+    return { ok: true, notified, expiredNotified, failed };
   } catch (err) {
     console.error('[trial-expiring] error:', err?.message);
     return { ok: false, error: err.message };
