@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Download, FileText, FileSpreadsheet, ChevronDown } from 'lucide-react';
+import { Download, FileText, FileSpreadsheet, ChevronDown, Loader2 } from 'lucide-react';
 import { useTheme } from '../../contexts/ThemeContext';
 
 /**
@@ -20,7 +20,22 @@ export function ExportMenu({
 }) {
   const { colors, isDark } = useTheme();
   const [open, setOpen] = useState(false);
+  // Feedback de geração: PDFs/planilhas demoram alguns segundos e sem
+  // indicador parecia que o clique não funcionou.
+  const [busy, setBusy] = useState(false);
   const ref = useRef(null);
+
+  const run = async (fn) => {
+    setOpen(false);
+    setBusy(true);
+    try {
+      // deixa o spinner PINTAR antes de começar o trabalho pesado
+      await new Promise((r) => setTimeout(r, 30));
+      await fn?.();
+    } finally {
+      setBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -48,22 +63,25 @@ export function ExportMenu({
 
   return (
     <div ref={ref} style={{ position: 'relative', display: 'inline-block' }}>
+      <style>{'@keyframes tp-spin { to { transform: rotate(360deg); } }'}</style>
       <button
         type="button"
-        onClick={() => !disabled && setOpen(v => !v)}
-        disabled={disabled}
+        onClick={() => !disabled && !busy && setOpen(v => !v)}
+        disabled={disabled || busy}
         style={{
           ...btnStyle,
           display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
           padding, borderRadius: '0.375rem',
           fontSize, fontWeight: 600,
-          cursor: disabled ? 'not-allowed' : 'pointer',
+          cursor: (disabled || busy) ? 'not-allowed' : 'pointer',
           opacity: disabled ? 0.5 : 1,
         }}
       >
-        {icon || <Download size={15} />}
-        <span>{label}</span>
-        <ChevronDown size={13} style={{ opacity: 0.85, transform: open ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }} />
+        {busy
+          ? <Loader2 size={15} style={{ animation: 'tp-spin 0.9s linear infinite' }} />
+          : (icon || <Download size={15} />)}
+        <span>{busy ? 'Gerando…' : label}</span>
+        {!busy && <ChevronDown size={13} style={{ opacity: 0.85, transform: open ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }} />}
       </button>
 
       {open && (
@@ -83,7 +101,7 @@ export function ExportMenu({
             <MenuItem
               icon={<FileText size={15} />}
               label="Exportar PDF"
-              onClick={() => { setOpen(false); onExportPDF(); }}
+              onClick={() => run(onExportPDF)}
               colors={colors} isDark={isDark}
             />
           )}
@@ -91,7 +109,7 @@ export function ExportMenu({
             <MenuItem
               icon={<FileSpreadsheet size={15} />}
               label="Exportar Excel"
-              onClick={() => { setOpen(false); onExportExcel(); }}
+              onClick={() => run(onExportExcel)}
               colors={colors} isDark={isDark}
               divider={Boolean(onExportPDF)}
             />
