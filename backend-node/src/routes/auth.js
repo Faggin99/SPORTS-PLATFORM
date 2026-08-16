@@ -217,6 +217,7 @@ router.delete('/me', authMiddleware, async (req, res) => {
               name               = 'Usuário removido',
               encrypted_password = NULL,
               google_id          = NULL,
+              apple_id           = NULL,
               avatar_url         = NULL,
               profile_photo      = NULL,
               phone              = NULL,
