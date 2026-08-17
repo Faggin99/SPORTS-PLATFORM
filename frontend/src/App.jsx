@@ -36,8 +36,8 @@ function ProtectedRoute({ children }) {
 
   if (loading) return <div>Carregando...</div>;
   if (!isAuthenticated) return <Navigate to="/login" />;
-  // Bloqueio: contas sem senha definida (criadas via Google) precisam definir antes
-  if (user?.requires_password) return <Navigate to="/set-password" replace />;
+  // Contas de login social (Apple/Google) NÃO são obrigadas a criar senha —
+  // exigência da Apple (Guideline 4). /set-password segue disponível opcionalmente.
   return children;
 }
 
