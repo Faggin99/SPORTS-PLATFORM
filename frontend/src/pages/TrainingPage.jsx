@@ -32,7 +32,7 @@ export function TrainingPage() {
   const tour = useTour('training');
   useTourReplayListener('training', () => tour.setIsOpen(true));
 
-  const isMobileDevice = typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches;
+  const isMobileDevice = typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches;
   const tourSteps = [
     {
       title: 'Bem-vindo ao TactiPlan!',

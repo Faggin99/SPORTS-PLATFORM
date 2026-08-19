@@ -1134,7 +1134,7 @@ function LandscapeGate({ onBack }) {
       }}>
         <RotateCw size={36} />
       </div>
-      <div style={{ color: '#fff', fontSize: '1.05rem', fontWeight: 700 }}>Gire o celular</div>
+      <div style={{ color: '#fff', fontSize: '1.05rem', fontWeight: 700 }}>Gire o aparelho</div>
       <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.85rem', maxWidth: 300 }}>
         O Quadro Tático usa a tela deitada (paisagem) pra o campo caber inteiro.
       </div>
@@ -1523,7 +1523,7 @@ function MobileRotateHint({ colors }) {
       pointerEvents: 'none',
     }}>
       <Smartphone size={13} />
-      Gire o celular pra paisagem — cabe mais campo
+      Gire o aparelho pra paisagem — cabe mais campo
     </div>
   );
 }

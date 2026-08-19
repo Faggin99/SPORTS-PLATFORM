@@ -8,7 +8,11 @@ import { useState, useEffect } from 'react';
 // retrato e renderizava o layout largo espremido. matchMedia reflete o estado
 // real da media query e dispara 'change' de forma confiável na rotação; ainda
 // re-checamos em orientationchange/resize (com atraso) por garantia.
-export function useIsMobile(breakpoint = 768) {
+// 900 (e não 768): o header desktop precisa de ~880px; iPads em retrato
+// (820/834px) ganhavam layout desktop transbordando na horizontal — a Apple
+// reprovou por "crowded UI" no iPad Air 11". Acima de 900 (iPad deitado,
+// iPad 13" em pé, desktop) o layout largo cabe com folga.
+export function useIsMobile(breakpoint = 900) {
   const query = `(max-width: ${breakpoint}px)`;
 
   const read = () => {

@@ -111,8 +111,8 @@ body {
 }
 
 /* iOS não faz zoom automático no focus se a font-size do input for >= 16px.
-   Deixamos 16px em qualquer viewport pequena (< 768px) pra evitar essa UX ruim. */
-@media (max-width: 768px) {
+   Deixamos 16px em qualquer viewport pequena (< 900px, alinhado ao useIsMobile) pra evitar essa UX ruim. */
+@media (max-width: 900px) {
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
   select,
   textarea {
