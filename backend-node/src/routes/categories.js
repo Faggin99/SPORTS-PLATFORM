@@ -57,7 +57,7 @@ router.post('/categories', async (req, res) => {
 
       if (!canUseMulti && count >= 1) {
         return res.status(402).json({
-          error: 'Múltiplas categorias por clube requerem o plano Clube. Faça upgrade pra liberar.',
+          error: 'Múltiplas categorias por clube estão disponíveis no plano Clube.',
           code: 'PLAN_REQUIRED',
           required_feature: 'multi_user',
         });

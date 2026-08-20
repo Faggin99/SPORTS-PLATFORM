@@ -4,6 +4,7 @@
 
 const { query } = require('../config/database');
 const { ADDON_PRICES, ADDON_MAX, computeRecurringAmountCents } = require('../config/addons');
+const { isLifetime } = require('../config/specialUsers');
 
 let mpClient = null;
 let PreApproval = null;
@@ -646,6 +647,10 @@ async function setAddons(userId, workspaceId, { extraClubs, extraCategories }) {
   }
 
   const features = sub.features || {};
+  if (sub.plan_id === 'free') {
+    const err = new Error('Add-ons estão disponíveis nos planos Pro e Clube.');
+    err.statusCode = 402; throw err;
+  }
   const isClube = features.multi_user === true;
 
   let ec = Math.max(0, Math.min(ADDON_MAX.extra_club, Math.round(Number(extraClubs) || 0)));
@@ -705,7 +710,99 @@ async function setAddons(userId, workspaceId, { extraClubs, extraCategories }) {
   };
 }
 
+// -----------------------------------------------------------------------------
+// Plano Free permanente + "assinatura efetiva"
+//
+// Ninguém fica mais trancado pra fora: se a assinatura/trial caducou (ou nunca
+// existiu), o acesso cai no plano FREE (features limitadas — sem quadro tático,
+// sem exportações, 30 atletas). Exigência da Apple (3.1.3(f)): o app precisa
+// ser utilizável sem pagar e sem chamada pra compra dentro dele.
+// -----------------------------------------------------------------------------
+const FREE_PLAN_ID = 'free';
+
+// Uma sub "usável" é a que ainda dá direito às features do SEU plano.
+function isSubscriptionUsable(sub) {
+  if (!sub) return false;
+  if (sub.is_admin || sub.plan_id === 'admin' || sub.plan_id === 'lifetime') return true;
+  const now = Date.now();
+  if (sub.status === 'trialing') {
+    return !sub.trial_ends_at || new Date(sub.trial_ends_at).getTime() >= now;
+  }
+  if (sub.status === 'active') {
+    return !sub.current_period_end || new Date(sub.current_period_end).getTime() >= now;
+  }
+  return isSubscriptionActive(sub);
+}
+
+// Sub efetiva da dupla (user, workspace): a real se usável; senão um objeto
+// Free sintético, carregando em `lapsed` a sub que caducou (pra UI explicar).
+async function getEffectiveSubscription({ userId, workspaceId = null }) {
+  let sub = null;
+  if (workspaceId) sub = await getSubscriptionForWorkspace(workspaceId);
+  if (!sub) sub = await getActiveSubscription(userId);
+  if (sub && isSubscriptionUsable(sub)) {
+    sub.is_free = sub.plan_id === FREE_PLAN_ID;
+    return sub;
+  }
+  const free = await getPlan(FREE_PLAN_ID);
+  return {
+    plan_id: FREE_PLAN_ID,
+    plan_name: free?.name || 'Free',
+    status: 'active',
+    price_cents: 0,
+    interval: 'monthly',
+    features: free?.features || { max_clubs: 1, max_categories: 1, max_athletes: 30 },
+    is_free: true,
+    is_fallback: true,
+    user_id: userId,
+    workspace_id: workspaceId || null,
+    lapsed: sub ? {
+      plan_id: sub.plan_id,
+      plan_name: sub.plan_name,
+      status: sub.status,
+      trial_ends_at: sub.trial_ends_at,
+      current_period_end: sub.current_period_end,
+      cancel_at_period_end: sub.cancel_at_period_end,
+    } : null,
+  };
+}
+
+// Assinatura inicial no cadastro (email/Google/Apple):
+//   admin → nada; lista lifetime → vitalícia; SIGNUP_TRIAL_DAYS>0 → trial do
+//   Pro; padrão → Free permanente.
+async function createInitialSubscription({ userId, workspaceId, email, role }) {
+  if (role === 'admin') return { kind: 'admin', trialDays: 0 };
+  if (isLifetime?.(email)) {
+    await query(
+      `INSERT INTO subscriptions (user_id, workspace_id, plan_id, status, current_period_start, current_period_end)
+       VALUES ($1, $2, 'lifetime', 'active', now(), now() + interval '100 years')`,
+      [userId, workspaceId]
+    );
+    return { kind: 'lifetime', trialDays: 0 };
+  }
+  const trialDays = Math.max(0, parseInt(process.env.SIGNUP_TRIAL_DAYS || '0', 10) || 0);
+  if (trialDays > 0) {
+    const trialEnd = new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000);
+    await query(
+      `INSERT INTO subscriptions (user_id, workspace_id, plan_id, status, trial_ends_at, current_period_start, current_period_end)
+       VALUES ($1, $2, 'pro', 'trialing', $3, now(), $3)`,
+      [userId, workspaceId, trialEnd]
+    );
+    return { kind: 'trial', trialDays };
+  }
+  await query(
+    `INSERT INTO subscriptions (user_id, workspace_id, plan_id, status, current_period_start)
+     VALUES ($1, $2, $3, 'active', now())`,
+    [userId, workspaceId, FREE_PLAN_ID]
+  );
+  return { kind: 'free', trialDays: 0 };
+}
+
 module.exports = {
+  FREE_PLAN_ID,
+  isSubscriptionUsable,
+  getEffectiveSubscription,
+  createInitialSubscription,
   isEnabled,
   getPlan,
   getActiveSubscription,

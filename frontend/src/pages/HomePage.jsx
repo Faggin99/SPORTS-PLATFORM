@@ -15,6 +15,7 @@ import { athleteService } from '../modules/training-management/services/athleteS
 import { trainingService } from '../services/trainingService';
 import { gameStatsService } from '../services/gameStatsService';
 import { generateClubReportPDF } from '../utils/clubReportPdf';
+import { useFeatureGuard } from '../components/common/PlanGate';
 
 const QUICK_LINKS = [
   { key: 'training',       label: 'Programação',   icon: Calendar,   route: '/training',          color: '#2563eb' },
@@ -64,6 +65,7 @@ export function HomePage() {
   const { colors } = useTheme();
   const { selectedClub } = useClub();
   const isMobile = useIsMobile();
+  const guardFeature = useFeatureGuard();
 
   const [dashboard, setDashboard] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -77,6 +79,7 @@ export function HomePage() {
       alert('Selecione um clube antes de gerar o relatório.');
       return;
     }
+    if (!guardFeature('pdf_export')) return;
     setReportLoading(true);
     try {
       const y = new Date().getFullYear();

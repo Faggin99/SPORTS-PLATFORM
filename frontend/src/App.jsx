@@ -30,6 +30,7 @@ import { HomePage } from './pages/HomePage';
 import { Layout } from './components/layout/Layout';
 import PlantelPage from './modules/training-management/pages/PlantelPage';
 import { TacticalBoardPage } from './modules/tactical-board';
+import { PlanGate } from './components/common/PlanGate';
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated, loading, user } = useAuth();
@@ -255,7 +256,10 @@ function AppRoutes() {
         path="/tactical-board"
         element={
           <ProtectedRoute>
-            <TacticalBoardPage />
+            {/* Quadro Tático é exclusivo dos planos pagos (Free vê aviso neutro) */}
+            <PlanGate feature="quadro_tatico">
+              <TacticalBoardPage />
+            </PlanGate>
           </ProtectedRoute>
         }
       />

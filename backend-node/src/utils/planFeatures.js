@@ -1,39 +1,36 @@
 const billing = require('../services/billing');
 const { isAdmin, isLifetime } = require('../config/specialUsers');
 
+function isUnlimitedUser(user) {
+  return user.role === 'admin' || isAdmin?.(user.email) || isLifetime?.(user.email);
+}
+
+// Sub EFETIVA do usuário na workspace ativa (cai no Free se não houver
+// assinatura válida). Sempre vem com `features`.
+async function resolveSub(user) {
+  return billing.getEffectiveSubscription({ userId: user.id, workspaceId: user.workspaceId || null });
+}
+
 // Verifica se a workspace ativa do usuário tem a feature do plano (ex: 'multi_user').
 // Admins (role ou email) e lifetime passam sempre, independente de workspace.
 async function hasFeature(user, feature) {
   if (!user) return false;
-  if (user.role === 'admin') return true;
-  if (isAdmin?.(user.email) || isLifetime?.(user.email)) return true;
-  // Tenta primeiro pela workspace ativa (modelo novo). Cai pro user.id se workspace ausente.
-  let sub = null;
-  if (user.workspaceId) {
-    sub = await billing.getSubscriptionForWorkspace(user.workspaceId);
-  }
-  if (!sub) {
-    sub = await billing.getActiveSubscription(user.id);
-  }
+  if (isUnlimitedUser(user)) return true;
+  const sub = await resolveSub(user);
   if (!sub) return false;
-  const plan = await billing.getPlan(sub.plan_id);
-  return !!(plan?.features?.[feature]);
+  if (sub.is_admin || sub.plan_id === 'lifetime') return true;
+  return !!(sub.features?.[feature]);
 }
 
-// Retorna o objeto de features do plano ativo (pra limites numéricos como
-// max_categories). Admin/lifetime → { __unlimited: true }. Sem plano → null.
+// Retorna o objeto de features do plano efetivo (pra limites numéricos como
+// max_categories / max_athletes). Admin/lifetime → { __unlimited: true }.
 async function getPlanFeatures(user) {
   if (!user) return null;
-  if (user.role === 'admin' || isAdmin?.(user.email) || isLifetime?.(user.email)) {
-    return { __unlimited: true };
-  }
-  let sub = null;
-  if (user.workspaceId) sub = await billing.getSubscriptionForWorkspace(user.workspaceId);
-  if (!sub) sub = await billing.getActiveSubscription(user.id);
+  if (isUnlimitedUser(user)) return { __unlimited: true };
+  const sub = await resolveSub(user);
   if (!sub) return null;
-  if (sub.is_admin) return { __unlimited: true };
-  const plan = await billing.getPlan(sub.plan_id);
-  const features = { ...(plan?.features || {}) };
+  if (sub.is_admin || sub.plan_id === 'lifetime') return { __unlimited: true };
+  const features = { ...(sub.features || {}) };
   // Add-on de categoria: soma extra_category_slots ao limite do plano.
   // (Clubes são tratados à parte em clubs.js/canCreateClub via extra_club_slots.)
   const extraCats = Number(sub.extra_category_slots || 0);

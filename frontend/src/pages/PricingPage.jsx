@@ -87,7 +87,7 @@ export function PricingPage() {
         <div style={{ textAlign: 'center', marginTop: 24, marginBottom: 40 }}>
           <h1 style={{ fontSize: '2rem', fontWeight: 800, color: colors.text, margin: 0 }}>Escolha seu plano</h1>
           <p style={{ fontSize: '1rem', color: colors.textSecondary, marginTop: 8 }}>
-            15 dias grátis pra experimentar tudo. Cancele quando quiser.
+            Comece grátis no plano Free. Faça upgrade quando quiser — sem fidelidade.
           </p>
         </div>
 
@@ -100,6 +100,11 @@ export function PricingPage() {
             .sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
           return (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1.25rem' }}>
+              <FreeCard
+                colors={colors}
+                isCurrent={currentSub?.plan_id === 'free'}
+                onSelect={() => (isAuthenticated ? navigate('/home') : navigate('/register'))}
+              />
               {visible.map((p) => (
                 <PlanCard
                   key={p.id}
@@ -118,6 +123,37 @@ export function PricingPage() {
           Pagamento processado via Mercado Pago. Cancele quando quiser.
         </p>
       </div>
+    </div>
+  );
+}
+
+// Plano Free permanente — o que a pessoa ganha sem pagar.
+function FreeCard({ colors, onSelect, isCurrent }) {
+  const incl = ['Planejamento semanal de treinos', 'Jogos e estatísticas', '1 clube · 1 categoria', 'Até 30 atletas', 'Mobile + Desktop + Web'];
+  const excl = ['Quadro tático com animação', 'Exportação em PDF, Excel e vídeo', 'Comissão técnica e categorias'];
+  return (
+    <div style={{ padding: '1.5rem', backgroundColor: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 16, display: 'flex', flexDirection: 'column' }}>
+      <h3 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 700, color: colors.text }}>Free</h3>
+      <p style={{ margin: '4px 0 12px', fontSize: '0.8125rem', color: colors.textSecondary }}>Pra começar a planejar</p>
+      <div style={{ marginBottom: 16 }}>
+        <span style={{ fontSize: '2rem', fontWeight: 800, color: colors.text }}>R$ 0</span>
+        <span style={{ color: colors.textSecondary, fontSize: '0.875rem' }}> /pra sempre</span>
+      </div>
+      <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 20px', display: 'grid', gap: 8, flex: 1 }}>
+        {incl.map((f) => (
+          <li key={f} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: '0.875rem', color: colors.text }}>
+            <Check size={16} color="#22c55e" style={{ flexShrink: 0, marginTop: 2 }} /> {f}
+          </li>
+        ))}
+        {excl.map((f) => (
+          <li key={f} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: '0.875rem', color: colors.textSecondary, textDecoration: 'line-through' }}>
+            <XIcon size={16} color="#94a3b8" style={{ flexShrink: 0, marginTop: 2 }} /> {f}
+          </li>
+        ))}
+      </ul>
+      <Button variant="secondary" fullWidth onClick={onSelect} disabled={isCurrent}>
+        {isCurrent ? 'Seu plano atual' : 'Criar conta grátis'}
+      </Button>
     </div>
   );
 }

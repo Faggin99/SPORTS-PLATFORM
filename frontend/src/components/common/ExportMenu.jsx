@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Download, FileText, FileSpreadsheet, ChevronDown, Loader2 } from 'lucide-react';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useFeatureGuard } from './PlanGate';
 
 /**
  * Dropdown unificado para exportação. Aceita callbacks pra PDF e Excel.
@@ -24,9 +25,12 @@ export function ExportMenu({
   // indicador parecia que o clique não funcionou.
   const [busy, setBusy] = useState(false);
   const ref = useRef(null);
+  // Exportações (PDF/Excel) são dos planos pagos — o Free vê um aviso neutro.
+  const guardFeature = useFeatureGuard();
 
   const run = async (fn) => {
     setOpen(false);
+    if (!guardFeature('pdf_export')) return;
     setBusy(true);
     try {
       // deixa o spinner PINTAR antes de começar o trabalho pesado

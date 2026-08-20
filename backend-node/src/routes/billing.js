@@ -171,13 +171,11 @@ router.get('/plans', async (req, res) => {
 // GET /api/billing/subscription — assinatura ativa da workspace ativa (ou do user se admin/sem workspace)
 router.get('/subscription', authMiddleware, async (req, res) => {
   try {
-    let sub = null;
-    if (req.user.workspaceId) {
-      sub = await billing.getSubscriptionForWorkspace(req.user.workspaceId);
-    }
-    if (!sub) {
-      sub = await billing.getActiveSubscription(req.user.id);
-    }
+    // Sub EFETIVA: a real se válida; senão o plano Free (com `lapsed` = a que caducou).
+    const sub = await billing.getEffectiveSubscription({
+      userId: req.user.id,
+      workspaceId: req.user.workspaceId || null,
+    });
     res.json(sub || null);
   } catch (err) {
     console.error('Subscription error:', err);
@@ -190,6 +188,7 @@ router.post('/checkout', authMiddleware, async (req, res) => {
   try {
     const { plan_id } = req.body || {};
     if (!plan_id) return res.status(400).json({ error: 'plan_id required' });
+    if (plan_id === 'free') return res.status(400).json({ error: 'O plano Free não precisa de checkout.' });
     if (!req.user.workspaceId) return res.status(400).json({ error: 'Nenhuma workspace ativa' });
     if (!req.user.can('billing:manage') || !req.user.isWorkspaceOwner(req.user.workspaceId)) {
       return res.status(403).json({ error: 'Apenas o dono pode gerenciar assinatura' });

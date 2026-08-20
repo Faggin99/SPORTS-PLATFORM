@@ -3,6 +3,7 @@ import { AlertTriangle, Clock, X } from 'lucide-react';
 import { useState } from 'react';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useSubscription } from '../../hooks/useSubscription';
+import { isNative } from '../../lib/platform';
 
 export function SubscriptionBanner() {
   const { colors } = useTheme();
@@ -13,6 +14,34 @@ export function SubscriptionBanner() {
   if (loading || !sub) return null;
   if (sub.is_admin || sub.plan_id === 'admin' || sub.plan_id === 'lifetime') return null;
   if (dismissed) return null;
+
+  const native = isNative();
+  const isFree = sub.plan_id === 'free' || sub.is_free;
+  // Free "de nascença": sem banner. Free por trial/assinatura que caducou:
+  // avisa UMA vez (dismiss persistido) que a conta continua funcionando.
+  if (isFree) {
+    if (!sub.lapsed) return null;
+    const key = `tp_lapsed_banner_${sub.lapsed.plan_id}_${sub.lapsed.trial_ends_at || sub.lapsed.current_period_end || ''}`;
+    if (localStorage.getItem(key)) return null;
+    const wasTrial = sub.lapsed.status === 'trialing';
+    const msg = wasTrial
+      ? 'Seu período de avaliação terminou — você continua no plano Free, com seus dados salvos.'
+      : 'Sua assinatura terminou — você continua no plano Free, com seus dados salvos.';
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0.625rem 1.25rem', backgroundColor: '#2563eb15', borderBottom: '1px solid #3b82f640', color: colors.text, fontSize: '0.875rem' }}>
+        <Clock size={16} color="#3b82f6" />
+        <span style={{ flex: 1 }}>{msg}</span>
+        {!native && (
+          <button onClick={() => navigate('/billing')} style={{ padding: '0.375rem 0.875rem', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 600, fontSize: '0.8125rem', cursor: 'pointer' }}>
+            Ver planos
+          </button>
+        )}
+        <button onClick={() => { localStorage.setItem(key, '1'); setDismissed(true); }} aria-label="Fechar" style={{ background: 'transparent', border: 'none', color: colors.textSecondary, cursor: 'pointer', display: 'inline-flex', padding: 4 }}>
+          <X size={16} />
+        </button>
+      </div>
+    );
+  }
 
   const isTrial = sub.status === 'trialing';
   const daysLeft = sub.trial_days_left;
@@ -69,7 +98,7 @@ export function SubscriptionBanner() {
     }}>
       <Icon size={16} color={styles.color} />
       <span style={{ flex: 1 }}>{message}</span>
-      <button
+      {!native && <button
         onClick={() => navigate('/billing')}
         style={{
           padding: '0.375rem 0.875rem',
@@ -80,7 +109,7 @@ export function SubscriptionBanner() {
         }}
       >
         {cta}
-      </button>
+      </button>}
       {level !== 'error' && (
         <button
           onClick={() => setDismissed(true)}

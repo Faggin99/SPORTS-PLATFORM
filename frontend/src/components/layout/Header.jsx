@@ -40,7 +40,7 @@ const mainNav = [
   { to: '/training-stats', icon: BarChart3, label: 'Estatísticas' },
   { kind: 'equipe', icon: UsersRound, label: 'Minha Equipe' },
   { kind: 'cadastros', icon: ClipboardList, label: 'Cadastros' },
-  { to: '/tactical-board', icon: Waypoints, label: 'Quadro Tático' },
+  { to: '/tactical-board', icon: Waypoints, label: 'Quadro Tático', gated: 'quadro_tatico' },
 ];
 
 function useOnOutsideClick(ref, handler) {
@@ -369,10 +369,12 @@ export function Header({ isMobile = false }) {
                   </div>
                 );
               }
+              const lockedMain = item.gated && !planFeatures.has(item.gated);
               return (
-                <NavLink key={item.to} to={item.to} style={({ isActive }) => mobileLinkStyle(isActive)}>
+                <NavLink key={item.to} to={item.to} style={({ isActive }) => ({ ...mobileLinkStyle(isActive), opacity: lockedMain ? 0.8 : 1 })}>
                   <item.icon size={20} strokeWidth={1.5} />
-                  {item.label}
+                  <span style={{ flex: 1 }}>{item.label}</span>
+                  {lockedMain && <Lock size={12} color="#f59e0b" />}
                 </NavLink>
               );
             })}
@@ -473,10 +475,12 @@ export function Header({ isMobile = false }) {
             );
           }
           const active = location.pathname === item.to || location.pathname.startsWith(item.to + '/');
+          const locked = item.gated && !planFeatures.has(item.gated);
           return (
-            <NavLink key={item.to} to={item.to} style={() => navItemStyle(active)}>
+            <NavLink key={item.to} to={item.to} style={() => ({ ...navItemStyle(active), opacity: locked ? 0.8 : 1 })}>
               <item.icon size={18} strokeWidth={1.75} />
               {item.label}
+              {locked && <Lock size={12} color="#f59e0b" />}
             </NavLink>
           );
         })}

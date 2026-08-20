@@ -110,7 +110,7 @@ export function BillingPage() {
 
       <CurrentSubscription sub={sub} colors={colors} onCancel={cancelSubscription} native={native} />
 
-      {native && <NativeManageNotice colors={colors} />}
+      {native && <NativeManageNotice colors={colors} isFree={sub?.plan_id === 'free' || !!sub?.is_free} />}
 
       {!native && (() => {
         const paidPlans = plans.filter(p =>
@@ -155,8 +155,20 @@ export function BillingPage() {
 // a checkout externo. Então no app só informamos (texto puro, sem botão/link).
 // No iOS a Apple é MAIS rígida: nem citar o site/URL de compra — texto 100%
 // neutro. No Android citamos o site (tolerado pelo Play).
-function NativeManageNotice({ colors }) {
+function NativeManageNotice({ colors, isFree }) {
   const isIos = getPlatform() === 'ios';
+  if (isFree) {
+    // Free no app: texto neutro, sem instrução de compra (Apple 3.1.3(f)).
+    return (
+      <div style={{ marginTop: 24, padding: 16, backgroundColor: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 12 }}>
+        <div style={{ fontSize: '0.9rem', fontWeight: 600, color: colors.text, marginBottom: 6 }}>Planos</div>
+        <p style={{ fontSize: '0.85rem', color: colors.textSecondary, margin: 0, lineHeight: 1.55 }}>
+          Você está no plano Free. Os recursos dos planos Pro e Clube (quadro tático e exportações)
+          são liberados automaticamente no app quando a assinatura da conta estiver ativa.
+        </p>
+      </div>
+    );
+  }
   return (
     <div style={{ marginTop: 24, padding: 16, backgroundColor: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 12 }}>
       <div style={{ fontSize: '0.9rem', fontWeight: 600, color: colors.text, marginBottom: 6 }}>
@@ -255,6 +267,31 @@ function CurrentSubscription({ sub, colors, onCancel, native }) {
   if (sub.plan_id === 'lifetime') {
     return (
       <Card colors={colors} icon={<Infinity size={20} color="#22c55e" />} title="Plano Vitalício" subtitle="Acesso completo sem cobrança." />
+    );
+  }
+
+  // Plano Free (linha real ou fallback de trial/assinatura que caducou).
+  if (sub.plan_id === 'free' || sub.is_free) {
+    const lapsed = sub.lapsed;
+    const maxAth = sub.features?.max_athletes;
+    return (
+      <div style={{ padding: 20, backgroundColor: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+          <Crown size={20} color="#94a3b8" />
+          <strong style={{ color: colors.text, fontSize: '1.05rem' }}>Plano Free</strong>
+          {statusBadge('active', colors)}
+        </div>
+        <p style={{ fontSize: '0.875rem', color: colors.textSecondary, margin: 0, lineHeight: 1.55 }}>
+          Planejamento de treinos, jogos, plantel{maxAth > 0 ? ` (até ${maxAth} atletas)` : ''} e estatísticas — grátis, pra sempre.
+          {lapsed?.status === 'trialing' && ' Seu período de avaliação terminou e a conta voltou pro Free — nada foi apagado.'}
+          {lapsed && lapsed.status !== 'trialing' && ' Sua assinatura anterior terminou e a conta voltou pro Free — nada foi apagado.'}
+        </p>
+        {!native && (
+          <p style={{ fontSize: '0.85rem', color: colors.textSecondary, margin: '10px 0 0' }}>
+            Quadro tático e exportações em PDF/vídeo estão nos planos Pro e Clube, abaixo.
+          </p>
+        )}
+      </div>
     );
   }
 

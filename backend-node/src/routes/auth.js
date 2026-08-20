@@ -74,30 +74,16 @@ router.post('/register', registerLimiter, [
     // - lifetime list: assinatura vitalícia
     // - demais: trial de 15 dias no plano Pro (padrão). O Clube só é liberado
     //   via pagamento (checkout) ou concessão manual pelo admin (change-plan).
-    if (role !== 'admin') {
-      if (isLifetime(email)) {
-        await query(
-          `INSERT INTO subscriptions (user_id, workspace_id, plan_id, status, current_period_start, current_period_end)
-           VALUES ($1, $2, 'lifetime', 'active', now(), now() + interval '100 years')`,
-          [user.id, workspaceId]
-        );
-      } else {
-        const trialEnd = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000);
-        await query(
-          `INSERT INTO subscriptions (user_id, workspace_id, plan_id, status, trial_ends_at, current_period_start, current_period_end)
-           VALUES ($1, $2, 'pro', 'trialing', $3, now(), $3)`,
-          [user.id, workspaceId, trialEnd]
-        );
-      }
-    }
+    // Assinatura inicial: Free permanente por padrão (SIGNUP_TRIAL_DAYS>0 → trial do Pro).
+      const initialSub = await billing.createInitialSubscription({ userId: user.id, workspaceId, email, role });
 
     const token = generateToken(user);
 
     // Fire-and-forget: e-mail de boas-vindas (não bloqueia o response).
-    // Trial de 15d é hard-coded no INSERT acima; se for admin/lifetime, ainda mandamos welcome.
+    // Se for admin/lifetime, ainda mandamos welcome (sem falar de trial).
     setImmediate(() => {
       const appUrl = process.env.APP_BASE_URL || 'https://app.tactiplan.faggin.com.br';
-      sendWelcomeEmail({ to: user.email, name: user.name, trialDaysLeft: 15, appUrl })
+      sendWelcomeEmail({ to: user.email, name: user.name, trialDaysLeft: initialSub?.trialDays || 0, appUrl })
         .catch(err => console.error('sendWelcomeEmail error:', err?.message));
     });
 
@@ -489,27 +475,13 @@ router.post('/google', loginLimiter, async (req, res) => {
       );
       const workspaceId = wsRes.rows[0].id;
 
-      if (role !== 'admin') {
-        if (isLifetime(email)) {
-          await query(
-            `INSERT INTO subscriptions (user_id, workspace_id, plan_id, status, current_period_start, current_period_end)
-             VALUES ($1, $2, 'lifetime', 'active', now(), now() + interval '100 years')`,
-            [user.id, workspaceId]
-          );
-        } else {
-          const trialEnd = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000);
-          await query(
-            `INSERT INTO subscriptions (user_id, workspace_id, plan_id, status, trial_ends_at, current_period_start, current_period_end)
-             VALUES ($1, $2, 'pro', 'trialing', $3, now(), $3)`,
-            [user.id, workspaceId, trialEnd]
-          );
-        }
-      }
+      // Assinatura inicial: Free permanente por padrão (SIGNUP_TRIAL_DAYS>0 → trial do Pro).
+      const initialSub = await billing.createInitialSubscription({ userId: user.id, workspaceId, email, role });
 
       // Email de boas-vindas — o cadastro via Google não disparava (só o
       // cadastro por email/senha chamava). Fire-and-forget.
       const appUrl = process.env.APP_BASE_URL || 'https://app.tactiplan.faggin.com.br';
-      sendWelcomeEmail({ to: user.email, name: user.name, trialDaysLeft: 15, appUrl })
+      sendWelcomeEmail({ to: user.email, name: user.name, trialDaysLeft: initialSub?.trialDays || 0, appUrl })
         .catch(err => console.error('sendWelcomeEmail (google) error:', err?.message));
     }
 
@@ -588,25 +560,11 @@ router.post('/apple', loginLimiter, async (req, res) => {
       );
       const workspaceId = wsRes.rows[0].id;
 
-      if (role !== 'admin') {
-        if (isLifetime(email)) {
-          await query(
-            `INSERT INTO subscriptions (user_id, workspace_id, plan_id, status, current_period_start, current_period_end)
-             VALUES ($1, $2, 'lifetime', 'active', now(), now() + interval '100 years')`,
-            [user.id, workspaceId]
-          );
-        } else {
-          const trialEnd = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000);
-          await query(
-            `INSERT INTO subscriptions (user_id, workspace_id, plan_id, status, trial_ends_at, current_period_start, current_period_end)
-             VALUES ($1, $2, 'pro', 'trialing', $3, now(), $3)`,
-            [user.id, workspaceId, trialEnd]
-          );
-        }
-      }
+      // Assinatura inicial: Free permanente por padrão (SIGNUP_TRIAL_DAYS>0 → trial do Pro).
+      const initialSub = await billing.createInitialSubscription({ userId: user.id, workspaceId, email, role });
 
       const appUrl = process.env.APP_BASE_URL || 'https://app.tactiplan.faggin.com.br';
-      sendWelcomeEmail({ to: user.email, name: user.name, trialDaysLeft: 15, appUrl })
+      sendWelcomeEmail({ to: user.email, name: user.name, trialDaysLeft: initialSub?.trialDays || 0, appUrl })
         .catch(err => console.error('sendWelcomeEmail (apple) error:', err?.message));
     }
 

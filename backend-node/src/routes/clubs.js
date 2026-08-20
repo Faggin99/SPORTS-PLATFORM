@@ -12,7 +12,7 @@ async function canCreateClub(user) {
   }
   if (!user.workspaceId) return { allowed: false, limit: 0, current: 0 };
 
-  const sub = await billing.getSubscriptionForWorkspace(user.workspaceId);
+  const sub = await billing.getEffectiveSubscription({ userId: user.id, workspaceId: user.workspaceId });
   const planLimit = sub?.features?.max_clubs;
   if (planLimit === undefined || planLimit === -1) return { allowed: true, limit: planLimit ?? -1 };
 
