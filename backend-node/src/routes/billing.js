@@ -213,6 +213,22 @@ router.post('/checkout', authMiddleware, async (req, res) => {
 // (routes/auth.js, INSERT direto). startTrial() ainda existe no service pra
 // esse uso interno, agora com guarda contra re-trial.
 
+// POST /api/billing/revenuecat/webhook — eventos de IAP (Apple/Google) via
+// RevenueCat. Auth: header Authorization tem que bater com REVENUECAT_WEBHOOK_AUTH.
+router.post('/revenuecat/webhook', async (req, res) => {
+  try {
+    const expected = process.env.REVENUECAT_WEBHOOK_AUTH || '';
+    if (!expected) return res.status(503).json({ error: 'not_configured' });
+    if ((req.headers.authorization || '') !== expected) return res.status(401).json({ error: 'unauthorized' });
+    const result = await billing.applyRevenueCatEvent(req.body?.event || {});
+    if (!result.handled) console.warn('RevenueCat webhook não aplicado:', result.reason);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error('RevenueCat webhook error:', err);
+    res.status(500).json({ error: 'webhook_failed' });
+  }
+});
+
 // GET /api/billing/addons — preços dos add-ons + quantidades atuais da assinatura
 router.get('/addons', authMiddleware, async (req, res) => {
   try {

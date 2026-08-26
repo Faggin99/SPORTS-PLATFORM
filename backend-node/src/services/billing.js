@@ -798,7 +798,114 @@ async function createInitialSubscription({ userId, workspaceId, email, role }) {
   return { kind: 'free', trialDays: 0 };
 }
 
+// -----------------------------------------------------------------------------
+// IAP (Apple App Store / Google Play) via RevenueCat
+//
+// O app nativo compra pela loja; a RevenueCat valida o recibo e nos manda
+// webhooks. Aqui traduzimos os eventos pra tabela `subscriptions`
+// (provider='apple'|'google'). O resto do sistema não muda: o gate lê a
+// assinatura efetiva como sempre.
+// -----------------------------------------------------------------------------
+const RC_PRODUCT_TO_PLAN = {
+  'com.faggin.tactiplan.pro.monthly':   'pro',
+  'com.faggin.tactiplan.pro.yearly':    'pro_annual',
+  'com.faggin.tactiplan.clube.monthly': 'clube',
+  'com.faggin.tactiplan.clube.yearly':  'clube_annual',
+};
+
+function rcResolveUserId(event) {
+  const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const candidates = [event.app_user_id, event.original_app_user_id, ...(Array.isArray(event.aliases) ? event.aliases : [])];
+  return candidates.find((c) => typeof c === 'string' && uuidRe.test(c)) || null;
+}
+
+async function applyRevenueCatEvent(event) {
+  const type = event?.type;
+  const RELEVANT = ['INITIAL_PURCHASE', 'RENEWAL', 'UNCANCELLATION', 'PRODUCT_CHANGE', 'CANCELLATION', 'EXPIRATION', 'BILLING_ISSUE'];
+  if (!type || !RELEVANT.includes(type)) return { handled: false, reason: `ignored:${type || 'no_type'}` };
+
+  const userId = rcResolveUserId(event);
+  if (!userId) return { handled: false, reason: 'no_uuid_user_id' };
+  const userRes = await query('SELECT id FROM users WHERE id = $1', [userId]);
+  if (userRes.rows.length === 0) return { handled: false, reason: 'user_not_found' };
+
+  const provider = String(event.store || '').toUpperCase() === 'PLAY_STORE' ? 'google' : 'apple';
+  const ref = String(event.original_transaction_id || event.transaction_id || event.id || '');
+  const productId = event.new_product_id || event.product_id || '';
+  const planId = RC_PRODUCT_TO_PLAN[productId] || null;
+  const expMs = Number(event.expiration_at_ms) || null;
+  const periodEnd = expMs ? new Date(expMs) : null;
+
+  await query(
+    'INSERT INTO billing_events (type, mp_resource_id, raw) VALUES ($1, $2, $3)',
+    [`revenuecat.${type.toLowerCase()}`, ref || null, JSON.stringify({ userId, productId, planId, environment: event.environment, expiration_at_ms: expMs })]
+  ).catch(() => {});
+
+  const existing = (await query(
+    `SELECT id FROM subscriptions
+      WHERE provider = $1 AND provider_subscription_id = $2
+      ORDER BY created_at DESC LIMIT 1`,
+    [provider, ref]
+  )).rows[0] || null;
+
+  const activates = ['INITIAL_PURCHASE', 'RENEWAL', 'UNCANCELLATION', 'PRODUCT_CHANGE'].includes(type);
+
+  if (activates) {
+    if (!planId) return { handled: false, reason: `unknown_product:${productId}` };
+    if (existing) {
+      await _hardCancelActiveSubsForUser(userId, `iap_${type.toLowerCase()}`, existing.id);
+      await query(
+        `UPDATE subscriptions SET
+           plan_id = $2, status = 'active', cancel_at_period_end = FALSE,
+           current_period_start = now(), current_period_end = $3, updated_at = now()
+         WHERE id = $1`,
+        [existing.id, planId, periodEnd]
+      );
+      return { handled: true, action: 'updated', plan: planId };
+    }
+    // Cancela as outras ativas (inclusive Free e Mercado Pago — evita cobrança dupla)
+    await _hardCancelActiveSubsForUser(userId, `iap_${type.toLowerCase()}`);
+    const ws = (await query('SELECT id FROM workspaces WHERE owner_id = $1 ORDER BY created_at ASC LIMIT 1', [userId])).rows[0]?.id || null;
+    await query(
+      `INSERT INTO subscriptions (user_id, workspace_id, plan_id, status, provider, provider_subscription_id, current_period_start, current_period_end)
+       VALUES ($1, $2, $3, 'active', $4, $5, now(), $6)`,
+      [userId, ws, planId, provider, ref, periodEnd]
+    );
+    return { handled: true, action: 'created', plan: planId };
+  }
+
+  if (!existing) return { handled: true, action: 'noop_no_local_sub' };
+
+  if (type === 'CANCELLATION') {
+    // Desligou a renovação: continua ativa até o fim do período pago.
+    await query(
+      `UPDATE subscriptions SET cancel_at_period_end = TRUE, canceled_at = now(), updated_at = now() WHERE id = $1`,
+      [existing.id]
+    );
+    return { handled: true, action: 'cancel_at_period_end' };
+  }
+  if (type === 'EXPIRATION') {
+    // Encerra o período explicitamente (senão a janela de graça do
+    // cancel_at_period_end poderia manter o acesso além do devido).
+    await query(
+      `UPDATE subscriptions SET
+         status = 'expired', cancel_at_period_end = FALSE,
+         current_period_end = LEAST(COALESCE($2, now()), now()),
+         updated_at = now()
+       WHERE id = $1`,
+      [existing.id, periodEnd]
+    );
+    return { handled: true, action: 'expired' }; // usuário cai no Free automaticamente
+  }
+  if (type === 'BILLING_ISSUE') {
+    await query(`UPDATE subscriptions SET status = 'past_due', updated_at = now() WHERE id = $1`, [existing.id]);
+    return { handled: true, action: 'past_due' };
+  }
+  return { handled: true };
+}
+
 module.exports = {
+  applyRevenueCatEvent,
   FREE_PLAN_ID,
   isSubscriptionUsable,
   getEffectiveSubscription,

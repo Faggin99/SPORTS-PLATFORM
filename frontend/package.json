@@ -37,6 +37,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@hookform/resolvers": "^5.2.2",
     "@react-oauth/google": "^0.13.5",
+    "@revenuecat/purchases-capacitor": "^13.4.2",
     "axios": "^1.12.2",
     "date-fns": "^4.1.0",
     "exceljs": "^4.4.0",

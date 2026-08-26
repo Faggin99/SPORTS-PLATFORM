@@ -6,6 +6,8 @@ import { Button } from '../components/common/Button';
 import { api } from '../services/api';
 import { notify } from '../lib/notify';
 import { openExternalUrl, isNative, getPlatform } from '../lib/platform';
+import { useAuth } from '../contexts/AuthContext';
+import { iapAvailable, getPurchases, configurePurchases } from '../lib/purchases';
 
 function formatPrice(cents, currency = 'BRL') {
   if (!cents) return 'Grátis';
@@ -110,7 +112,7 @@ export function BillingPage() {
 
       <CurrentSubscription sub={sub} colors={colors} onCancel={cancelSubscription} native={native} />
 
-      {native && <NativeManageNotice colors={colors} isFree={sub?.plan_id === 'free' || !!sub?.is_free} />}
+      {native && <NativeBillingSection sub={sub} colors={colors} onSub={setSub} />}
 
       {!native && (() => {
         const paidPlans = plans.filter(p =>
@@ -146,6 +148,145 @@ export function BillingPage() {
       })()}
 
       {!native && <AdvancedActions colors={colors} />}
+    </div>
+  );
+}
+
+// Seção de billing do app NATIVO.
+// iOS com IAP configurado: plano Free → grade de compra nativa (StoreKit);
+// assinatura da App Store → gerenciar/restaurar. Demais casos (Android,
+// binário antigo, chave ausente, assinatura do site) → aviso neutro.
+function NativeBillingSection({ sub, colors, onSub }) {
+  const isFree = sub?.plan_id === 'free' || !!sub?.is_free;
+  if (getPlatform() === 'ios' && iapAvailable()) {
+    if (isFree) return <IapPlansSection colors={colors} onSub={onSub} />;
+    if (sub?.provider === 'apple') return <AppleManageSection colors={colors} onSub={onSub} />;
+  }
+  return <NativeManageNotice colors={colors} isFree={isFree} />;
+}
+
+// Ordem e rótulos dos produtos da loja (mesmo mapa do backend).
+const IAP_PRODUCTS = [
+  { id: 'com.faggin.tactiplan.pro.monthly',   name: 'Pro Mensal',   per: '/mês', desc: 'Quadro tático + exportações' },
+  { id: 'com.faggin.tactiplan.clube.monthly', name: 'Clube Mensal', per: '/mês', desc: 'Tudo do Pro + equipe e categorias' },
+  { id: 'com.faggin.tactiplan.pro.yearly',    name: 'Pro Anual',    per: '/ano', desc: '2 meses grátis vs. mensal' },
+  { id: 'com.faggin.tactiplan.clube.yearly',  name: 'Clube Anual',  per: '/ano', desc: '2 meses grátis vs. mensal' },
+];
+
+async function pollSubscriptionChange(onSub, tries = 10) {
+  for (let i = 0; i < tries; i++) {
+    await new Promise((r) => setTimeout(r, 2000));
+    const s = await api.get('/billing/subscription').catch(() => null);
+    if (s && s.plan_id !== 'free' && !s.is_free) { onSub(s); return true; }
+  }
+  return false;
+}
+
+function IapPlansSection({ colors, onSub }) {
+  const { user } = useAuth();
+  const [pkgs, setPkgs] = useState(null);
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(null);
+
+  useEffect(() => {
+    let on = true;
+    (async () => {
+      try {
+        await configurePurchases(user?.id);
+        const Purchases = await getPurchases();
+        const { current } = await Purchases.getOfferings();
+        if (on) setPkgs(current?.availablePackages || []);
+      } catch (e) {
+        if (on) setError(e?.message || 'Não foi possível carregar os planos.');
+      }
+    })();
+    return () => { on = false; };
+  }, [user?.id]);
+
+  async function buy(pkg) {
+    setBusy(pkg.identifier);
+    try {
+      const Purchases = await getPurchases();
+      await Purchases.purchasePackage({ aPackage: pkg });
+      notify.success('Compra concluída! Liberando seu acesso…');
+      const ok = await pollSubscriptionChange(onSub);
+      if (!ok) notify.info('Compra registrada — seu acesso será liberado em instantes.');
+    } catch (e) {
+      const cancelled = e?.userCancelled || /cancel/i.test(String(e?.code || e?.message || ''));
+      if (!cancelled) notify.error(e?.message || 'Não foi possível concluir a compra.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function restore() {
+    setBusy('restore');
+    try {
+      const Purchases = await getPurchases();
+      await Purchases.restorePurchases();
+      const ok = await pollSubscriptionChange(onSub, 3);
+      notify[ok ? 'success' : 'info'](ok ? 'Compras restauradas!' : 'Nenhuma compra ativa encontrada.');
+    } catch (e) {
+      notify.error(e?.message || 'Não foi possível restaurar as compras.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const ordered = (pkgs || [])
+    .map((pkg) => ({ pkg, meta: IAP_PRODUCTS.find((m) => m.id === (pkg.product?.identifier || '')) }))
+    .sort((a, b) => (a.meta ? IAP_PRODUCTS.indexOf(a.meta) : 99) - (b.meta ? IAP_PRODUCTS.indexOf(b.meta) : 99));
+
+  return (
+    <div style={{ marginTop: 32 }}>
+      <h2 style={{ fontSize: '1.125rem', fontWeight: 600, color: colors.text, margin: '0 0 12px' }}>Planos disponíveis</h2>
+      {error && <p style={{ color: colors.textSecondary, fontSize: '0.875rem' }}>{error}</p>}
+      {!error && pkgs === null && <p style={{ color: colors.textSecondary, fontSize: '0.875rem' }}>Carregando planos…</p>}
+      {!error && pkgs !== null && pkgs.length === 0 && (
+        <p style={{ color: colors.textSecondary, fontSize: '0.875rem' }}>Planos indisponíveis no momento.</p>
+      )}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16 }}>
+        {ordered.map(({ pkg, meta }) => (
+          <div key={pkg.identifier} style={{ padding: 16, backgroundColor: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
+              <strong style={{ color: colors.text }}>{meta?.name || pkg.product?.title || pkg.identifier}</strong>
+              <span style={{ color: colors.text, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                {pkg.product?.priceString}
+                <span style={{ fontWeight: 400, color: colors.textSecondary, fontSize: 13 }}>{meta?.per || ''}</span>
+              </span>
+            </div>
+            {meta?.desc && <div style={{ fontSize: '0.75rem', color: colors.textSecondary, marginTop: 2 }}>{meta.desc}</div>}
+            <div style={{ height: 12 }} />
+            <Button size="sm" fullWidth onClick={() => buy(pkg)} disabled={busy !== null}>
+              {busy === pkg.identifier ? 'Abrindo…' : 'Assinar'}
+            </Button>
+          </div>
+        ))}
+      </div>
+      <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <button onClick={restore} disabled={busy !== null} style={{ background: 'transparent', border: 'none', color: colors.primary, fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer', padding: 4, alignSelf: 'flex-start' }}>
+          {busy === 'restore' ? 'Restaurando…' : 'Restaurar compras'}
+        </button>
+        <p style={{ fontSize: '0.75rem', color: colors.textSecondary, margin: 0, lineHeight: 1.5 }}>
+          A assinatura é cobrada no seu Apple ID e renova automaticamente até ser cancelada
+          nas configurações de assinaturas da App Store.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function AppleManageSection({ colors, onSub }) {
+  return (
+    <div style={{ marginTop: 24, padding: 16, backgroundColor: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 12 }}>
+      <div style={{ fontSize: '0.9rem', fontWeight: 600, color: colors.text, marginBottom: 6 }}>Assinatura pela App Store</div>
+      <p style={{ fontSize: '0.85rem', color: colors.textSecondary, margin: '0 0 12px', lineHeight: 1.55 }}>
+        Sua assinatura é cobrada no seu Apple ID. Pra trocar de plano ou cancelar, use as
+        configurações de assinaturas da App Store.
+      </p>
+      <Button size="sm" variant="secondary" onClick={() => openExternalUrl('https://apps.apple.com/account/subscriptions')}>
+        Gerenciar assinatura
+      </Button>
     </div>
   );
 }
@@ -353,8 +494,8 @@ function CurrentSubscription({ sub, colors, onCancel, native }) {
         <AddonsSection colors={colors} />
       )}
 
-      {/* Cancelar (só pra planos pagos não-vitalício/admin) */}
-      {sub.plan_id !== 'lifetime' && !sub.is_admin && (
+      {/* Cancelar (só pra planos pagos não-vitalício/admin; assinatura de LOJA cancela na App Store/Play) */}
+      {sub.plan_id !== 'lifetime' && !sub.is_admin && sub.provider !== 'apple' && sub.provider !== 'google' && (
         <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${colors.border}`, display: 'flex', justifyContent: 'flex-end' }}>
           <button
             onClick={onCancel}
