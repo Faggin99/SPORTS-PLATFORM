@@ -811,6 +811,8 @@ const RC_PRODUCT_TO_PLAN = {
   'com.faggin.tactiplan.pro.yearly':    'pro_annual',
   'com.faggin.tactiplan.clube.monthly': 'clube',
   'com.faggin.tactiplan.clube.yearly':  'clube_annual',
+  // alias defensivo: o ID foi criado com um 'V' colado por engano no ASC
+  'Vcom.faggin.tactiplan.clube.yearly': 'clube_annual',
 };
 
 function rcResolveUserId(event) {
