@@ -198,10 +198,9 @@ function IapPlansSection({ colors, onSub }) {
       new Promise((_, rej) => setTimeout(() => rej(new Error('A loja demorou pra responder. Tente novamente em instantes.')), ms)),
     ]);
     (async () => {
-      let stage = 'import';
+      let stage = 'configure';
       try {
-        const Purchases = await withTimeout(getPurchases(), 10000);
-        stage = 'configure';
+        const Purchases = getPurchases(); // síncrono — NÃO dar await no Proxy
         await withTimeout(configurePurchases(user?.id), 15000);
         stage = 'offerings';
         const { current } = await withTimeout(Purchases.getOfferings(), 20000);
@@ -217,7 +216,7 @@ function IapPlansSection({ colors, onSub }) {
   async function buy(pkg) {
     setBusy(pkg.identifier);
     try {
-      const Purchases = await getPurchases();
+      const Purchases = getPurchases();
       await Purchases.purchasePackage({ aPackage: pkg });
       notify.success('Compra concluída! Liberando seu acesso…');
       const ok = await pollSubscriptionChange(onSub);
@@ -233,7 +232,7 @@ function IapPlansSection({ colors, onSub }) {
   async function restore() {
     setBusy('restore');
     try {
-      const Purchases = await getPurchases();
+      const Purchases = getPurchases();
       await Purchases.restorePurchases();
       const ok = await pollSubscriptionChange(onSub, 3);
       notify[ok ? 'success' : 'info'](ok ? 'Compras restauradas!' : 'Nenhuma compra ativa encontrada.');

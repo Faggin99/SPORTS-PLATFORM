@@ -45,7 +45,19 @@ export async function initOtaUpdates() {
     if (manifest.version === currentVersion) return; // já está na última
 
     // Já baixamos essa versão numa checagem anterior? (aguardando restart)
-    if (localStorage.getItem('ota_pending_version') === manifest.version) return;
+    // Se o bundle existe mas não está rodando (restart ainda não aconteceu, ou
+    // o plugin fez rollback), re-arma o next(); se ele sumiu, baixa de novo.
+    if (localStorage.getItem('ota_pending_version') === manifest.version) {
+      const pendingId = localStorage.getItem('ota_pending_id');
+      if (pendingId) {
+        try {
+          await CapacitorUpdater.next({ id: pendingId });
+          return;
+        } catch { /* bundle não existe mais — segue pro download */ }
+      }
+      localStorage.removeItem('ota_pending_version');
+      localStorage.removeItem('ota_pending_id');
+    }
 
     const bundle = await CapacitorUpdater.download({
       url: manifest.url,
@@ -56,6 +68,7 @@ export async function initOtaUpdates() {
       // Aplica no próximo background/restart — não interrompe a sessão atual.
       await CapacitorUpdater.next({ id: bundle.id });
       localStorage.setItem('ota_pending_version', manifest.version);
+      localStorage.setItem('ota_pending_id', bundle.id);
     }
   } catch (err) {
     console.error('[OTA] falha ao checar/baixar atualização:', err?.message || err);

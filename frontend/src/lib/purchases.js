@@ -11,7 +11,11 @@ export function iapAvailable() {
   return Capacitor.getPlatform() === 'ios' && !!IOS_KEY && Capacitor.isPluginAvailable('Purchases');
 }
 
-export async function getPurchases() {
+// SÍNCRONO de propósito: o objeto Purchases é um Proxy que responde a QUALQUER
+// propriedade (inclusive `.then`) com uma chamada nativa. Devolvê-lo por uma
+// função async / dar `await` nele faz o JS tratá-lo como thenable e chamar um
+// método nativo "then" que nunca responde → trava pra sempre.
+export function getPurchases() {
   return Purchases;
 }
 
