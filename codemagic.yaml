@@ -27,6 +27,8 @@ workflows:
         # App da LOJA aponta pro backend de PRODUÇÃO
         VITE_API_URL: "https://app.tactiplan.faggin.com.br/api"
         APP_VERSION: "1.0.3"
+        # Chave pública do SDK RevenueCat (appl_ = safe to commit, é client-side)
+        REVENUECAT_IOS_KEY: "appl_oXeNIjbStppBoOFbyyUNbiAbstu"
     scripts:
       - name: Dependências web
         script: |
@@ -36,7 +38,7 @@ workflows:
         script: |
           cd frontend
           printf 'VITE_API_URL=%s\n' "$VITE_API_URL" > .env.production.local
-          # Chave pública do RevenueCat (env REVENUECAT_IOS_KEY no Codemagic; vazia = IAP desligado)
+          # Chave PÚBLICA do RevenueCat (embarca no app de qualquer forma; vazia = IAP desligado)
           printf 'VITE_REVENUECAT_IOS_KEY=%s\n' "${REVENUECAT_IOS_KEY:-}" >> .env.production.local
           npm run build
       - name: Capacitor sync iOS
