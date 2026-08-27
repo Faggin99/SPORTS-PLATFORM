@@ -190,14 +190,22 @@ function IapPlansSection({ colors, onSub }) {
 
   useEffect(() => {
     let on = true;
+    // Timeout: se a loja não responder (ex.: contrato de apps pagos ainda não
+    // ativo, produtos recém-criados propagando), mostra erro em vez de
+    // carregar eternamente.
+    const withTimeout = (promise, ms) => Promise.race([
+      promise,
+      new Promise((_, rej) => setTimeout(() => rej(new Error('A loja demorou pra responder. Tente novamente em instantes.')), ms)),
+    ]);
     (async () => {
       try {
-        await configurePurchases(user?.id);
+        await withTimeout(configurePurchases(user?.id), 15000);
         const Purchases = await getPurchases();
-        const { current } = await Purchases.getOfferings();
+        const { current } = await withTimeout(Purchases.getOfferings(), 20000);
         if (on) setPkgs(current?.availablePackages || []);
       } catch (e) {
-        if (on) setError(e?.message || 'Não foi possível carregar os planos.');
+        const detail = e?.underlyingErrorMessage || e?.message || 'Não foi possível carregar os planos.';
+        if (on) setError(detail);
       }
     })();
     return () => { on = false; };
@@ -243,7 +251,9 @@ function IapPlansSection({ colors, onSub }) {
       {error && <p style={{ color: colors.textSecondary, fontSize: '0.875rem' }}>{error}</p>}
       {!error && pkgs === null && <p style={{ color: colors.textSecondary, fontSize: '0.875rem' }}>Carregando planos…</p>}
       {!error && pkgs !== null && pkgs.length === 0 && (
-        <p style={{ color: colors.textSecondary, fontSize: '0.875rem' }}>Planos indisponíveis no momento.</p>
+        <p style={{ color: colors.textSecondary, fontSize: '0.875rem' }}>
+          Planos indisponíveis no momento — a loja ainda não liberou os produtos. Tente novamente mais tarde.
+        </p>
       )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16 }}>
         {ordered.map(({ pkg, meta }) => (
