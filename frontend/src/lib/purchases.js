@@ -17,7 +17,8 @@ export async function getPurchases() {
 
 // appUserID = nosso users.id (UUID) — é o que o webhook usa pra achar a conta.
 export async function configurePurchases(userId) {
-  if (!iapAvailable() || !userId) return false;
+  if (!iapAvailable()) throw new Error('IAP indisponível neste build');
+  if (!userId) throw new Error('sessão sem user.id');
   if (configuredFor === userId) return true;
   const Purchases = await getPurchases();
   await Purchases.configure({ apiKey: IOS_KEY, appUserID: userId });

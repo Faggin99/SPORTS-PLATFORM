@@ -198,14 +198,17 @@ function IapPlansSection({ colors, onSub }) {
       new Promise((_, rej) => setTimeout(() => rej(new Error('A loja demorou pra responder. Tente novamente em instantes.')), ms)),
     ]);
     (async () => {
+      let stage = 'import';
       try {
+        const Purchases = await withTimeout(getPurchases(), 10000);
+        stage = 'configure';
         await withTimeout(configurePurchases(user?.id), 15000);
-        const Purchases = await getPurchases();
+        stage = 'offerings';
         const { current } = await withTimeout(Purchases.getOfferings(), 20000);
         if (on) setPkgs(current?.availablePackages || []);
       } catch (e) {
         const detail = e?.underlyingErrorMessage || e?.message || 'Não foi possível carregar os planos.';
-        if (on) setError(detail);
+        if (on) setError(`[${stage}] ${detail}${e?.code ? ` (code ${e.code})` : ''}`);
       }
     })();
     return () => { on = false; };
