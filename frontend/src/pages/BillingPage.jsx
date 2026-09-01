@@ -188,36 +188,51 @@ function IapPlansSection({ colors, onSub }) {
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(null);
 
-  useEffect(() => {
-    let on = true;
-    // Timeout: se a loja não responder (ex.: contrato de apps pagos ainda não
-    // ativo, produtos recém-criados propagando), mostra erro em vez de
-    // carregar eternamente.
-    const withTimeout = (promise, ms) => Promise.race([
-      promise,
-      new Promise((_, rej) => setTimeout(() => rej(new Error('A loja demorou pra responder. Tente novamente em instantes.')), ms)),
-    ]);
-    (async () => {
-      let stage = 'configure';
+  // Timeout: se a loja não responder, mostra erro (com retry) em vez de
+  // carregar eternamente.
+  const withTimeout = (promise, ms) => Promise.race([
+    promise,
+    new Promise((_, rej) => setTimeout(() => rej(new Error('A loja demorou pra responder. Tente novamente em instantes.')), ms)),
+  ]);
+
+  async function load() {
+    setError(null);
+    setPkgs(null);
+    let stage = 'configure';
+    try {
+      const Purchases = getPurchases(); // síncrono — NÃO dar await no Proxy
+      await withTimeout(configurePurchases(user?.id), 15000);
+      stage = 'offerings';
+      let list = [];
       try {
-        const Purchases = getPurchases(); // síncrono — NÃO dar await no Proxy
-        await withTimeout(configurePurchases(user?.id), 15000);
-        stage = 'offerings';
         const { current } = await withTimeout(Purchases.getOfferings(), 20000);
-        if (on) setPkgs(current?.availablePackages || []);
-      } catch (e) {
-        const detail = e?.underlyingErrorMessage || e?.message || 'Não foi possível carregar os planos.';
-        if (on) setError(`[${stage}] ${detail}${e?.code ? ` (code ${e.code})` : ''}`);
+        list = current?.availablePackages || [];
+      } catch { /* cai pro fallback abaixo */ }
+      if (list.length === 0) {
+        // Fallback: busca os produtos DIRETO na loja. O offerings pode falhar
+        // no ambiente de revisão da Apple (assinaturas "Waiting for Review"
+        // às vezes não resolvem lá) — sem isso o revisor via tela vazia.
+        stage = 'products';
+        const { products } = await withTimeout(
+          Purchases.getProducts({ productIdentifiers: IAP_PRODUCTS.map((m) => m.id) }), 20000
+        );
+        list = (products || []).map((prod) => ({ __direct: true, identifier: prod.identifier, product: prod }));
       }
-    })();
-    return () => { on = false; };
-  }, [user?.id]);
+      setPkgs(list);
+    } catch (e) {
+      const detail = e?.underlyingErrorMessage || e?.message || 'Não foi possível carregar os planos.';
+      setError(`[${stage}] ${detail}${e?.code ? ` (code ${e.code})` : ''}`);
+    }
+  }
+
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [user?.id]);
 
   async function buy(pkg) {
     setBusy(pkg.identifier);
     try {
       const Purchases = getPurchases();
-      await Purchases.purchasePackage({ aPackage: pkg });
+      if (pkg.__direct) await Purchases.purchaseStoreProduct({ product: pkg.product });
+      else await Purchases.purchasePackage({ aPackage: pkg });
       notify.success('Compra concluída! Liberando seu acesso…');
       const ok = await pollSubscriptionChange(onSub);
       if (!ok) notify.info('Compra registrada — seu acesso será liberado em instantes.');
@@ -250,7 +265,12 @@ function IapPlansSection({ colors, onSub }) {
   return (
     <div style={{ marginTop: 32 }}>
       <h2 style={{ fontSize: '1.125rem', fontWeight: 600, color: colors.text, margin: '0 0 12px' }}>Planos disponíveis</h2>
-      {error && <p style={{ color: colors.textSecondary, fontSize: '0.875rem' }}>{error}</p>}
+      {error && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <p style={{ color: colors.textSecondary, fontSize: '0.875rem', margin: 0 }}>{error}</p>
+          <Button size="sm" variant="secondary" onClick={load}>Tentar novamente</Button>
+        </div>
+      )}
       {!error && pkgs === null && <p style={{ color: colors.textSecondary, fontSize: '0.875rem' }}>Carregando planos…</p>}
       {!error && pkgs !== null && pkgs.length === 0 && (
         <p style={{ color: colors.textSecondary, fontSize: '0.875rem' }}>
