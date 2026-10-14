@@ -1,0 +1,68 @@
+# Pipeline iOS do TactiPlan — builda o web, sincroniza o Capacitor, assina com
+# a chave do App Store Connect (integração "tactiplan" configurada na UI do
+# Codemagic) e publica no TestFlight.
+#
+# Pré-requisitos (uma vez, na UI do Codemagic):
+#   Teams → Personal Account → Integrations → App Store Connect →
+#   adicionar a chave .p8 (Key ID + Issuer ID) com o nome "tactiplan".
+workflows:
+  ios-testflight:
+    name: iOS — TestFlight
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    integrations:
+      app_store_connect: tactiplan
+    environment:
+      ios_signing:
+        # Identidades ARMAZENADAS no Codemagic (Settings → Code signing
+        # identities): certificado gerado via integração + profile App Store
+        # criado no portal da Apple e enviado com esses reference names.
+        certificates:
+          - tactiplan-dist
+        provisioning_profiles:
+          - tactiplan-appstore
+      node: 22
+      xcode: latest
+      vars:
+        # App da LOJA aponta pro backend de PRODUÇÃO
+        VITE_API_URL: "https://app.tactiplan.faggin.com.br/api"
+        APP_VERSION: "1.0.3"
+        # Chave pública do SDK RevenueCat (appl_ = safe to commit, é client-side)
+        REVENUECAT_IOS_KEY: "appl_oXeNIjbStppBoOFbyyUNbiAbstu"
+    scripts:
+      - name: Dependências web
+        script: |
+          cd frontend
+          npm ci
+      - name: Build web (produção)
+        script: |
+          cd frontend
+          printf 'VITE_API_URL=%s\n' "$VITE_API_URL" > .env.production.local
+          # Chave PÚBLICA do RevenueCat (embarca no app de qualquer forma; vazia = IAP desligado)
+          printf 'VITE_REVENUECAT_IOS_KEY=%s\n' "${REVENUECAT_IOS_KEY:-}" >> .env.production.local
+          npm run build
+      - name: Capacitor sync iOS
+        script: |
+          cd frontend
+          npx cap sync ios
+      - name: Versão e número de build
+        script: |
+          cd frontend/ios/App
+          agvtool new-marketing-version "$APP_VERSION"
+          agvtool new-version -all "$PROJECT_BUILD_NUMBER"
+      - name: Assinatura automática (perfis do App Store Connect)
+        script: |
+          xcode-project use-profiles
+      - name: Build IPA
+        script: |
+          xcode-project build-ipa \
+            --project frontend/ios/App/App.xcodeproj \
+            --scheme App
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        # Submissão à revisão beta (só p/ testadores EXTERNOS) — ligar quando abrirmos beta externo
+        submit_to_testflight: false

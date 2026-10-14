@@ -31,6 +31,9 @@ frontend/ios/App/build/
 frontend/ios/Pods/
 frontend/ios/App/Podfile.lock
 
-# OTA bundles (gerados por scripts/ota-release.sh)
+# AAB/APK gerados vão pro repo pra facilitar download (temporário)
+# Se ficar grande demais, remover:
+# frontend/mobile-artifacts/*.aab
+# frontend/mobile-artifacts/*.apk
 ota/
 frontend/mobile-artifacts/

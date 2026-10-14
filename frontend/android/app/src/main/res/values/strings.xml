@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">TactiPlan</string>
+    <string name="title_activity_main">TactiPlan</string>
+    <string name="package_name">com.faggin.tactiplan</string>
+    <string name="custom_url_scheme">com.faggin.tactiplan</string>
+</resources>
