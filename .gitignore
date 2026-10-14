@@ -19,3 +19,18 @@ backend-node/uploads/
 extract.json
 uploads/
 landing/downloads/
+pwa-cache-dump.json
+
+# Mobile: NÃO commitar keystore (backup fora do repo!) e nem builds
+frontend/android/**/*.keystore
+frontend/android/keystore.properties
+frontend/android/app/build/
+frontend/android/build/
+frontend/android/.gradle/
+frontend/ios/App/build/
+frontend/ios/Pods/
+frontend/ios/App/Podfile.lock
+
+# OTA bundles (gerados por scripts/ota-release.sh)
+ota/
+frontend/mobile-artifacts/

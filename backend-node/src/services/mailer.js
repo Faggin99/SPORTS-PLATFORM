@@ -74,16 +74,29 @@ async function sendPasswordResetEmail({ to, name, resetUrl }) {
   return sendMail({ to, subject, html, text });
 }
 
-// Boas-vindas — disparado logo após signup. Menciona os 30d do plano Clube grátis.
+// Boas-vindas — disparado logo após signup. Se trialDaysLeft > 0 fala do
+// trial do Pro; senão (padrão hoje) apresenta o plano Free permanente.
 async function sendWelcomeEmail({ to, name, trialDaysLeft, appUrl }) {
-  const days = Number.isFinite(trialDaysLeft) ? trialDaysLeft : 30;
+  const days = Number.isFinite(trialDaysLeft) ? trialDaysLeft : 0;
   const url = appUrl || 'https://app.tactiplan.faggin.com.br';
+  const bUrl = `${url.replace(/\/$/, '')}/#/billing`;
   const subject = `Bem-vindo ao TactiPlan, ${name || 'treinador'}!`;
-  const text = `Olá, ${name || ''}.\n\nSua conta no TactiPlan está pronta. Você já começa com ${days} dias grátis do plano Clube — acesso completo a treinos, jogos, plantel e o quadro tático.\n\nComece agora: ${url}\n\nBons treinos!\n— TactiPlan`;
+  if (days > 0) {
+    const text = `Olá, ${name || ''}.\n\nSua conta no TactiPlan está pronta. Você já começa com ${days} dias grátis do plano Pro — treinos, jogos, plantel e o quadro tático. Ao final, você continua no plano Free (planejamento, jogos e estatísticas) ou assina pra manter tudo.\n\nComece agora: ${url}\n\nBons treinos!\n— TactiPlan`;
+    const bodyHtml = `
+      <p style="line-height: 1.5;">Olá, <strong>${name || ''}</strong>.</p>
+      <p style="line-height: 1.5;">Sua conta está pronta. Você já começa com <strong>${days} dias grátis do plano Pro</strong>: treinos semanais, gestão de jogos, plantel e o quadro tático. Ao final, você continua no plano Free (planejamento, jogos e estatísticas) ou assina pra manter tudo.</p>
+      ${button(url, 'Abrir o TactiPlan')}
+      <p style="line-height: 1.5; color: #64748b; font-size: 13px;">Qualquer dúvida, é só responder este e-mail.</p>
+    `;
+    return sendMail({ to, subject, html: wrap({ title: 'Bem-vindo ao TactiPlan', bodyHtml }), text });
+  }
+  const text = `Olá, ${name || ''}.\n\nSua conta no TactiPlan está pronta, no plano Free — grátis pra sempre: planejamento semanal de treinos, jogos, plantel e estatísticas.\n\nComece agora: ${url}\n\nQuando quiser o quadro tático interativo e as exportações em PDF/vídeo, os planos Pro e Clube estão em: ${bUrl}\n\nBons treinos!\n— TactiPlan`;
   const bodyHtml = `
     <p style="line-height: 1.5;">Olá, <strong>${name || ''}</strong>.</p>
-    <p style="line-height: 1.5;">Sua conta está pronta. Você já começa com <strong>${days} dias grátis do plano Clube</strong> — o pacote completo: treinos semanais, gestão de jogos, plantel e o quadro tático.</p>
+    <p style="line-height: 1.5;">Sua conta está pronta, no <strong>plano Free — grátis pra sempre</strong>: planejamento semanal de treinos, gestão de jogos, plantel e estatísticas.</p>
     ${button(url, 'Abrir o TactiPlan')}
+    <p style="line-height: 1.5;">Quando quiser o <strong>quadro tático interativo</strong> e as <strong>exportações em PDF e vídeo</strong>, os planos Pro e Clube estão a um clique: <a href="${bUrl}" style="color:#2563eb;">ver planos</a>.</p>
     <p style="line-height: 1.5; color: #64748b; font-size: 13px;">Qualquer dúvida, é só responder este e-mail.</p>
   `;
   return sendMail({ to, subject, html: wrap({ title: 'Bem-vindo ao TactiPlan', bodyHtml }), text });
@@ -95,14 +108,29 @@ async function sendTrialExpiringEmail({ to, name, daysLeft, appUrl, billingUrl }
   const url = appUrl || 'https://app.tactiplan.faggin.com.br';
   const bUrl = billingUrl || `${url.replace(/\/$/, '')}/#/billing`;
   const subject = `Seu teste grátis acaba em ${days} ${days === 1 ? 'dia' : 'dias'} — TactiPlan`;
-  const text = `Olá, ${name || ''}.\n\nSeu teste grátis do plano Clube termina em ${days} ${days === 1 ? 'dia' : 'dias'}. Pra continuar sem interrupção, ative a assinatura:\n\n${bUrl}\n\nSe preferir, é só ignorar — a conta segue disponível, mas os recursos pagos param até você assinar.\n\n— TactiPlan`;
+  const text = `Olá, ${name || ''}.\n\nSeu período de avaliação termina em ${days} ${days === 1 ? 'dia' : 'dias'}. Pra continuar sem interrupção, ative a assinatura:\n\n${bUrl}\n\nSe não assinar, tudo bem: você continua no plano Free (treinos, jogos, plantel e estatísticas seguem funcionando) e seus dados ficam salvos. Só o quadro tático e as exportações ficam aguardando a assinatura.\n\n— TactiPlan`;
   const bodyHtml = `
     <p style="line-height: 1.5;">Olá, <strong>${name || ''}</strong>.</p>
-    <p style="line-height: 1.5;">Seu teste grátis do <strong>plano Clube</strong> termina em <strong>${days} ${days === 1 ? 'dia' : 'dias'}</strong>. Pra continuar com tudo funcionando (treinos, jogos, plantel, quadro tático), ative sua assinatura:</p>
+    <p style="line-height: 1.5;">Seu período de avaliação termina em <strong>${days} ${days === 1 ? 'dia' : 'dias'}</strong>. Pra continuar com tudo funcionando (treinos, jogos, plantel, quadro tático), ative sua assinatura:</p>
     ${button(bUrl, 'Ativar assinatura')}
-    <p style="line-height: 1.5; color: #64748b; font-size: 13px;">Se preferir, é só ignorar — a conta segue disponível, mas os recursos pagos ficam bloqueados até você assinar.</p>
+    <p style="line-height: 1.5; color: #64748b; font-size: 13px;">Se não assinar, tudo bem: você continua no <strong>plano Free</strong> (treinos, jogos, plantel e estatísticas seguem funcionando) e <strong>seus dados ficam salvos</strong>. Só o quadro tático e as exportações ficam aguardando a assinatura.</p>
   `;
   return sendMail({ to, subject, html: wrap({ title: `Seu teste acaba em ${days} ${days === 1 ? 'dia' : 'dias'}`, bodyHtml }), text });
+}
+
+// Trial terminou — convite pra assinar e continuar de onde parou.
+async function sendTrialExpiredEmail({ to, name, appUrl, billingUrl }) {
+  const url = appUrl || 'https://app.tactiplan.faggin.com.br';
+  const bUrl = billingUrl || `${url.replace(/\/$/, '')}/#/billing`;
+  const subject = 'Seu teste terminou — você continua no plano Free · TactiPlan';
+  const text = `Olá, ${name || ''}.\n\nSeu período de avaliação do TactiPlan terminou e sua conta passou pro plano Free: treinos, jogos, plantel e estatísticas continuam funcionando, e suas jogadas ficam salvas. Pra voltar a usar o quadro tático e as exportações, é só ativar a assinatura:\n\n${bUrl}\n\n— TactiPlan`;
+  const bodyHtml = `
+    <p style="line-height: 1.5;">Olá, <strong>${name || ''}</strong>.</p>
+    <p style="line-height: 1.5;">Seu período de avaliação terminou e sua conta passou pro <strong>plano Free</strong>: treinos, jogos, plantel e estatísticas continuam funcionando, e <strong>suas jogadas ficam salvas</strong>. Pra voltar a usar o quadro tático e as exportações, é só ativar a assinatura:</p>
+    ${button(bUrl, 'Ativar assinatura')}
+    <p style="line-height: 1.5; color: #64748b; font-size: 13px;">Ficou com alguma dúvida ou precisa de mais tempo pra avaliar? Responde este e-mail que a gente conversa.</p>
+  `;
+  return sendMail({ to, subject, html: wrap({ title: 'Seu teste terminou — você continua no Free', bodyHtml }), text });
 }
 
 // Pagamento aprovado.
@@ -143,6 +171,7 @@ module.exports = {
   sendPasswordResetEmail,
   sendWelcomeEmail,
   sendTrialExpiringEmail,
+  sendTrialExpiredEmail,
   sendPaymentApprovedEmail,
   sendPaymentFailedEmail,
 };

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { NavLink, useLocation, useNavigate, Link } from 'react-router-dom';
 import {
   Moon, Sun, LogOut, HelpCircle, Settings, ChevronDown, Menu, X,
-  Calendar, BarChart3, ClipboardList, Waypoints, Users, Building2, Target, Layers, BookOpen, User, CreditCard, LayoutGrid, UsersRound, Lock, Trophy,
+  Calendar, BarChart3, ClipboardList, Waypoints, Users, Building2, Target, Layers, BookOpen, User, CreditCard, LayoutGrid, UsersRound, Lock, Trophy, Home,
 } from 'lucide-react';
 import { usePlanFeatures } from '../../hooks/usePlanFeatures';
 import { useCan } from '../../hooks/useCan';
@@ -40,7 +40,7 @@ const mainNav = [
   { to: '/training-stats', icon: BarChart3, label: 'Estatísticas' },
   { kind: 'equipe', icon: UsersRound, label: 'Minha Equipe' },
   { kind: 'cadastros', icon: ClipboardList, label: 'Cadastros' },
-  { to: '/tactical-board', icon: Waypoints, label: 'Quadro Tático' },
+  { to: '/tactical-board', icon: Waypoints, label: 'Quadro Tático', gated: 'quadro_tatico' },
 ];
 
 function useOnOutsideClick(ref, handler) {
@@ -166,14 +166,8 @@ export function Header({ isMobile = false }) {
     width: '2rem',
     height: '2rem',
     borderRadius: '0.5rem',
-    background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
-    color: '#fff',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontWeight: 800,
-    fontSize: '1rem',
-    letterSpacing: '-0.02em',
+    display: 'block',
+    flexShrink: 0,
   };
 
   const brandTextStyle = {
@@ -325,10 +319,10 @@ export function Header({ isMobile = false }) {
           <button style={iconBtnStyle} onClick={() => setMobileOpen(true)} aria-label="Abrir menu">
             <Menu size={22} />
           </button>
-          <div style={{ ...brandStyle, flex: 1 }}>
-            <div style={logoBadgeStyle}>T</div>
+          <Link to="/home" style={{ ...brandStyle, flex: 1, textDecoration: 'none' }}>
+            <img src="/pwa-192.svg" alt="TactiPlan" style={logoBadgeStyle} />
             <span style={brandTextStyle}>TactiPlan</span>
-          </div>
+          </Link>
           <button style={iconBtnStyle} onClick={toggleTheme} aria-label="Tema">
             {isDark ? <Sun size={20} /> : <Moon size={20} />}
           </button>
@@ -339,7 +333,7 @@ export function Header({ isMobile = false }) {
         <aside style={mobileDrawerStyle}>
           <div style={{ padding: '1rem', borderBottom: `1px solid ${colors.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={brandStyle}>
-              <div style={logoBadgeStyle}>T</div>
+              <img src="/pwa-192.svg" alt="TactiPlan" style={logoBadgeStyle} />
               <span style={brandTextStyle}>TactiPlan</span>
             </div>
             <button style={iconBtnStyle} onClick={() => setMobileOpen(false)} aria-label="Fechar"><X size={20} /></button>
@@ -349,6 +343,11 @@ export function Header({ isMobile = false }) {
             {showClubSelector && <ClubSelector />}
           </div>
           <nav style={{ flex: 1 }}>
+            {/* Início — sem isso, no mobile não havia como voltar pro dashboard */}
+            <NavLink to="/home" style={({ isActive }) => mobileLinkStyle(isActive)}>
+              <Home size={20} strokeWidth={1.5} />
+              Início
+            </NavLink>
             {mainNav.map((item) => {
               if (item.kind === 'equipe' || item.kind === 'cadastros') {
                 const items = item.kind === 'equipe' ? visibleEquipeItems : visibleCadastrosItems;
@@ -370,14 +369,21 @@ export function Header({ isMobile = false }) {
                   </div>
                 );
               }
+              const lockedMain = item.gated && !planFeatures.has(item.gated);
               return (
-                <NavLink key={item.to} to={item.to} style={({ isActive }) => mobileLinkStyle(isActive)}>
+                <NavLink key={item.to} to={item.to} style={({ isActive }) => ({ ...mobileLinkStyle(isActive), opacity: lockedMain ? 0.8 : 1 })}>
                   <item.icon size={20} strokeWidth={1.5} />
-                  {item.label}
+                  <span style={{ flex: 1 }}>{item.label}</span>
+                  {lockedMain && <Lock size={12} color="#f59e0b" />}
                 </NavLink>
               );
             })}
             <div style={{ borderTop: `1px solid ${colors.border}`, marginTop: '0.5rem' }}>
+              {/* Assinatura — antes inalcançável no mobile */}
+              <NavLink to="/billing" style={({ isActive }) => mobileLinkStyle(isActive)}>
+                <CreditCard size={20} strokeWidth={1.5} />
+                Assinatura
+              </NavLink>
               <button
                 onClick={() => { setSettingsTab('perfil'); setSettingsSheetOpen(true); setMobileOpen(false); }}
                 style={{ ...mobileLinkStyle(false), background: 'transparent', border: 'none', width: '100%', cursor: 'pointer' }}
@@ -407,7 +413,7 @@ export function Header({ isMobile = false }) {
     <header style={headerStyle}>
       {/* Brand */}
       <Link to="/home" style={{ ...brandStyle, textDecoration: 'none' }}>
-        <div style={logoBadgeStyle}>T</div>
+        <img src="/pwa-192.svg" alt="TactiPlan" style={logoBadgeStyle} />
         <span style={brandTextStyle}>TactiPlan</span>
       </Link>
 
@@ -469,10 +475,12 @@ export function Header({ isMobile = false }) {
             );
           }
           const active = location.pathname === item.to || location.pathname.startsWith(item.to + '/');
+          const locked = item.gated && !planFeatures.has(item.gated);
           return (
-            <NavLink key={item.to} to={item.to} style={() => navItemStyle(active)}>
+            <NavLink key={item.to} to={item.to} style={() => ({ ...navItemStyle(active), opacity: locked ? 0.8 : 1 })}>
               <item.icon size={18} strokeWidth={1.75} />
               {item.label}
+              {locked && <Lock size={12} color="#f59e0b" />}
             </NavLink>
           );
         })}

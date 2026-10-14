@@ -15,6 +15,7 @@ import { athleteService } from '../modules/training-management/services/athleteS
 import { trainingService } from '../services/trainingService';
 import { gameStatsService } from '../services/gameStatsService';
 import { generateClubReportPDF } from '../utils/clubReportPdf';
+import { useFeatureGuard } from '../components/common/PlanGate';
 
 const QUICK_LINKS = [
   { key: 'training',       label: 'Programação',   icon: Calendar,   route: '/training',          color: '#2563eb' },
@@ -64,6 +65,7 @@ export function HomePage() {
   const { colors } = useTheme();
   const { selectedClub } = useClub();
   const isMobile = useIsMobile();
+  const guardFeature = useFeatureGuard();
 
   const [dashboard, setDashboard] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -77,6 +79,7 @@ export function HomePage() {
       alert('Selecione um clube antes de gerar o relatório.');
       return;
     }
+    if (!guardFeature('pdf_export')) return;
     setReportLoading(true);
     try {
       const y = new Date().getFullYear();
@@ -88,7 +91,7 @@ export function HomePage() {
         gameStatsService.getStats({ start_date, end_date, clubId: selectedClub.id }).catch(() => null),
       ]);
       const trainingStats = trainingResp?.data || trainingResp || null;
-      generateClubReportPDF({
+      await generateClubReportPDF({
         athletes: Array.isArray(athletes) ? athletes : [],
         trainingStats,
         gameStats,
@@ -105,7 +108,7 @@ export function HomePage() {
     } finally {
       setReportLoading(false);
     }
-  }, [selectedClub?.id, selectedClub?.name, selectedClub?.modality]);
+  }, [selectedClub?.id, selectedClub?.name, selectedClub?.modality, selectedClub?.primary_color]);
 
   const loadDashboard = useCallback(async () => {
     setLoading(true);
@@ -158,7 +161,9 @@ export function HomePage() {
 
   return (
     <Layout>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxWidth: 1280, width: '100%', margin: '0 auto' }}>
+      {/* flex:1 — em telas altas (tablet) o conteúdo estica e distribui em vez
+          de terminar no meio e sobrar só o fundo embaixo. */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxWidth: 1280, width: '100%', margin: '0 auto', flex: 1 }}>
         {/* Saudação + Relatório do Clube (PDF consolidado do ano vigente) */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', gap: '1rem', flexDirection: isMobile ? 'column' : 'row' }}>
           <div>
@@ -238,8 +243,10 @@ export function HomePage() {
           <StatCard icon={<HeartPulse size={16} />}  color="#ef4444" label="Lesionados"     value={String(summary.activeInjuries || 0)} sub={summary.activeInjuries === 0 ? 'Plantel pleno' : 'Ativos no DM'} colors={colors} clickable onClick={() => navigate('/plantel')} />
         </div>
 
-        {/* Conteúdo principal — 2 colunas: próximas sessões | lesionados */}
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.5fr 1fr', gap: '0.75rem' }}>
+        {/* Conteúdo principal — 2 colunas: próximas sessões | lesionados.
+            flex:1 + minHeight:0: absorve a altura extra em telas altas (os
+            cards esticam juntos), empurrando os Atalhos pro pé da tela. */}
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.5fr 1fr', gap: '0.75rem', flex: 1, minHeight: 0, alignContent: 'stretch' }}>
           {/* Próximas sessões */}
           <div style={cardStyle}>
             <div style={sectionTitleStyle}>Próximas sessões</div>

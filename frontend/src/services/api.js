@@ -38,9 +38,20 @@ class ApiClient {
 
     if (!response.ok) {
       if (response.status === 401) {
-        localStorage.removeItem('auth_token');
-        window.location.href = '/login';
-        throw new Error('Sessão expirada');
+        // Endpoints de autenticação usam 401 pra ERRO DE NEGÓCIO (senha
+        // incorreta, e-mail não encontrado, conta removida na exclusão). Nesses
+        // casos a mensagem do backend precisa subir pra UI — não é sessão
+        // expirada, então NÃO desloga nem redireciona.
+        const isAuthEndpoint = endpoint.startsWith('/auth/');
+        const body = await response.json().catch(() => ({}));
+        if (!isAuthEndpoint) {
+          localStorage.removeItem('auth_token');
+          window.location.href = '/login';
+          throw new Error(body.error || body.message || 'Sessão expirada');
+        }
+        const err = new Error(body.error || body.message || 'Falha na autenticação');
+        err.statusCode = 401;
+        throw err;
       }
       if (response.status === 402) {
         const body = await response.json().catch(() => ({}));

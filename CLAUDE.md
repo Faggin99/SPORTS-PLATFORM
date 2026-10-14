@@ -72,10 +72,20 @@ Resumo: /api/auth/*, /api/clubs/*, /api/athletes/*, /api/microcycles/*,
   implementado — sai num sprint futuro se a feature decolar.)
 
 ## Billing (Assinaturas)
-- Planos seedados em migrations 006/007: `free`, `pro` (R$ 49/mes), `team` (R$ 99/mes), `lifetime`
+- Planos ativos (tabela `plans`): `free` (R$ 0, migration 046), `pro`/`pro_annual`, `clube`/`clube_annual`, `lifetime`
+- **Plano Free permanente** (ago/2026, exigência Apple 3.1.3(f)): planejamento, jogos, estatísticas,
+  1 clube, 1 categoria, `max_athletes=30`; SEM `quadro_tatico`, SEM `pdf_export`, SEM `multi_user`.
+  Flags no JSON `plans.features` — ajustar lá, sem deploy.
+- **Assinatura efetiva**: `billing.getEffectiveSubscription()` — se a sub real caducou (trial vencido,
+  cancelada, expirada) o usuário cai no Free (objeto sintético com `is_fallback` + `lapsed`). Ninguém fica
+  mais trancado pra fora; `requireActiveSubscription` só bloqueia rotas PREMIUM (`/api/plays` → 402
+  `PLAN_REQUIRED`). Limites numéricos ficam nas rotas de criação (athletes/clubs/categories).
+- Novos cadastros entram direto no Free (`billing.createInitialSubscription`). Env `SIGNUP_TRIAL_DAYS`
+  (default 0) liga de volta um trial do Pro que cai no Free ao terminar.
+- Frontend: `usePlanFeatures().has('quadro_tatico'|'pdf_export')`, `<PlanGate feature>` (rota do tático),
+  `useFeatureGuard()` (exportações). No app NATIVO as mensagens são neutras (sem "assine"/URL).
 - Usuarios admin (role='admin') tem acesso ilimitado sem assinatura
 - Lista de emails admin/vitalicio em backend-node/src/config/specialUsers.js
-- Novos cadastros recebem trial automatico de 14 dias no Pro
 - Integracao Mercado Pago (Preapproval / Assinaturas recorrentes)
 - Webhook em POST /api/billing/webhook valida assinatura HMAC SHA-256
 

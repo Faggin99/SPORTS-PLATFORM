@@ -74,6 +74,18 @@ async function notifyPaymentEvent(payload) {
 
     const baseUrl = process.env.APP_BASE_URL || 'https://app.tactiplan.faggin.com.br';
 
+    // Dedup: o Mercado Pago reenvia o mesmo evento de pagamento várias vezes.
+    // Se já mandamos e-mail pra este payment id, não manda de novo (senão o
+    // "Pagamento confirmado" chega em duplicata).
+    const already = await query(
+      `SELECT 1 FROM billing_events
+        WHERE mp_resource_id = $1
+          AND type IN ('payment.approved.email_sent','payment.rejected.email_sent')
+        LIMIT 1`,
+      [String(resourceId)]
+    );
+    if (already.rows.length > 0) return;
+
     if (approved) {
       const amountBRL = Number(payment.transaction_amount || 0);
       await sendPaymentApprovedEmail({
@@ -159,13 +171,11 @@ router.get('/plans', async (req, res) => {
 // GET /api/billing/subscription — assinatura ativa da workspace ativa (ou do user se admin/sem workspace)
 router.get('/subscription', authMiddleware, async (req, res) => {
   try {
-    let sub = null;
-    if (req.user.workspaceId) {
-      sub = await billing.getSubscriptionForWorkspace(req.user.workspaceId);
-    }
-    if (!sub) {
-      sub = await billing.getActiveSubscription(req.user.id);
-    }
+    // Sub EFETIVA: a real se válida; senão o plano Free (com `lapsed` = a que caducou).
+    const sub = await billing.getEffectiveSubscription({
+      userId: req.user.id,
+      workspaceId: req.user.workspaceId || null,
+    });
     res.json(sub || null);
   } catch (err) {
     console.error('Subscription error:', err);
@@ -178,6 +188,7 @@ router.post('/checkout', authMiddleware, async (req, res) => {
   try {
     const { plan_id } = req.body || {};
     if (!plan_id) return res.status(400).json({ error: 'plan_id required' });
+    if (plan_id === 'free') return res.status(400).json({ error: 'O plano Free não precisa de checkout.' });
     if (!req.user.workspaceId) return res.status(400).json({ error: 'Nenhuma workspace ativa' });
     if (!req.user.can('billing:manage') || !req.user.isWorkspaceOwner(req.user.workspaceId)) {
       return res.status(403).json({ error: 'Apenas o dono pode gerenciar assinatura' });
@@ -195,15 +206,67 @@ router.post('/checkout', authMiddleware, async (req, res) => {
   }
 });
 
-// POST /api/billing/trial — inicia trial no plano free/pro
-router.post('/trial', authMiddleware, async (req, res) => {
+// NOTA: a rota POST /api/billing/trial foi REMOVIDA (segurança).
+// Era órfã (o frontend nunca chamava) e permitia a qualquer usuário logado
+// se autoconceder trial de qualquer plano, infinitas vezes — bypass total de
+// pagamento. O trial legítimo é criado uma única vez no cadastro
+// (routes/auth.js, INSERT direto). startTrial() ainda existe no service pra
+// esse uso interno, agora com guarda contra re-trial.
+
+// POST /api/billing/revenuecat/webhook — eventos de IAP (Apple/Google) via
+// RevenueCat. Auth: header Authorization tem que bater com REVENUECAT_WEBHOOK_AUTH.
+router.post('/revenuecat/webhook', async (req, res) => {
   try {
-    const { plan_id = 'pro' } = req.body || {};
-    const sub = await billing.startTrial(req.user.id, plan_id);
-    res.status(201).json(sub);
+    const expected = process.env.REVENUECAT_WEBHOOK_AUTH || '';
+    if (!expected) return res.status(503).json({ error: 'not_configured' });
+    if ((req.headers.authorization || '') !== expected) return res.status(401).json({ error: 'unauthorized' });
+    const result = await billing.applyRevenueCatEvent(req.body?.event || {});
+    if (!result.handled) console.warn('RevenueCat webhook não aplicado:', result.reason);
+    res.json({ ok: true, ...result });
   } catch (err) {
-    console.error('Trial error:', err);
-    res.status(500).json({ error: err.message || 'Failed to start trial' });
+    console.error('RevenueCat webhook error:', err);
+    res.status(500).json({ error: 'webhook_failed' });
+  }
+});
+
+// GET /api/billing/addons — preços dos add-ons + quantidades atuais da assinatura
+router.get('/addons', authMiddleware, async (req, res) => {
+  try {
+    let sub = null;
+    if (req.user.workspaceId) sub = await billing.getSubscriptionForWorkspace(req.user.workspaceId);
+    if (!sub) sub = await billing.getActiveSubscription(req.user.id);
+    res.json({
+      prices: billing.ADDON_PRICES,               // { extra_club, extra_category } em centavos/mês
+      extra_clubs: sub?.extra_club_slots || 0,
+      extra_categories: sub?.extra_category_slots || 0,
+      plan_id: sub?.plan_id || null,
+      interval: sub?.interval || null,
+      is_clube: sub?.features?.multi_user === true,
+      is_admin: sub?.is_admin === true,
+      can_manage: sub?.status === 'active' && !sub?.is_admin,
+      base_price_cents: sub?.price_cents || 0,
+    });
+  } catch (err) {
+    console.error('Addons GET error:', err);
+    res.status(500).json({ error: 'Failed to load addons' });
+  }
+});
+
+// POST /api/billing/addons — define as quantidades de add-ons (clubes/categorias extras)
+router.post('/addons', authMiddleware, async (req, res) => {
+  try {
+    if (!req.user.can('billing:manage') || !req.user.isWorkspaceOwner?.(req.user.workspaceId)) {
+      return res.status(403).json({ error: 'Apenas o dono pode gerenciar add-ons' });
+    }
+    const { extra_clubs = 0, extra_categories = 0 } = req.body || {};
+    const result = await billing.setAddons(req.user.id, req.user.workspaceId, {
+      extraClubs: extra_clubs,
+      extraCategories: extra_categories,
+    });
+    res.json(result);
+  } catch (err) {
+    console.error('Addons POST error:', err);
+    res.status(err.statusCode || 500).json({ error: err.message || 'Failed to update addons' });
   }
 });
 
@@ -247,8 +310,12 @@ router.post('/webhook', async (req, res) => {
     });
     res.status(200).send('ok');
   } catch (err) {
+    // Falha ao processar (não é spoofing — a assinatura já passou). Responde 500
+    // pra o Mercado Pago RE-ENVIAR o evento. O evento bruto já foi persistido em
+    // billing_events, e o cron de reconciliação (reconcilePendingSubscriptions)
+    // é a segunda rede de segurança caso os retries também falhem.
     console.error('Webhook error:', err);
-    res.status(200).send('ok');
+    res.status(500).send('error');
   }
 });
 

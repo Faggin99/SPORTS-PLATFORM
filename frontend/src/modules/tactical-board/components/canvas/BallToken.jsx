@@ -7,6 +7,7 @@ export default function BallToken({
   draggable = true,
   onDragEnd,
   onClick,
+  onDblClick,
 }) {
   const radius = 10;
 
@@ -18,6 +19,8 @@ export default function BallToken({
       onDragEnd={onDragEnd}
       onClick={onClick}
       onTap={onClick}
+      onDblClick={onDblClick}
+      onDblTap={onDblClick}
     >
       {/* Selection ring */}
       {isSelected && (

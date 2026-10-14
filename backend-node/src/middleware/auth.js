@@ -73,14 +73,18 @@ const authMiddleware = async (req, res, next) => {
     // LGPD: rejeita JWT de conta removida (soft-deleted). Também cobre user apagado
     // manualmente do banco (userCheck vem vazio).
     const userCheck = await query(
-      'SELECT deleted_at FROM users WHERE id = $1',
+      'SELECT deleted_at, role FROM users WHERE id = $1',
       [decoded.id]
     );
     if (userCheck.rows.length === 0 || userCheck.rows[0].deleted_at) {
       return res.status(401).json({ error: 'Conta removida' });
     }
 
-    req.user = { id: decoded.id, email: decoded.email, role: decoded.role };
+    // role vem do BANCO (fonte da verdade), não do token: o JWT antigo não
+    // carregava role, então `decoded.role` era sempre undefined e o bypass
+    // de admin abaixo nunca disparava. Ler do banco também evita token stale.
+    const dbRole = userCheck.rows[0].role;
+    req.user = { id: decoded.id, email: decoded.email, role: dbRole };
 
     let accessible = { workspaces: [], clubs: [] };
     try {
@@ -118,7 +122,7 @@ const authMiddleware = async (req, res, next) => {
     const activeMember = (accessible.workspaces || []).find(w => w.workspace_id === activeWs) || null;
 
     // Resolve permissões efetivas. Admin global passa por tudo.
-    if (decoded.role === 'admin') {
+    if (dbRole === 'admin') {
       req.user.permissions = new Set(PERMISSIONS);
       req.user.allowedCategoryIds = null; // todas
     } else if (activeMember) {

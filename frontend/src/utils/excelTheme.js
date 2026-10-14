@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs';
+import { deliverFile } from '../lib/deliverFile';
 import { saveAs } from 'file-saver';
 
 // Tema centralizado pra geração de Excels bonitos, formatados pra A4.
@@ -219,7 +220,7 @@ export function saveWorkbook(wb, filename, chartSpecs = null) {
       } else {
         blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       }
-      saveAs(blob, filename);
+      return deliverFile(blob, filename, 'Compartilhar planilha');
     })
     .catch((err) => {
       console.error('saveWorkbook error', err);

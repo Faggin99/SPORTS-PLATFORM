@@ -5,7 +5,9 @@ import { useTheme } from '../contexts/ThemeContext';
 import { Button } from '../components/common/Button';
 import { api } from '../services/api';
 import { notify } from '../lib/notify';
-import { openExternalUrl } from '../lib/platform';
+import { openExternalUrl, isNative, getPlatform } from '../lib/platform';
+import { useAuth } from '../contexts/AuthContext';
+import { iapAvailable, getPurchases, configurePurchases } from '../lib/purchases';
 
 function formatPrice(cents, currency = 'BRL') {
   if (!cents) return 'Grátis';
@@ -45,6 +47,10 @@ export function BillingPage() {
   }, []);
 
   async function startCheckout(planId) {
+    // Compliance lojas (Apple 3.1.1 / Google): não vendemos assinatura digital
+    // DENTRO do app. As CTAs de compra ficam escondidas no nativo; este guard
+    // é só cinto de segurança caso algo chame o checkout.
+    if (isNative()) return;
     // Se o usuário está testando o Clube e quer assinar Pro, alerta o que perde.
     const isTryingClube = sub?.plan_id === 'clube' || sub?.plan_id === 'clube_annual';
     const isPickingPro = planId === 'pro' || planId === 'pro_annual';
@@ -95,6 +101,8 @@ export function BillingPage() {
     return <div style={{ padding: 32, color: colors.textSecondary }}>Carregando…</div>;
   }
 
+  const native = isNative();
+
   return (
     <div style={{ padding: '1.5rem 2rem', maxWidth: 960, margin: '0 auto', width: '100%' }}>
       <h1 style={{ fontSize: '1.5rem', fontWeight: 700, color: colors.text, margin: 0 }}>Assinatura</h1>
@@ -102,9 +110,11 @@ export function BillingPage() {
         Gerencie seu plano e pagamentos.
       </p>
 
-      <CurrentSubscription sub={sub} colors={colors} onCancel={cancelSubscription} />
+      <CurrentSubscription sub={sub} colors={colors} onCancel={cancelSubscription} native={native} />
 
-      {(() => {
+      {native && <NativeBillingSection sub={sub} colors={colors} onSub={setSub} />}
+
+      {!native && (() => {
         const paidPlans = plans.filter(p =>
           p.id !== 'lifetime'
           && p.id !== 'free'
@@ -137,7 +147,219 @@ export function BillingPage() {
         );
       })()}
 
-      <AdvancedActions colors={colors} />
+      {!native && <AdvancedActions colors={colors} />}
+    </div>
+  );
+}
+
+// Seção de billing do app NATIVO.
+// iOS com IAP configurado: plano Free → grade de compra nativa (StoreKit);
+// assinatura da App Store → gerenciar/restaurar. Demais casos (Android,
+// binário antigo, chave ausente, assinatura do site) → aviso neutro.
+function NativeBillingSection({ sub, colors, onSub }) {
+  const isFree = sub?.plan_id === 'free' || !!sub?.is_free;
+  if (getPlatform() === 'ios' && iapAvailable()) {
+    if (isFree) return <IapPlansSection colors={colors} onSub={onSub} />;
+    if (sub?.provider === 'apple') return <AppleManageSection colors={colors} onSub={onSub} />;
+  }
+  return <NativeManageNotice colors={colors} isFree={isFree} />;
+}
+
+// Ordem e rótulos dos produtos da loja (mesmo mapa do backend).
+const IAP_PRODUCTS = [
+  { id: 'com.faggin.tactiplan.pro.monthly',   name: 'Pro Mensal',   per: '/mês', desc: 'Quadro tático + exportações' },
+  { id: 'com.faggin.tactiplan.clube.monthly', name: 'Clube Mensal', per: '/mês', desc: 'Tudo do Pro + equipe e categorias' },
+  { id: 'com.faggin.tactiplan.pro.yearly',    name: 'Pro Anual',    per: '/ano', desc: '2 meses grátis vs. mensal' },
+  { id: 'com.faggin.tactiplan.clube.yearly',  name: 'Clube Anual',  per: '/ano', desc: '2 meses grátis vs. mensal' },
+];
+
+async function pollSubscriptionChange(onSub, tries = 10) {
+  for (let i = 0; i < tries; i++) {
+    await new Promise((r) => setTimeout(r, 2000));
+    const s = await api.get('/billing/subscription').catch(() => null);
+    if (s && s.plan_id !== 'free' && !s.is_free) { onSub(s); return true; }
+  }
+  return false;
+}
+
+function IapPlansSection({ colors, onSub }) {
+  const { user } = useAuth();
+  const [pkgs, setPkgs] = useState(null);
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(null);
+
+  // Timeout: se a loja não responder, mostra erro (com retry) em vez de
+  // carregar eternamente.
+  const withTimeout = (promise, ms) => Promise.race([
+    promise,
+    new Promise((_, rej) => setTimeout(() => rej(new Error('A loja demorou pra responder. Tente novamente em instantes.')), ms)),
+  ]);
+
+  async function load() {
+    setError(null);
+    setPkgs(null);
+    let stage = 'configure';
+    try {
+      const Purchases = getPurchases(); // síncrono — NÃO dar await no Proxy
+      await withTimeout(configurePurchases(user?.id), 15000);
+      stage = 'offerings';
+      let list = [];
+      try {
+        const { current } = await withTimeout(Purchases.getOfferings(), 20000);
+        list = current?.availablePackages || [];
+      } catch { /* cai pro fallback abaixo */ }
+      if (list.length === 0) {
+        // Fallback: busca os produtos DIRETO na loja. O offerings pode falhar
+        // no ambiente de revisão da Apple (assinaturas "Waiting for Review"
+        // às vezes não resolvem lá) — sem isso o revisor via tela vazia.
+        stage = 'products';
+        const { products } = await withTimeout(
+          Purchases.getProducts({ productIdentifiers: IAP_PRODUCTS.map((m) => m.id) }), 20000
+        );
+        list = (products || []).map((prod) => ({ __direct: true, identifier: prod.identifier, product: prod }));
+      }
+      setPkgs(list);
+    } catch (e) {
+      const detail = e?.underlyingErrorMessage || e?.message || 'Não foi possível carregar os planos.';
+      setError(`[${stage}] ${detail}${e?.code ? ` (code ${e.code})` : ''}`);
+    }
+  }
+
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [user?.id]);
+
+  async function buy(pkg) {
+    setBusy(pkg.identifier);
+    try {
+      const Purchases = getPurchases();
+      if (pkg.__direct) await Purchases.purchaseStoreProduct({ product: pkg.product });
+      else await Purchases.purchasePackage({ aPackage: pkg });
+      notify.success('Compra concluída! Liberando seu acesso…');
+      const ok = await pollSubscriptionChange(onSub);
+      if (!ok) notify.info('Compra registrada — seu acesso será liberado em instantes.');
+    } catch (e) {
+      const cancelled = e?.userCancelled || /cancel/i.test(String(e?.code || e?.message || ''));
+      if (!cancelled) notify.error(e?.message || 'Não foi possível concluir a compra.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function restore() {
+    setBusy('restore');
+    try {
+      const Purchases = getPurchases();
+      await Purchases.restorePurchases();
+      const ok = await pollSubscriptionChange(onSub, 3);
+      notify[ok ? 'success' : 'info'](ok ? 'Compras restauradas!' : 'Nenhuma compra ativa encontrada.');
+    } catch (e) {
+      notify.error(e?.message || 'Não foi possível restaurar as compras.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const ordered = (pkgs || [])
+    .map((pkg) => ({ pkg, meta: IAP_PRODUCTS.find((m) => m.id === (pkg.product?.identifier || '')) }))
+    .sort((a, b) => (a.meta ? IAP_PRODUCTS.indexOf(a.meta) : 99) - (b.meta ? IAP_PRODUCTS.indexOf(b.meta) : 99));
+
+  return (
+    <div style={{ marginTop: 32 }}>
+      <h2 style={{ fontSize: '1.125rem', fontWeight: 600, color: colors.text, margin: '0 0 12px' }}>Planos disponíveis</h2>
+      {error && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <p style={{ color: colors.textSecondary, fontSize: '0.875rem', margin: 0 }}>{error}</p>
+          <Button size="sm" variant="secondary" onClick={load}>Tentar novamente</Button>
+        </div>
+      )}
+      {!error && pkgs === null && <p style={{ color: colors.textSecondary, fontSize: '0.875rem' }}>Carregando planos…</p>}
+      {!error && pkgs !== null && pkgs.length === 0 && (
+        <p style={{ color: colors.textSecondary, fontSize: '0.875rem' }}>
+          Planos indisponíveis no momento — a loja ainda não liberou os produtos. Tente novamente mais tarde.
+        </p>
+      )}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16 }}>
+        {ordered.map(({ pkg, meta }) => (
+          <div key={pkg.identifier} style={{ padding: 16, backgroundColor: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
+              <strong style={{ color: colors.text }}>{meta?.name || pkg.product?.title || pkg.identifier}</strong>
+              <span style={{ color: colors.text, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                {pkg.product?.priceString}
+                <span style={{ fontWeight: 400, color: colors.textSecondary, fontSize: 13 }}>{meta?.per || ''}</span>
+              </span>
+            </div>
+            {meta?.desc && <div style={{ fontSize: '0.75rem', color: colors.textSecondary, marginTop: 2 }}>{meta.desc}</div>}
+            <div style={{ height: 12 }} />
+            <Button size="sm" fullWidth onClick={() => buy(pkg)} disabled={busy !== null}>
+              {busy === pkg.identifier ? 'Abrindo…' : 'Assinar'}
+            </Button>
+          </div>
+        ))}
+      </div>
+      <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <button onClick={restore} disabled={busy !== null} style={{ background: 'transparent', border: 'none', color: colors.primary, fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer', padding: 4, alignSelf: 'flex-start' }}>
+          {busy === 'restore' ? 'Restaurando…' : 'Restaurar compras'}
+        </button>
+        <p style={{ fontSize: '0.75rem', color: colors.textSecondary, margin: 0, lineHeight: 1.5 }}>
+          A assinatura é cobrada no seu Apple ID e renova automaticamente até ser cancelada
+          nas configurações de assinaturas da App Store.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function AppleManageSection({ colors, onSub }) {
+  return (
+    <div style={{ marginTop: 24, padding: 16, backgroundColor: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 12 }}>
+      <div style={{ fontSize: '0.9rem', fontWeight: 600, color: colors.text, marginBottom: 6 }}>Assinatura pela App Store</div>
+      <p style={{ fontSize: '0.85rem', color: colors.textSecondary, margin: '0 0 12px', lineHeight: 1.55 }}>
+        Sua assinatura é cobrada no seu Apple ID. Pra trocar de plano ou cancelar, use as
+        configurações de assinaturas da App Store.
+      </p>
+      <Button size="sm" variant="secondary" onClick={() => openExternalUrl('https://apps.apple.com/account/subscriptions')}>
+        Gerenciar assinatura
+      </Button>
+    </div>
+  );
+}
+
+// Aviso no app NATIVO no lugar da grade de planos. As lojas (Apple 3.1.1 /
+// Google Play) não permitem vender assinatura digital dentro do app nem levar
+// a checkout externo. Então no app só informamos (texto puro, sem botão/link).
+// No iOS a Apple é MAIS rígida: nem citar o site/URL de compra — texto 100%
+// neutro. No Android citamos o site (tolerado pelo Play).
+function NativeManageNotice({ colors, isFree }) {
+  const isIos = getPlatform() === 'ios';
+  if (isFree) {
+    // Free no app: texto neutro, sem instrução de compra (Apple 3.1.3(f)).
+    return (
+      <div style={{ marginTop: 24, padding: 16, backgroundColor: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 12 }}>
+        <div style={{ fontSize: '0.9rem', fontWeight: 600, color: colors.text, marginBottom: 6 }}>Planos</div>
+        <p style={{ fontSize: '0.85rem', color: colors.textSecondary, margin: 0, lineHeight: 1.55 }}>
+          Você está no plano Free. Os recursos dos planos Pro e Clube (quadro tático e exportações)
+          são liberados automaticamente no app quando a assinatura da conta estiver ativa.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div style={{ marginTop: 24, padding: 16, backgroundColor: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 12 }}>
+      <div style={{ fontSize: '0.9rem', fontWeight: 600, color: colors.text, marginBottom: 6 }}>
+        Planos e pagamentos
+      </div>
+      {isIos ? (
+        <p style={{ fontSize: '0.85rem', color: colors.textSecondary, margin: 0, lineHeight: 1.55 }}>
+          A assinatura da sua conta é gerenciada fora do app. Seu acesso é liberado
+          automaticamente aqui assim que a assinatura estiver ativa.
+        </p>
+      ) : (
+        <p style={{ fontSize: '0.85rem', color: colors.textSecondary, margin: 0, lineHeight: 1.55 }}>
+          As assinaturas do TactiPlan são gerenciadas no site. Acesse{' '}
+          <strong style={{ color: colors.text }}>tactiplan.faggin.com.br</strong> pelo navegador
+          para assinar ou trocar de plano. Seu acesso é liberado automaticamente aqui no app
+          assim que a assinatura estiver ativa.
+        </p>
+      )}
     </div>
   );
 }
@@ -192,7 +414,7 @@ function AdvancedActions({ colors }) {
   );
 }
 
-function CurrentSubscription({ sub, colors, onCancel }) {
+function CurrentSubscription({ sub, colors, onCancel, native }) {
   if (!sub) {
     return (
       <div style={{ padding: 20, backgroundColor: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 12 }}>
@@ -201,7 +423,9 @@ function CurrentSubscription({ sub, colors, onCancel }) {
           <strong style={{ color: colors.text }}>Sem assinatura ativa</strong>
         </div>
         <p style={{ fontSize: '0.875rem', color: colors.textSecondary, margin: 0 }}>
-          Escolha um plano abaixo para começar a usar todos os recursos.
+          {native
+            ? 'Sua assinatura é gerenciada no site — veja como continuar logo abaixo.'
+            : 'Escolha um plano abaixo para começar a usar todos os recursos.'}
         </p>
       </div>
     );
@@ -216,6 +440,31 @@ function CurrentSubscription({ sub, colors, onCancel }) {
   if (sub.plan_id === 'lifetime') {
     return (
       <Card colors={colors} icon={<Infinity size={20} color="#22c55e" />} title="Plano Vitalício" subtitle="Acesso completo sem cobrança." />
+    );
+  }
+
+  // Plano Free (linha real ou fallback de trial/assinatura que caducou).
+  if (sub.plan_id === 'free' || sub.is_free) {
+    const lapsed = sub.lapsed;
+    const maxAth = sub.features?.max_athletes;
+    return (
+      <div style={{ padding: 20, backgroundColor: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+          <Crown size={20} color="#94a3b8" />
+          <strong style={{ color: colors.text, fontSize: '1.05rem' }}>Plano Free</strong>
+          {statusBadge('active', colors)}
+        </div>
+        <p style={{ fontSize: '0.875rem', color: colors.textSecondary, margin: 0, lineHeight: 1.55 }}>
+          Planejamento de treinos, jogos, plantel{maxAth > 0 ? ` (até ${maxAth} atletas)` : ''} e estatísticas — grátis, pra sempre.
+          {lapsed?.status === 'trialing' && ' Seu período de avaliação terminou e a conta voltou pro Free — nada foi apagado.'}
+          {lapsed && lapsed.status !== 'trialing' && ' Sua assinatura anterior terminou e a conta voltou pro Free — nada foi apagado.'}
+        </p>
+        {!native && (
+          <p style={{ fontSize: '0.85rem', color: colors.textSecondary, margin: '10px 0 0' }}>
+            Quadro tático e exportações em PDF/vídeo estão nos planos Pro e Clube, abaixo.
+          </p>
+        )}
+      </div>
     );
   }
 
@@ -257,18 +506,28 @@ function CurrentSubscription({ sub, colors, onCancel }) {
       {isTrial && trialDays === 0 && (
         <div style={{ marginTop: 16, padding: 14, backgroundColor: '#ef444415', borderRadius: 8, border: '1px solid #ef444440', fontSize: '0.875rem', color: colors.text }}>
           <strong style={{ color: '#ef4444' }}>Seu período de avaliação terminou.</strong>{' '}
-          Escolha um dos planos abaixo para continuar usando o TactiPlan com todos os recursos.
+          {native
+            ? 'Assim que sua assinatura estiver ativa, o acesso é liberado automaticamente aqui no app.'
+            : 'Escolha um dos planos abaixo para continuar usando o TactiPlan com todos os recursos.'}
         </div>
       )}
 
       {isTrial && trialDays > 0 && (
         <div style={{ marginTop: 16, padding: 12, backgroundColor: '#f59e0b15', borderRadius: 8, border: '1px solid #f59e0b40', fontSize: '0.8125rem', color: colors.text }}>
-          <strong>Você está testando o plano Clube</strong> — após {trialDays} dia{trialDays === 1 ? '' : 's'} é necessário escolher um plano (Pro ou Clube) pra continuar.
+          <strong>Você está no período de avaliação</strong> — {native
+            ? `restam ${trialDays} dia${trialDays === 1 ? '' : 's'} de acesso completo.`
+            : `após ${trialDays} dia${trialDays === 1 ? '' : 's'} é necessário escolher um plano (Pro ou Clube) pra continuar.`}
         </div>
       )}
 
-      {/* Cancelar (só pra planos pagos não-vitalício/admin) */}
-      {sub.plan_id !== 'lifetime' && !sub.is_admin && (
+      {/* Add-ons (só pra assinatura paga ativa) — escondidos no app nativo
+          (compra de add-on também é venda digital: fica só na web). */}
+      {!native && sub.status === 'active' && sub.plan_id !== 'lifetime' && !sub.is_admin && (
+        <AddonsSection colors={colors} />
+      )}
+
+      {/* Cancelar (só pra planos pagos não-vitalício/admin; assinatura de LOJA cancela na App Store/Play) */}
+      {sub.plan_id !== 'lifetime' && !sub.is_admin && sub.provider !== 'apple' && sub.provider !== 'google' && (
         <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${colors.border}`, display: 'flex', justifyContent: 'flex-end' }}>
           <button
             onClick={onCancel}
@@ -294,6 +553,120 @@ function CurrentSubscription({ sub, colors, onCancel }) {
       )}
     </div>
   );
+}
+
+// Gerenciamento de add-ons (clubes/categorias extras) da assinatura ativa.
+function AddonsSection({ colors }) {
+  const [data, setData] = useState(null);
+  const [clubs, setClubs] = useState(0);
+  const [cats, setCats] = useState(0);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api.get('/billing/addons')
+      .then((d) => { setData(d); setClubs(d.extra_clubs || 0); setCats(d.extra_categories || 0); })
+      .catch(() => setData({ can_manage: false }));
+  }, []);
+
+  if (!data || !data.can_manage) return null;
+
+  const isAnnual = data.interval === 'yearly';
+  const isClube = data.is_clube;
+  const clubPrice = (data.prices?.extra_club ?? 2000) / 100;
+  const catPrice = (data.prices?.extra_category ?? 500) / 100;
+  const addonMonthly = clubs * clubPrice + cats * catPrice;
+  const dirty = clubs !== (data.extra_clubs || 0) || cats !== (data.extra_categories || 0);
+  const brl = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await api.post('/billing/addons', { extra_clubs: clubs, extra_categories: cats });
+      setClubs(res.extra_clubs); setCats(res.extra_categories);
+      setData((d) => ({ ...d, extra_clubs: res.extra_clubs, extra_categories: res.extra_categories }));
+      notify.success(
+        res.effective === 'next_cycle'
+          ? 'Add-ons atualizados — entram na próxima fatura.'
+          : 'Add-ons atualizados.'
+      );
+    } catch (e) {
+      notify.error(e.message || 'Não foi possível atualizar os add-ons.');
+    } finally { setSaving(false); }
+  };
+
+  const Stepper = ({ label, sub, value, setValue, unit, disabled }) => (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '0.6rem 0' }}>
+      <div>
+        <div style={{ fontSize: '0.875rem', fontWeight: 600, color: colors.text }}>{label}</div>
+        <div style={{ fontSize: '0.75rem', color: colors.textSecondary }}>{sub}</div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <button onClick={() => setValue(Math.max(0, value - 1))} disabled={disabled || value <= 0}
+          style={stepBtn(colors, disabled || value <= 0)}>−</button>
+        <span style={{ minWidth: 22, textAlign: 'center', fontWeight: 700, color: colors.text, fontVariantNumeric: 'tabular-nums' }}>{value}</span>
+        <button onClick={() => setValue(value + 1)} disabled={disabled}
+          style={stepBtn(colors, disabled)}>+</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${colors.border}` }}>
+      <div style={{ fontSize: '0.8rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: colors.textSecondary, marginBottom: 4 }}>
+        Add-ons
+      </div>
+      {isAnnual && (
+        <div style={{ fontSize: '0.72rem', color: '#f59e0b', marginBottom: 8 }}>
+          Add-ons no plano anual chegam em breve. Por enquanto, disponíveis no plano mensal.
+        </div>
+      )}
+
+      <Stepper
+        label="Clubes extras"
+        sub={`+ ${brl(clubPrice)}/mês por clube`}
+        value={clubs} setValue={setClubs}
+        disabled={isAnnual}
+      />
+      {isClube && (
+        <Stepper
+          label="Categorias extras"
+          sub={`+ ${brl(catPrice)}/mês por categoria (além das 5 do Clube)`}
+          value={cats} setValue={setCats}
+          disabled={isAnnual}
+        />
+      )}
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10, paddingTop: 10, borderTop: `1px solid ${colors.border}` }}>
+        <div style={{ fontSize: '0.8rem', color: colors.textSecondary }}>
+          Adicionais: <strong style={{ color: colors.text }}>{brl(addonMonthly)}/mês</strong>
+        </div>
+        <button
+          onClick={save}
+          disabled={!dirty || saving || isAnnual}
+          style={{
+            padding: '0.45rem 0.9rem', borderRadius: 8, border: 'none',
+            backgroundColor: (!dirty || saving || isAnnual) ? colors.border : colors.primary,
+            color: '#fff', fontSize: '0.82rem', fontWeight: 600,
+            cursor: (!dirty || saving || isAnnual) ? 'default' : 'pointer',
+          }}
+        >
+          {saving ? 'Salvando…' : 'Salvar add-ons'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function stepBtn(colors, disabled) {
+  return {
+    width: 30, height: 30, borderRadius: 6,
+    border: `1px solid ${colors.border}`,
+    backgroundColor: disabled ? 'transparent' : colors.surface,
+    color: disabled ? colors.textSecondary : colors.text,
+    fontSize: '1.1rem', fontWeight: 700, lineHeight: 1,
+    cursor: disabled ? 'default' : 'pointer',
+    opacity: disabled ? 0.5 : 1,
+  };
 }
 
 function Card({ colors, icon, title, subtitle }) {

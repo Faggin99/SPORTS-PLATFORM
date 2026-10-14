@@ -1,5 +1,12 @@
+import { useRef, useEffect } from 'react';
 import { Plus, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
-import { useTheme } from '../../../../contexts/ThemeContext';
+import { notify } from '../../../../lib/notify';
+
+// Identidade fixa da barra inferior: navy #0f172a + lime #c8ff00 (assinatura
+// TactiPlan), independente do tema claro/escuro — a barra vive sobre o canvas
+// escuro do campo.
+const LIME = '#c8ff00';
+const NAVY = '#0f172a';
 
 export default function FrameControls({
   currentFrameIndex,
@@ -10,7 +17,17 @@ export default function FrameControls({
   onGoToPrevFrame,
   onGoToNextFrame,
 }) {
-  const { colors } = useTheme();
+  const activeChipRef = useRef(null);
+
+  // Mantém o frame ativo visível na strip quando há muitos frames
+  useEffect(() => {
+    activeChipRef.current?.scrollIntoView?.({ inline: 'nearest', block: 'nearest', behavior: 'smooth' });
+  }, [currentFrameIndex]);
+
+  const handleDeleteFrame = async () => {
+    const ok = await notify.confirm(`Excluir o frame ${currentFrameIndex + 1}?`, { confirmText: 'Excluir', cancelText: 'Cancelar' });
+    if (ok) onDeleteFrame();
+  };
 
   const buttonStyle = {
     display: 'flex',
@@ -33,13 +50,14 @@ export default function FrameControls({
     minWidth: 36,
     height: 32,
     borderRadius: '0.375rem',
-    border: `1px solid ${isActive ? colors.primary : 'rgba(255,255,255,0.2)'}`,
-    backgroundColor: isActive ? colors.primary : 'rgba(255,255,255,0.1)',
-    color: 'white',
+    border: `1px solid ${isActive ? LIME : 'rgba(255,255,255,0.2)'}`,
+    backgroundColor: isActive ? LIME : 'rgba(255,255,255,0.1)',
+    color: isActive ? NAVY : 'white',
     cursor: 'pointer',
     fontSize: '0.8rem',
-    fontWeight: isActive ? '600' : '400',
+    fontWeight: isActive ? '700' : '400',
     transition: 'all 0.15s',
+    flexShrink: 0,
   });
 
   return (
@@ -71,6 +89,7 @@ export default function FrameControls({
         {Array.from({ length: totalFrames }, (_, i) => (
           <button
             key={i}
+            ref={i === currentFrameIndex ? activeChipRef : null}
             style={frameButtonStyle(i === currentFrameIndex)}
             onClick={() => onGoToFrame(i)}
             title={`Frame ${i + 1}`}
@@ -93,9 +112,9 @@ export default function FrameControls({
 
       {/* Add frame */}
       <button
-        style={{ ...buttonStyle, borderColor: colors.primary, color: colors.primary }}
+        style={{ ...buttonStyle, borderColor: LIME, color: LIME }}
         onClick={onAddFrame}
-        title="Adicionar frame"
+        title="Novo frame (duplica o atual)"
       >
         <Plus size={16} />
       </button>
@@ -108,7 +127,7 @@ export default function FrameControls({
           color: '#ef4444',
           opacity: totalFrames > 1 ? 1 : 0.4,
         }}
-        onClick={onDeleteFrame}
+        onClick={handleDeleteFrame}
         disabled={totalFrames <= 1}
         title="Remover frame atual"
       >
@@ -121,7 +140,7 @@ export default function FrameControls({
         color: 'rgba(255,255,255,0.7)',
         whiteSpace: 'nowrap',
       }}>
-        {currentFrameIndex + 1} / {totalFrames}
+        Frame {currentFrameIndex + 1} de {totalFrames}
       </span>
     </div>
   );

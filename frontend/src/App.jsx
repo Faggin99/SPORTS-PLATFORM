@@ -7,9 +7,11 @@ import { WorkspaceProvider } from './contexts/WorkspaceContext';
 import { LoginPage } from './pages/LoginPage';
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
+import { EntrarContaPage } from './pages/EntrarContaPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { PricingPage } from './pages/PricingPage';
 import { BillingPage } from './pages/BillingPage';
+import { BillingCallbackPage } from './pages/BillingCallbackPage';
 import { PWAUpdatePrompt } from './components/common/PWAUpdatePrompt';
 import { TrainingPage } from './pages/TrainingPage';
 import { TrainingStatsPage } from './pages/TrainingStatsPage';
@@ -29,14 +31,15 @@ import { HomePage } from './pages/HomePage';
 import { Layout } from './components/layout/Layout';
 import PlantelPage from './modules/training-management/pages/PlantelPage';
 import { TacticalBoardPage } from './modules/tactical-board';
+import { PlanGate } from './components/common/PlanGate';
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated, loading, user } = useAuth();
 
   if (loading) return <div>Carregando...</div>;
   if (!isAuthenticated) return <Navigate to="/login" />;
-  // Bloqueio: contas sem senha definida (criadas via Google) precisam definir antes
-  if (user?.requires_password) return <Navigate to="/set-password" replace />;
+  // Contas de login social (Apple/Google) NÃO são obrigadas a criar senha —
+  // exigência da Apple (Guideline 4). /set-password segue disponível opcionalmente.
   return children;
 }
 
@@ -107,6 +110,8 @@ function AppRoutes() {
       <Route path="/register" element={isAuthenticated ? <Navigate to="/home" /> : <RegisterPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
+      {/* Entrada vinda de outro produto Faggin (seletor, login único) — pública, mesmo já logado */}
+      <Route path="/entrar-conta" element={<EntrarContaPage />} />
       <Route path="/set-password" element={isAuthenticated ? <SetPasswordPage /> : <Navigate to="/login" />} />
       {/* Termos e Privacidade ficam na LP (https://tactiplan.faggin.com.br/{termos,privacidade}.html) */}
       <Route path="/pricing" element={<PricingPage />} />
@@ -132,6 +137,16 @@ function AppRoutes() {
           <ProtectedRoute>
             <Layout>
               <BillingPage />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/billing/callback"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <BillingCallbackPage />
             </Layout>
           </ProtectedRoute>
         }
@@ -238,13 +253,16 @@ function AppRoutes() {
         }
       />
       <Route path="/accept-invite/:token" element={<AcceptInvitePage />} />
+      {/* Quadro Tático: experiência imersiva em tela cheia — SEM o Layout
+          (header/nav) pra o campo ocupar a tela inteira. */}
       <Route
         path="/tactical-board"
         element={
           <ProtectedRoute>
-            <Layout>
+            {/* Quadro Tático é exclusivo dos planos pagos (Free vê aviso neutro) */}
+            <PlanGate feature="quadro_tatico">
               <TacticalBoardPage />
-            </Layout>
+            </PlanGate>
           </ProtectedRoute>
         }
       />

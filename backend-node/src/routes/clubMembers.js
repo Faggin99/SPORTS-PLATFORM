@@ -34,24 +34,39 @@ async function countPendingInvites(workspaceId) {
   return r.rows[0]?.n || 0;
 }
 
+// Escapa valores controlados pelo usuário antes de injetar no HTML do e-mail.
+// Sem isso, um nome de workspace/convidador com < > & " vira injeção de HTML
+// no corpo do e-mail (o destinatário e o conteúdo são escolhidos pelo emissor).
+function escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function buildInviteEmail({ workspaceName, role, inviterName, acceptUrl }) {
   const roleLabel = role === 'assistant' ? 'auxiliar' : 'treinador';
+  const wsName = escapeHtml(workspaceName);
+  const invName = escapeHtml(inviterName || 'Um treinador');
+  const url = escapeHtml(acceptUrl);
   const subject = `Convite para participar de "${workspaceName}" no TactiPlan`;
   const html = `
     <div style="font-family: Helvetica, Arial, sans-serif; max-width: 540px; margin: auto; padding: 24px; color: #0f172a;">
       <h2 style="color: #2563eb; margin-top: 0;">Você recebeu um convite</h2>
-      <p>${inviterName || 'Um treinador'} te convidou para participar de
-        <strong>${workspaceName}</strong> como <strong>${roleLabel}</strong> no TactiPlan.</p>
+      <p>${invName} te convidou para participar de
+        <strong>${wsName}</strong> como <strong>${roleLabel}</strong> no TactiPlan.</p>
       <p>Pra aceitar, clique no botão abaixo. Você precisa ter uma conta TactiPlan
         com o mesmo e-mail pra qual o convite foi enviado.</p>
       <p style="margin: 24px 0;">
-        <a href="${acceptUrl}" style="background: #2563eb; color: #fff; padding: 12px 22px; text-decoration: none; border-radius: 6px; font-weight: 600;">
+        <a href="${url}" style="background: #2563eb; color: #fff; padding: 12px 22px; text-decoration: none; border-radius: 6px; font-weight: 600;">
           Aceitar convite
         </a>
       </p>
       <p style="font-size: 13px; color: #64748b;">Se você não esperava esse convite, é só ignorar.</p>
       <p style="font-size: 12px; color: #94a3b8; margin-top: 32px;">
-        Não consegue clicar? Cole no navegador: ${acceptUrl}
+        Não consegue clicar? Cole no navegador: ${url}
       </p>
     </div>
   `;
@@ -205,7 +220,9 @@ router.post('/clubs/:clubId/invite', authMiddleware, async (req, res) => {
        normalizedPermissions ? JSON.stringify(normalizedPermissions) : null, req.user.id, token]
     );
 
-    const baseUrl = process.env.APP_URL || 'https://app.tactiplan.faggin.com.br';
+    // APP_BASE_URL é a env var usada no resto do backend; APP_URL não existe,
+    // então o link do convite do staging saía apontando pro app de produção.
+    const baseUrl = process.env.APP_BASE_URL || 'https://app.tactiplan.faggin.com.br';
     const acceptUrl = `${baseUrl}/#/accept-invite/${token}`;
 
     try {

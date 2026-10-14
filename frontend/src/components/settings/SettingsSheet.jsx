@@ -322,7 +322,7 @@ function ClubesTab() {
       <div>
         <div style={{ fontSize: '0.95rem', fontWeight: 700, color: colors.text }}>Edite os dados do seu clube</div>
         <div style={{ fontSize: '0.75rem', color: colors.textSecondary, marginTop: 2 }}>
-          Pra gerenciar outro clube com assinatura separada, use <strong>Criar nova conta</strong> no menu superior.
+          Precisa de mais de um clube? Adicione um <strong>clube extra</strong> (R$20/mês) na sua <strong>Assinatura</strong>, ou crie outra conta se preferir cobrança separada.
         </div>
       </div>
 
@@ -383,10 +383,9 @@ function ClubesTab() {
         </Button>
       </div>
 
-      {/* Lista resumida caso o user tenha mais de 1 clube (legado) — só leitura, click pra trocar */}
       {clubs.length > 1 && (
-        <div style={{ marginTop: '0.5rem', padding: '0.625rem 0.75rem', backgroundColor: `#f59e0b15`, border: `1px solid #f59e0b40`, borderRadius: '0.5rem', fontSize: '0.78rem', color: colors.text }}>
-          <strong>Você ainda tem mais de um clube nesta conta.</strong> No modelo novo, cada conta gerencia 1 clube. Sugerimos consolidar — entre em contato se precisar de ajuda na migração.
+        <div style={{ marginTop: '0.5rem', padding: '0.625rem 0.75rem', backgroundColor: colors.surface, border: `1px solid ${colors.border}`, borderRadius: '0.5rem', fontSize: '0.78rem', color: colors.textSecondary }}>
+          Você gerencia <strong style={{ color: colors.text }}>{clubs.length} clubes</strong> nesta conta. Use o seletor de clube no topo pra alternar entre eles.
         </div>
       )}
 

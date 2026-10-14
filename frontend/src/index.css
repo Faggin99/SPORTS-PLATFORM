@@ -35,7 +35,8 @@ a:focus-visible {
 
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+  /* Poppins (out/2026): mesma tipografia do Gestsport. */
+  font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
     'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
     sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -111,11 +112,14 @@ body {
 }
 
 /* iOS não faz zoom automático no focus se a font-size do input for >= 16px.
-   Deixamos 16px em qualquer viewport pequena (< 768px) pra evitar essa UX ruim. */
-@media (max-width: 768px) {
+   Deixamos 16px em qualquer viewport pequena (< 900px, alinhado ao useIsMobile) pra evitar essa UX ruim. */
+@media (max-width: 900px) {
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
   select,
   textarea {
     font-size: 16px !important;
   }
 }
+
+/* Poppins também em campos e botões (inputs nativos não herdam no Safari). */
+button, input, select, textarea { font-family: inherit; }

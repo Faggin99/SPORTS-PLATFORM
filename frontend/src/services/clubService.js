@@ -25,6 +25,8 @@ export const clubService = {
       name: clubData.name,
       description: clubData.description,
       modality: clubData.modality,
+      primary_color: clubData.primary_color,
+      secondary_color: clubData.secondary_color,
     });
   },
 

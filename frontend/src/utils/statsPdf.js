@@ -172,6 +172,6 @@ export function generateStatsPDF(stats, opts = {}) {
 
   paginate(doc);
   const safe = (s) => String(s || '').replace(/\s+/g, '_').replace(/[^\w-]/g, '');
-  doc.save(`Estatisticas_Treino_${safe(clubName)}_${safe(periodLabel || 'periodo')}.pdf`);
+  deliverPdf(doc, `Estatisticas_Treino_${safe(clubName)}_${safe(periodLabel || 'periodo')}.pdf`);
   } finally { resetColor(); }
 }

@@ -164,7 +164,7 @@ export const generatePlantelPDF = async (athletes, opts = {}) => {
   });
 
   paginate(doc);
-  doc.save(`plantel_${(clubName || 'clube').replace(/\s+/g, '_').replace(/[^\w-]/g, '')}_${new Date().toISOString().split('T')[0]}.pdf`);
+  deliverPdf(doc, `plantel_${(clubName || 'clube').replace(/\s+/g, '_').replace(/[^\w-]/g, '')}_${new Date().toISOString().split('T')[0]}.pdf`);
   } finally { resetColor(); }
 };
 

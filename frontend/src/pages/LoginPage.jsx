@@ -6,6 +6,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { Input } from '../components/common/Input';
 import { Button } from '../components/common/Button';
 import { GoogleSignInButton } from '../components/auth/GoogleSignInButton';
+import { AppleSignInButton } from '../components/auth/AppleSignInButton';
 
 export function LoginPage() {
   const [email, setEmail] = useState('');
@@ -90,9 +91,20 @@ export function LoginPage() {
 
         {import.meta.env.VITE_GOOGLE_CLIENT_ID && (
           <>
-            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '0.5rem' }}>
               <GoogleSignInButton />
             </div>
+            <div style={{ marginBottom: '0.5rem' }}>
+              <AppleSignInButton />
+            </div>
+            {/* Consentimento explícito: entrar com Google pode CRIAR conta nova,
+                então o aceite dos termos precisa estar visível aqui também
+                (na tela de login não há checkbox, diferente do cadastro). */}
+            <p style={{ textAlign: 'center', fontSize: '0.7rem', color: colors.textSecondary, margin: '0 0 1rem', lineHeight: 1.5 }}>
+              Ao continuar com o Google ou a Apple, você concorda com os{' '}
+              <a href="https://tactiplan.faggin.com.br/termos.html" target="_blank" rel="noopener" style={{ color: colors.primary }}>Termos de Uso</a> e a{' '}
+              <a href="https://tactiplan.faggin.com.br/privacidade.html" target="_blank" rel="noopener" style={{ color: colors.primary }}>Política de Privacidade</a>.
+            </p>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: '1rem', color: colors.textSecondary, fontSize: '0.75rem' }}>
               <div style={{ flex: 1, height: 1, backgroundColor: colors.border }} />
               <span>ou</span>

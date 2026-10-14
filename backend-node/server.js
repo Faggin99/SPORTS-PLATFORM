@@ -40,6 +40,7 @@ const workspacesRoutes = require('./src/routes/workspaces');
 const competitionsRoutes = require('./src/routes/competitions');
 const externalCompetitionsRoutes = require('./src/routes/externalCompetitions');
 const publicStatsRoutes = require('./src/routes/publicStats');
+const contaRoutes = require('./src/routes/conta'); // seletor de produtos Faggin (F3)
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -88,6 +89,7 @@ app.use('/uploads', express.static(uploadDir));
 //  se vier antes, intercepta TUDO que começa com /api e quebra outras rotas)
 app.use('/api/admin', adminRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/conta', contaRoutes);
 app.use('/api/clubs', clubsRoutes);
 app.use('/api/athletes', athletesRoutes);
 app.use('/api/microcycles', microcyclesRoutes);
@@ -136,6 +138,7 @@ app.use((err, req, res, next) => {
 
 const { startBillingCleanupTimer } = require('./src/jobs/cleanupExpiredSubscriptions');
 const { startTrialExpiringNotifierTimer } = require('./src/jobs/trialExpiringNotifier');
+const { startPendingReconcileTimer } = require('./src/jobs/reconcilePendingSubscriptions');
 
 app.listen(PORT, () => {
   console.log(`Sports Platform API running on port ${PORT}`);
@@ -143,6 +146,8 @@ app.listen(PORT, () => {
   startBillingCleanupTimer();
   // Cron leve: notifica trials que expiram em 2–3 dias (1x/h).
   startTrialExpiringNotifierTimer();
+  // Cron leve: reconcilia checkouts pendentes com o MP caso o webhook falhe (1x/15min).
+  startPendingReconcileTimer();
 });
 
 module.exports = app;

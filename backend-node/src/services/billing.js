@@ -3,18 +3,22 @@
 // mas o ciclo de vida local (trial, status, cancel_at_period_end) continua rodando.
 
 const { query } = require('../config/database');
+const { ADDON_PRICES, ADDON_MAX, computeRecurringAmountCents } = require('../config/addons');
+const { isLifetime } = require('../config/specialUsers');
 
 let mpClient = null;
 let PreApproval = null;
+let PreApprovalPlan = null;
 let Payment = null;
 
 function getMP() {
   if (mpClient) return mpClient;
   if (!process.env.MP_ACCESS_TOKEN) return null;
 
-  const { MercadoPagoConfig, PreApproval: PA, Payment: PAY } = require('mercadopago');
+  const { MercadoPagoConfig, PreApproval: PA, PreApprovalPlan: PAP, Payment: PAY } = require('mercadopago');
   mpClient = new MercadoPagoConfig({ accessToken: process.env.MP_ACCESS_TOKEN });
   PreApproval = PA;
+  PreApprovalPlan = PAP;
   Payment = PAY;
   return mpClient;
 }
@@ -61,14 +65,15 @@ async function cancelOnMP(preapprovalId) {
 // `uq_subscriptions_active_per_user` bloqueia 2 subs ativas do mesmo user, então
 // precisamos fechar as antigas antes de inserir a nova.
 // Não é o mesmo fluxo do cancelSubscription do usuário (que preserva o período).
-async function _hardCancelActiveSubsForUser(userId, reason = 'upgrade') {
+async function _hardCancelActiveSubsForUser(userId, reason = 'upgrade', exceptSubId = null) {
   const r = await query(
     `SELECT id, mp_preapproval_id, plan_id, status, current_period_end
        FROM subscriptions
       WHERE user_id = $1
         AND status IN ('trialing','active','past_due','paused')
-        AND plan_id <> 'lifetime'`,
-    [userId]
+        AND plan_id <> 'lifetime'
+        AND ($2::uuid IS NULL OR id <> $2)`,
+    [userId, exceptSubId]
   );
   let closed = 0;
   for (const sub of r.rows) {
@@ -140,11 +145,12 @@ async function getActiveSubscription(userId) {
   }
 
   const r = await query(
-    `SELECT s.*, p.name AS plan_name, p.price_cents, p.features
+    `SELECT s.*, p.name AS plan_name, p.price_cents, p.features, p.interval
      FROM subscriptions s
      JOIN plans p ON p.id = s.plan_id
      WHERE s.user_id = $1
-       AND s.status IN ('trialing','active','past_due','paused')
+       AND (s.status IN ('trialing','active','past_due','paused')
+            OR (s.cancel_at_period_end = TRUE AND s.current_period_end > NOW()))
      ORDER BY (s.plan_id = 'lifetime') DESC, s.created_at DESC LIMIT 1`,
     [userId]
   );
@@ -180,11 +186,12 @@ async function getSubscriptionForWorkspace(workspaceId) {
   }
 
   const r = await query(
-    `SELECT s.*, p.name AS plan_name, p.price_cents, p.features
+    `SELECT s.*, p.name AS plan_name, p.price_cents, p.features, p.interval
      FROM subscriptions s
      JOIN plans p ON p.id = s.plan_id
      WHERE s.workspace_id = $1
-       AND s.status IN ('trialing','active','past_due','paused')
+       AND (s.status IN ('trialing','active','past_due','paused')
+            OR (s.cancel_at_period_end = TRUE AND s.current_period_end > NOW()))
      ORDER BY (s.plan_id = 'lifetime') DESC, s.created_at DESC LIMIT 1`,
     [workspaceId]
   );
@@ -205,6 +212,18 @@ async function getSubscriptionForWorkspace(workspaceId) {
 async function startTrial(userId, planId = 'pro', days = 30) {
   const plan = await getPlan(planId);
   if (!plan) throw new Error('Plan not found');
+  // Guarda contra re-trial: um usuário só pode ter UM trial na vida. Sem isso,
+  // qualquer chamada repetida reabriria acesso grátis indefinidamente. A
+  // checagem cobre qualquer assinatura já existente (trial ou paga).
+  const prior = await query(
+    'SELECT 1 FROM subscriptions WHERE user_id = $1 LIMIT 1',
+    [userId]
+  );
+  if (prior.rows.length > 0) {
+    const err = new Error('Usuário já possui (ou já teve) uma assinatura — trial não pode ser reiniciado.');
+    err.statusCode = 409;
+    throw err;
+  }
   // Trial também conta como sub ativa — precisa fechar as antigas pro unique
   // index não rejeitar.
   await _hardCancelActiveSubsForUser(userId, 'start_trial');
@@ -237,17 +256,34 @@ async function createCheckout({ userId, planId, payerEmail, workspaceId = null }
   const plan = await getPlan(planId);
   if (!plan) throw new Error('Plan not found');
 
-  // Dedup: fecha qualquer sub ativa desse user antes de criar a nova.
-  // Sem isso, o unique partial index bate.
-  await _hardCancelActiveSubsForUser(userId, 'upgrade_checkout');
+  // IMPORTANTE: NÃO cancelamos a assinatura anterior aqui. O checkout pode ser
+  // abandonado; cancelar antes de confirmar o pagamento deixaria o usuário sem
+  // o plano que já pagava. A troca de plano só se efetiva quando o webhook
+  // confirma o preapproval como autorizado (syncSubscriptionFromPreapproval).
+  //
+  // Limpa apenas checkouts PENDENTES antigos deste user (não-pagos, fora do
+  // índice de ativos) pra não acumular lixo — nunca toca em sub ativa/paga.
+  await query(
+    `UPDATE subscriptions
+        SET status = 'expired', updated_at = NOW()
+      WHERE user_id = $1 AND status = 'pending'`,
+    [userId]
+  );
 
   const mp = getMP();
-  const pa = new PreApproval(mp);
+  const paPlan = new PreApprovalPlan(mp);
 
+  // Fluxo baseado em PLANO (preapproval_plan): a conta MP recusa preapproval
+  // direto (500), mas plano funciona e gera init_point (checkout por redirect).
+  // Criamos um plano por checkout com o valor BASE do plano (add-ons são
+  // comprados depois, via setAddons, que ajusta o valor). external_reference
+  // = "userId|planId" pra vincular; guardamos o id do plano na sub pendente e,
+  // quando a assinatura (preapproval) resultante chega no webhook, linkamos.
   const baseUrl = process.env.APP_BASE_URL || 'https://app.tactiplan.faggin.com.br';
-  const result = await pa.create({
+  const result = await paPlan.create({
     body: {
       reason: `${plan.name} — TactiPlan`,
+      external_reference: `${userId}|${planId}`,
       auto_recurring: {
         frequency: plan.interval === 'yearly' ? 12 : 1,
         frequency_type: 'months',
@@ -255,15 +291,13 @@ async function createCheckout({ userId, planId, payerEmail, workspaceId = null }
         currency_id: plan.currency || 'BRL',
       },
       back_url: `${baseUrl}/#/billing/callback`,
-      payer_email: payerEmail,
-      external_reference: `${userId}|${planId}`,
-      status: 'pending',
     },
   });
 
+  // Sub nasce 'pending' guardando o id do PLANO (o preapproval real vem depois).
   const ins = await query(
-    `INSERT INTO subscriptions (user_id, workspace_id, plan_id, status, mp_preapproval_id, mp_status)
-     VALUES ($1, $2, $3, 'trialing', $4, $5)
+    `INSERT INTO subscriptions (user_id, workspace_id, plan_id, status, mp_preapproval_plan_id, mp_status)
+     VALUES ($1, $2, $3, 'pending', $4, $5)
      RETURNING id`,
     [userId, workspaceId, planId, result.id, result.status]
   );
@@ -271,20 +305,23 @@ async function createCheckout({ userId, planId, payerEmail, workspaceId = null }
   await logBillingEvent({
     subscriptionId: ins.rows[0]?.id || null,
     userId,
-    type: 'subscription.created',
+    type: 'subscription.checkout_started',
     mpResourceId: result.id,
     status: result.status,
-    raw: { plan_id: planId, workspace_id: workspaceId },
+    raw: { plan_id: planId, workspace_id: workspaceId, preapproval_plan_id: result.id },
   });
 
-  return { init_point: result.init_point, preapproval_id: result.id };
+  return { init_point: result.init_point, preapproval_plan_id: result.id };
 }
 
 // Mapeia status do Mercado Pago para nosso schema interno
 function mapMpStatus(mpStatus) {
   const m = String(mpStatus || '').toLowerCase();
   if (['authorized', 'active', 'approved'].includes(m)) return 'active';
-  if (['pending', 'trialing'].includes(m)) return 'trialing';
+  if (m === 'trialing') return 'trialing';
+  // 'pending' fica 'pending' (NÃO ativo) — preapproval criado mas não pago
+  // ainda não libera acesso; só vira 'active' quando o pagamento confirma.
+  if (m === 'pending') return 'pending';
   if (['paused'].includes(m)) return 'paused';
   if (['cancelled', 'canceled'].includes(m)) return 'canceled';
   if (['rejected', 'failed'].includes(m)) return 'past_due';
@@ -316,8 +353,10 @@ async function fetchPayment(paymentId) {
   }
 }
 
-async function syncSubscriptionFromPreapproval(preapprovalId) {
-  const pa = await fetchPreapproval(preapprovalId);
+async function syncSubscriptionFromPreapproval(preapprovalId, paOverride = null) {
+  // paOverride: usado em testes pra injetar o preapproval sem chamar o MP.
+  // Em produção nunca é passado (busca o preapproval real no MP).
+  const pa = paOverride || await fetchPreapproval(preapprovalId);
   if (!pa) return null;
 
   const mappedStatus = mapMpStatus(pa.status);
@@ -330,31 +369,71 @@ async function syncSubscriptionFromPreapproval(preapprovalId) {
 
   // Próxima data de cobrança
   const nextPaymentDate = pa.next_payment_date ? new Date(pa.next_payment_date) : null;
+  // A assinatura (preapproval) criada pelo comprador vem LINKADA ao nosso plano.
+  const planRef = pa.preapproval_plan_id || null;
 
-  // Atualiza por preapproval_id se já existir
-  const existing = await query(
-    'SELECT id, user_id, plan_id FROM subscriptions WHERE mp_preapproval_id = $1',
+  // Acha a sub local: (1) já linkada por preapproval_id; senão (2) a pendente
+  // pelo id do PLANO que criamos no checkout; senão (3) por external_reference.
+  let existing = await query(
+    'SELECT id, user_id, plan_id, status, cancel_at_period_end, current_period_end FROM subscriptions WHERE mp_preapproval_id = $1',
     [preapprovalId]
   );
+  if (existing.rows.length === 0 && planRef) {
+    existing = await query(
+      `SELECT id, user_id, plan_id, status, cancel_at_period_end, current_period_end
+         FROM subscriptions WHERE mp_preapproval_plan_id = $1
+        ORDER BY created_at DESC LIMIT 1`,
+      [planRef]
+    );
+  }
 
   if (existing.rows.length > 0) {
-    await query(
-      `UPDATE subscriptions SET
-         status = COALESCE($2, status),
-         mp_status = $3,
-         mp_payer_id = COALESCE($4, mp_payer_id),
-         current_period_end = COALESCE($5, current_period_end),
-         updated_at = now()
-       WHERE mp_preapproval_id = $1`,
-      [preapprovalId, mappedStatus, pa.status, pa.payer_id ? String(pa.payer_id) : null, nextPaymentDate]
-    );
+    const local = existing.rows[0];
+
+    if (mappedStatus === 'active') {
+      // PAGAMENTO CONFIRMADO. Vincula o preapproval real, ativa a sub e cancela
+      // as OUTRAS ativas do user (troca de plano só se efetiva aqui). Checkout
+      // abandonado nunca chega neste ponto.
+      await _hardCancelActiveSubsForUser(local.user_id, 'plan_switch_confirmed', local.id);
+      await query(
+        `UPDATE subscriptions SET
+           status = 'active',
+           mp_preapproval_id = $2,
+           mp_status = $3,
+           mp_payer_id = COALESCE($4, mp_payer_id),
+           current_period_end = COALESCE($5, current_period_end),
+           cancel_at_period_end = FALSE,
+           updated_at = now()
+         WHERE id = $1`,
+        [local.id, preapprovalId, pa.status, pa.payer_id ? String(pa.payer_id) : null, nextPaymentDate]
+      );
+    } else {
+      // Não rebaixa uma sub em período de graça (cancelou mas período ainda
+      // válido) pra 'canceled' — o cron faz a transição final no fim do período.
+      const inGrace = local.cancel_at_period_end === true
+        && local.current_period_end && new Date(local.current_period_end) > new Date();
+      const nextStatus = (mappedStatus === 'canceled' && inGrace) ? local.status : mappedStatus;
+      await query(
+        `UPDATE subscriptions SET
+           status = COALESCE($2, status),
+           mp_preapproval_id = COALESCE(mp_preapproval_id, $3),
+           mp_status = $4,
+           mp_payer_id = COALESCE($5, mp_payer_id),
+           current_period_end = COALESCE($6, current_period_end),
+           updated_at = now()
+         WHERE id = $1`,
+        [local.id, nextStatus, preapprovalId, pa.status, pa.payer_id ? String(pa.payer_id) : null, nextPaymentDate]
+      );
+    }
   } else if (userId && planId) {
-    // Caso o checkout não tenha criado o registro local antes (raro).
-    // Precisamos fechar as ativas primeiro pra não bater no unique index.
-    await _hardCancelActiveSubsForUser(userId, 'sync_from_preapproval');
+    // Checkout não criou o registro local antes (raro). Se já está autorizado,
+    // fecha as ativas e insere como active; senão insere pending.
+    if (mappedStatus === 'active') {
+      await _hardCancelActiveSubsForUser(userId, 'sync_from_preapproval');
+    }
     await query(
       `INSERT INTO subscriptions (user_id, plan_id, status, mp_preapproval_id, mp_status, mp_payer_id, current_period_end)
-       VALUES ($1, $2, COALESCE($3, 'trialing'), $4, $5, $6, $7)`,
+       VALUES ($1, $2, COALESCE($3, 'pending'), $4, $5, $6, $7)`,
       [userId, planId, mappedStatus, preapprovalId, pa.status, pa.payer_id ? String(pa.payer_id) : null, nextPaymentDate]
     );
   }
@@ -386,22 +465,36 @@ async function handleWebhook(payload, headers = {}) {
         const preId = payment.metadata?.preapproval_id || payment.point_of_interaction?.transaction_data?.preapproval_id;
         await syncSubscriptionFromPreapproval(preId);
       } else if (payment?.external_reference?.includes('|')) {
-        // Tenta achar a subscription pelo external_reference do payment
-        const [userId] = payment.external_reference.split('|');
-        if (userId) {
-          // Marca a subscription ativa do user como active quando o pagamento for aprovado
-          if (mapMpStatus(payment.status) === 'active') {
+        // Fallback sem preapproval_id: identifica a sub pelo external_reference
+        // (userId|planId) e promove a pendente pra ativa quando o pagamento
+        // aprovar, cancelando as demais ativas do user.
+        const [userId, planId] = payment.external_reference.split('|');
+        if (userId && mapMpStatus(payment.status) === 'active') {
+          const pend = await query(
+            `SELECT id FROM subscriptions
+              WHERE user_id = $1 AND plan_id = $2
+                AND status IN ('pending','trialing','past_due','paused')
+              ORDER BY created_at DESC LIMIT 1`,
+            [userId, planId]
+          );
+          if (pend.rows[0]) {
+            await _hardCancelActiveSubsForUser(userId, 'payment_confirmed', pend.rows[0].id);
             await query(
-              `UPDATE subscriptions SET status='active', mp_status=$2, updated_at=now()
-               WHERE user_id=$1 AND status IN ('trialing','past_due','paused')`,
-              [userId, payment.status]
+              `UPDATE subscriptions
+                  SET status='active', mp_status=$2, cancel_at_period_end=FALSE, updated_at=now()
+                WHERE id=$1`,
+              [pend.rows[0].id, payment.status]
             );
           }
         }
       }
     }
   } catch (err) {
+    // Propaga pro caller (rota do webhook) responder != 2xx e o MP re-enviar.
+    // O evento bruto já foi gravado em billing_events antes deste try, então
+    // nada se perde mesmo que o retry demore.
     console.error('Webhook sync error:', err);
+    throw err;
   }
   return { ok: true };
 }
@@ -504,13 +597,329 @@ async function cancelSubscription(userId, workspaceId = null) {
   };
 }
 
+// Atualiza o valor recorrente do preapproval no Mercado Pago (base + add-ons).
+// A mudança de valor no MP vale a partir do PRÓXIMO ciclo (não é proporcional).
+// Retorna true se OK; nunca lança (o estado local é atualizado de qualquer jeito).
+async function updatePreapprovalAmount(preapprovalId, amountCents) {
+  if (!isEnabled() || !preapprovalId) return false;
+  try {
+    const mp = getMP();
+    const pa = new PreApproval(mp);
+    await pa.update({ id: preapprovalId, body: { auto_recurring: { transaction_amount: amountCents / 100 } } });
+    return true;
+  } catch (err) {
+    console.error('updatePreapprovalAmount error:', err?.message);
+    return false;
+  }
+}
+
+// Atualiza o valor do PLANO (preapproval_plan). Como criamos um plano por
+// assinante, atualizar o plano é a forma canônica de mudar o valor recorrente
+// da assinatura linkada. Fazemos os dois (plano + preapproval) por robustez.
+async function updatePlanAmount(planId, amountCents) {
+  if (!isEnabled() || !planId) return false;
+  try {
+    const mp = getMP();
+    const pap = new PreApprovalPlan(mp);
+    await pap.update({ id: planId, body: { auto_recurring: { transaction_amount: amountCents / 100 } } });
+    return true;
+  } catch (err) {
+    console.error('updatePlanAmount error:', err?.message);
+    return false;
+  }
+}
+
+// Define os add-ons (clubes/categorias extras) da assinatura ATIVA e ajusta o
+// valor recorrente no MP. Só funciona em assinatura paga (status='active').
+// Fase 1: planos MENSAIS. Anual (cobrança proporcional imediata) fica pra Fase 2.
+async function setAddons(userId, workspaceId, { extraClubs, extraCategories }) {
+  const selectSql = (whereCol) => `
+    SELECT s.*, p.interval, p.price_cents AS plan_price, p.features
+      FROM subscriptions s JOIN plans p ON p.id = s.plan_id
+     WHERE s.${whereCol} = $1 AND s.status = 'active' AND s.plan_id <> 'lifetime'
+     ORDER BY s.created_at DESC LIMIT 1`;
+  let sub = null;
+  if (workspaceId) sub = (await query(selectSql('workspace_id'), [workspaceId])).rows[0] || null;
+  if (!sub) sub = (await query(selectSql('user_id'), [userId])).rows[0] || null;
+  if (!sub) {
+    const err = new Error('Você precisa de uma assinatura ativa para adicionar clubes ou categorias.');
+    err.statusCode = 402; throw err;
+  }
+
+  const features = sub.features || {};
+  if (sub.plan_id === 'free') {
+    const err = new Error('Add-ons estão disponíveis nos planos Pro e Clube.');
+    err.statusCode = 402; throw err;
+  }
+  const isClube = features.multi_user === true;
+
+  let ec = Math.max(0, Math.min(ADDON_MAX.extra_club, Math.round(Number(extraClubs) || 0)));
+  let ecat = Math.max(0, Math.min(ADDON_MAX.extra_category, Math.round(Number(extraCategories) || 0)));
+
+  // Categoria extra só no Clube (no Pro, pra ter categorias, sobe pro Clube).
+  if (ecat > 0 && !isClube) {
+    const err = new Error('Categorias extras estão disponíveis no plano Clube. Faça upgrade primeiro.');
+    err.statusCode = 402; throw err;
+  }
+
+  // Fase 1: add-ons no plano ANUAL ainda não (precisa da cobrança proporcional).
+  const currentEc = sub.extra_club_slots || 0;
+  const currentEcat = sub.extra_category_slots || 0;
+  if (sub.interval === 'yearly' && (ec > currentEc || ecat > currentEcat)) {
+    const err = new Error('Add-ons no plano anual chegam em breve. Por enquanto, disponíveis no plano mensal.');
+    err.statusCode = 501; throw err;
+  }
+
+  // Não deixa reduzir abaixo do que já está EM USO (senão cobraria menos do que usa).
+  const wsId = sub.workspace_id;
+  if (wsId) {
+    const clubsUsed = (await query('SELECT COUNT(*)::int n FROM clubs WHERE workspace_id = $1', [wsId])).rows[0].n;
+    const planClubs = features.max_clubs === -1 ? Infinity : (features.max_clubs || 1);
+    if (Number.isFinite(planClubs)) ec = Math.max(ec, Math.max(0, clubsUsed - planClubs));
+
+    const catUsed = (await query(
+      `SELECT COALESCE(MAX(c),0)::int AS maxc FROM (
+         SELECT COUNT(*)::int c FROM categories WHERE workspace_id = $1 GROUP BY club_id
+       ) t`, [wsId])).rows[0].maxc;
+    const planCats = features.max_categories || 1;
+    ecat = Math.max(ecat, Math.max(0, catUsed - planCats));
+  }
+
+  const amountCents = computeRecurringAmountCents(
+    { price_cents: sub.plan_price, interval: sub.interval }, ec, ecat
+  );
+  // Atualiza o plano E o preapproval (robustez — a assinatura é linkada ao plano).
+  const planUpdated = await updatePlanAmount(sub.mp_preapproval_plan_id, amountCents);
+  const paUpdated = await updatePreapprovalAmount(sub.mp_preapproval_id, amountCents);
+  const mpUpdated = planUpdated || paUpdated;
+
+  await query(
+    `UPDATE subscriptions SET extra_club_slots = $2, extra_category_slots = $3, updated_at = NOW() WHERE id = $1`,
+    [sub.id, ec, ecat]
+  );
+  await logBillingEvent({
+    subscriptionId: sub.id, userId, type: 'subscription.addons_updated',
+    mpResourceId: sub.mp_preapproval_id, status: sub.status,
+    raw: { extra_clubs: ec, extra_categories: ecat, amount_cents: amountCents, interval: sub.interval, mp_updated: mpUpdated },
+  });
+
+  return {
+    extra_clubs: ec, extra_categories: ecat,
+    amount_cents: amountCents, interval: sub.interval, mp_updated: mpUpdated,
+    effective: sub.interval === 'yearly' ? 'next_renewal' : 'next_cycle',
+  };
+}
+
+// -----------------------------------------------------------------------------
+// Plano Free permanente + "assinatura efetiva"
+//
+// Ninguém fica mais trancado pra fora: se a assinatura/trial caducou (ou nunca
+// existiu), o acesso cai no plano FREE (features limitadas — sem quadro tático,
+// sem exportações, 30 atletas). Exigência da Apple (3.1.3(f)): o app precisa
+// ser utilizável sem pagar e sem chamada pra compra dentro dele.
+// -----------------------------------------------------------------------------
+const FREE_PLAN_ID = 'free';
+
+// Uma sub "usável" é a que ainda dá direito às features do SEU plano.
+function isSubscriptionUsable(sub) {
+  if (!sub) return false;
+  if (sub.is_admin || sub.plan_id === 'admin' || sub.plan_id === 'lifetime') return true;
+  const now = Date.now();
+  if (sub.status === 'trialing') {
+    return !sub.trial_ends_at || new Date(sub.trial_ends_at).getTime() >= now;
+  }
+  if (sub.status === 'active') {
+    return !sub.current_period_end || new Date(sub.current_period_end).getTime() >= now;
+  }
+  return isSubscriptionActive(sub);
+}
+
+// Sub efetiva da dupla (user, workspace): a real se usável; senão um objeto
+// Free sintético, carregando em `lapsed` a sub que caducou (pra UI explicar).
+async function getEffectiveSubscription({ userId, workspaceId = null }) {
+  let sub = null;
+  if (workspaceId) sub = await getSubscriptionForWorkspace(workspaceId);
+  if (!sub) sub = await getActiveSubscription(userId);
+  if (sub && isSubscriptionUsable(sub)) {
+    sub.is_free = sub.plan_id === FREE_PLAN_ID;
+    return sub;
+  }
+  const free = await getPlan(FREE_PLAN_ID);
+  return {
+    plan_id: FREE_PLAN_ID,
+    plan_name: free?.name || 'Free',
+    status: 'active',
+    price_cents: 0,
+    interval: 'monthly',
+    features: free?.features || { max_clubs: 1, max_categories: 1, max_athletes: 30 },
+    is_free: true,
+    is_fallback: true,
+    user_id: userId,
+    workspace_id: workspaceId || null,
+    lapsed: sub ? {
+      plan_id: sub.plan_id,
+      plan_name: sub.plan_name,
+      status: sub.status,
+      trial_ends_at: sub.trial_ends_at,
+      current_period_end: sub.current_period_end,
+      cancel_at_period_end: sub.cancel_at_period_end,
+    } : null,
+  };
+}
+
+// Assinatura inicial no cadastro (email/Google/Apple):
+//   admin → nada; lista lifetime → vitalícia; SIGNUP_TRIAL_DAYS>0 → trial do
+//   Pro; padrão → Free permanente.
+async function createInitialSubscription({ userId, workspaceId, email, role }) {
+  if (role === 'admin') return { kind: 'admin', trialDays: 0 };
+  if (isLifetime?.(email)) {
+    await query(
+      `INSERT INTO subscriptions (user_id, workspace_id, plan_id, status, current_period_start, current_period_end)
+       VALUES ($1, $2, 'lifetime', 'active', now(), now() + interval '100 years')`,
+      [userId, workspaceId]
+    );
+    return { kind: 'lifetime', trialDays: 0 };
+  }
+  const trialDays = Math.max(0, parseInt(process.env.SIGNUP_TRIAL_DAYS || '0', 10) || 0);
+  if (trialDays > 0) {
+    const trialEnd = new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000);
+    await query(
+      `INSERT INTO subscriptions (user_id, workspace_id, plan_id, status, trial_ends_at, current_period_start, current_period_end)
+       VALUES ($1, $2, 'pro', 'trialing', $3, now(), $3)`,
+      [userId, workspaceId, trialEnd]
+    );
+    return { kind: 'trial', trialDays };
+  }
+  await query(
+    `INSERT INTO subscriptions (user_id, workspace_id, plan_id, status, current_period_start)
+     VALUES ($1, $2, $3, 'active', now())`,
+    [userId, workspaceId, FREE_PLAN_ID]
+  );
+  return { kind: 'free', trialDays: 0 };
+}
+
+// -----------------------------------------------------------------------------
+// IAP (Apple App Store / Google Play) via RevenueCat
+//
+// O app nativo compra pela loja; a RevenueCat valida o recibo e nos manda
+// webhooks. Aqui traduzimos os eventos pra tabela `subscriptions`
+// (provider='apple'|'google'). O resto do sistema não muda: o gate lê a
+// assinatura efetiva como sempre.
+// -----------------------------------------------------------------------------
+const RC_PRODUCT_TO_PLAN = {
+  'com.faggin.tactiplan.pro.monthly':   'pro',
+  'com.faggin.tactiplan.pro.yearly':    'pro_annual',
+  'com.faggin.tactiplan.clube.monthly': 'clube',
+  'com.faggin.tactiplan.clube.yearly':  'clube_annual',
+  // alias defensivo: o ID foi criado com um 'V' colado por engano no ASC
+  'Vcom.faggin.tactiplan.clube.yearly': 'clube_annual',
+};
+
+function rcResolveUserId(event) {
+  const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const candidates = [event.app_user_id, event.original_app_user_id, ...(Array.isArray(event.aliases) ? event.aliases : [])];
+  return candidates.find((c) => typeof c === 'string' && uuidRe.test(c)) || null;
+}
+
+async function applyRevenueCatEvent(event) {
+  const type = event?.type;
+  const RELEVANT = ['INITIAL_PURCHASE', 'RENEWAL', 'UNCANCELLATION', 'PRODUCT_CHANGE', 'CANCELLATION', 'EXPIRATION', 'BILLING_ISSUE'];
+  if (!type || !RELEVANT.includes(type)) return { handled: false, reason: `ignored:${type || 'no_type'}` };
+
+  const userId = rcResolveUserId(event);
+  if (!userId) return { handled: false, reason: 'no_uuid_user_id' };
+  const userRes = await query('SELECT id FROM users WHERE id = $1', [userId]);
+  if (userRes.rows.length === 0) return { handled: false, reason: 'user_not_found' };
+
+  const provider = String(event.store || '').toUpperCase() === 'PLAY_STORE' ? 'google' : 'apple';
+  const ref = String(event.original_transaction_id || event.transaction_id || event.id || '');
+  const productId = event.new_product_id || event.product_id || '';
+  const planId = RC_PRODUCT_TO_PLAN[productId] || null;
+  const expMs = Number(event.expiration_at_ms) || null;
+  const periodEnd = expMs ? new Date(expMs) : null;
+
+  await query(
+    'INSERT INTO billing_events (type, mp_resource_id, raw) VALUES ($1, $2, $3)',
+    [`revenuecat.${type.toLowerCase()}`, ref || null, JSON.stringify({ userId, productId, planId, environment: event.environment, expiration_at_ms: expMs })]
+  ).catch(() => {});
+
+  const existing = (await query(
+    `SELECT id FROM subscriptions
+      WHERE provider = $1 AND provider_subscription_id = $2
+      ORDER BY created_at DESC LIMIT 1`,
+    [provider, ref]
+  )).rows[0] || null;
+
+  const activates = ['INITIAL_PURCHASE', 'RENEWAL', 'UNCANCELLATION', 'PRODUCT_CHANGE'].includes(type);
+
+  if (activates) {
+    if (!planId) return { handled: false, reason: `unknown_product:${productId}` };
+    if (existing) {
+      await _hardCancelActiveSubsForUser(userId, `iap_${type.toLowerCase()}`, existing.id);
+      await query(
+        `UPDATE subscriptions SET
+           plan_id = $2, status = 'active', cancel_at_period_end = FALSE,
+           current_period_start = now(), current_period_end = $3, updated_at = now()
+         WHERE id = $1`,
+        [existing.id, planId, periodEnd]
+      );
+      return { handled: true, action: 'updated', plan: planId };
+    }
+    // Cancela as outras ativas (inclusive Free e Mercado Pago — evita cobrança dupla)
+    await _hardCancelActiveSubsForUser(userId, `iap_${type.toLowerCase()}`);
+    const ws = (await query('SELECT id FROM workspaces WHERE owner_id = $1 ORDER BY created_at ASC LIMIT 1', [userId])).rows[0]?.id || null;
+    await query(
+      `INSERT INTO subscriptions (user_id, workspace_id, plan_id, status, provider, provider_subscription_id, current_period_start, current_period_end)
+       VALUES ($1, $2, $3, 'active', $4, $5, now(), $6)`,
+      [userId, ws, planId, provider, ref, periodEnd]
+    );
+    return { handled: true, action: 'created', plan: planId };
+  }
+
+  if (!existing) return { handled: true, action: 'noop_no_local_sub' };
+
+  if (type === 'CANCELLATION') {
+    // Desligou a renovação: continua ativa até o fim do período pago.
+    await query(
+      `UPDATE subscriptions SET cancel_at_period_end = TRUE, canceled_at = now(), updated_at = now() WHERE id = $1`,
+      [existing.id]
+    );
+    return { handled: true, action: 'cancel_at_period_end' };
+  }
+  if (type === 'EXPIRATION') {
+    // Encerra o período explicitamente (senão a janela de graça do
+    // cancel_at_period_end poderia manter o acesso além do devido).
+    await query(
+      `UPDATE subscriptions SET
+         status = 'expired', cancel_at_period_end = FALSE,
+         current_period_end = LEAST(COALESCE($2, now()), now()),
+         updated_at = now()
+       WHERE id = $1`,
+      [existing.id, periodEnd]
+    );
+    return { handled: true, action: 'expired' }; // usuário cai no Free automaticamente
+  }
+  if (type === 'BILLING_ISSUE') {
+    await query(`UPDATE subscriptions SET status = 'past_due', updated_at = now() WHERE id = $1`, [existing.id]);
+    return { handled: true, action: 'past_due' };
+  }
+  return { handled: true };
+}
+
 module.exports = {
+  applyRevenueCatEvent,
+  FREE_PLAN_ID,
+  isSubscriptionUsable,
+  getEffectiveSubscription,
+  createInitialSubscription,
   isEnabled,
   getPlan,
   getActiveSubscription,
   getSubscriptionForWorkspace,
   startTrial,
   createCheckout,
+  setAddons,
+  ADDON_PRICES,
   handleWebhook,
   cancelSubscription,
   migrateToCanceled,
@@ -519,6 +928,8 @@ module.exports = {
   fetchPayment,
   mapMpStatus,
   logBillingEvent,
+  // Exportado pro cron de reconciliação (reconcilePendingSubscriptions).
+  syncSubscriptionFromPreapproval,
   // Exportado pra tests/scripts admin — não usar em rotas de user comum.
   _hardCancelActiveSubsForUser,
 };

@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Header } from './Header';
+import { AppSidebar, AppTopBar, AppMobileBar } from './AppShell';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useClub } from '../../contexts/ClubContext';
 import { ClubOnboardingModal } from '../club/ClubOnboardingModal';
@@ -19,6 +20,11 @@ export function Layout({ children }) {
   const location = useLocation();
 
   const fixedViewport = FIXED_VIEWPORT_ROUTES.some(p => location.pathname.startsWith(p));
+  // Menu lateral (padrão do Gestsport): gaveta no celular; no computador recolhe em trilho de
+  // ícones, preferência guardada no aparelho.
+  const [drawer, setDrawer] = useState(false);
+  const [recolhida, setRecolhida] = useState(() => { try { return localStorage.getItem('sidebar_recolhida') === '1'; } catch { return false; } });
+  const alternarBarra = () => setRecolhida((v) => { try { localStorage.setItem('sidebar_recolhida', v ? '0' : '1'); } catch { /* sem storage */ } return !v; });
 
   const bgWrapperStyle = {
     position: 'fixed',
@@ -27,19 +33,32 @@ export function Layout({ children }) {
     pointerEvents: 'none',
   };
 
-  const containerStyle = {
+  const shellStyle = {
     position: 'relative',
     zIndex: 1,
+    display: 'flex',
+    minHeight: '100vh',
+    overflowX: 'clip',
+    maxWidth: '100%',
+  };
+
+  const containerStyle = {
+    flex: 1,
+    minWidth: 0,
     display: 'flex',
     flexDirection: 'column',
     minHeight: '100vh',
     ...(fixedViewport ? { height: '100vh' } : {}),
-    backgroundColor: 'transparent',
+    // Rotas de viewport fixo (ex: Programação) usam fundo OPACO pra o conteúdo
+    // preencher a tela toda — sem o gramado do StadiumBackground aparecendo na
+    // metade de baixo quando o conteúdo é curto (efeito de "tela dividida").
+    backgroundColor: fixedViewport ? colors.background : 'transparent',
   };
 
   const contentStyle = {
     flex: 1,
-    padding: isMobile ? '0.75rem' : '1.5rem',
+    padding: isMobile ? '0.75rem' : (fixedViewport ? '0 1.5rem 1.25rem' : '0.25rem 1.5rem 1.5rem'),
+    minWidth: 0,
     display: 'flex',
     flexDirection: 'column',
     ...(fixedViewport ? { minHeight: 0, overflowY: 'auto' } : {}),
@@ -55,12 +74,15 @@ export function Layout({ children }) {
       <div style={bgWrapperStyle}>
         <StadiumBackground isDark={isDark} variant="soft" modality={selectedClub?.modality || 'football_11'} />
       </div>
-      <div style={containerStyle}>
-        <Header isMobile={isMobile} />
-        <SubscriptionBanner />
-        <main style={contentStyle}>
-          {children}
-        </main>
+      <div style={shellStyle}>
+        <AppSidebar isMobile={isMobile} open={drawer} onClose={() => setDrawer(false)} collapsed={!isMobile && recolhida} />
+        <div style={containerStyle}>
+          {isMobile ? <AppMobileBar onOpenMenu={() => setDrawer(true)} /> : <AppTopBar collapsed={recolhida} onToggle={alternarBarra} />}
+          <SubscriptionBanner />
+          <main style={contentStyle}>
+            {children}
+          </main>
+        </div>
       </div>
 
       {showOnboarding && (

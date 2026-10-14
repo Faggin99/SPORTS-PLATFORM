@@ -20,6 +20,10 @@ export function usePlanFeatures() {
     isLifetime,
     planId: sub?.plan_id || null,
     planName: sub?.plan_name || null,
+    // Plano Free (linha real ou fallback de trial/assinatura que acabou).
+    isFree: !isAdmin && !isLifetime && (sub?.plan_id === 'free' || !!sub?.is_free),
+    // Assinatura anterior que caducou (o backend manda quando cai no Free).
+    lapsed: sub?.lapsed || null,
     multi_user,
     monthly_theme: isAdmin || isLifetime || !!features.monthly_theme,
     max_coaches: features.max_coaches,

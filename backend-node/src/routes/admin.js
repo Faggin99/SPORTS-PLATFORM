@@ -5,6 +5,7 @@ const { query } = require('../config/database');
 const authMiddleware = require('../middleware/auth');
 const requireAdmin = require('../middleware/requireAdmin');
 const { isAdmin, isLifetime } = require('../config/specialUsers');
+const { loginLimiter } = require('../middleware/rateLimit');
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -12,8 +13,9 @@ const JWT_SECRET = process.env.JWT_SECRET;
 /**
  * POST /api/admin/auth/login
  * Login dedicado da área admin. Rejeita não-admins na própria autenticação.
+ * Rate limit dedicado (5/15min por IP) — é a conta de maior privilégio.
  */
-router.post('/auth/login', async (req, res) => {
+router.post('/auth/login', loginLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'email e password obrigatórios' });
@@ -217,10 +219,11 @@ router.post('/users/:id/extend-trial', async (req, res) => {
       return res.json({ ok: true, action: 'extended', subscription: r.rows[0] });
     }
 
-    // Sem trial ativo — cria novo no plano Clube (default do trial atual)
+    // Sem trial ativo — cria novo no plano Pro (default do trial). Se quiser
+    // conceder Clube, use "Trocar plano" (change-plan) depois.
     const r = await query(`
       INSERT INTO subscriptions (user_id, plan_id, status, trial_ends_at, current_period_start, current_period_end, metadata)
-      VALUES ($1, 'clube', 'trialing', NOW() + ($2 || ' days')::interval, NOW(), NOW() + ($2 || ' days')::interval, '{"grantedBy":"admin"}'::jsonb)
+      VALUES ($1, 'pro', 'trialing', NOW() + ($2 || ' days')::interval, NOW(), NOW() + ($2 || ' days')::interval, '{"grantedBy":"admin"}'::jsonb)
       RETURNING *
     `, [id, days]);
     res.json({ ok: true, action: 'created', subscription: r.rows[0] });

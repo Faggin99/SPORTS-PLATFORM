@@ -1,8 +1,9 @@
 import { Group, Line, Arrow, Circle, Rect, Text, Shape } from 'react-konva';
 import { toPixel } from '../../utils/fieldDimensions';
 
-// Render a single drawn element
-function DrawnElement({ element, fieldWidth, fieldHeight, isSelected, onClick, draggable, onDragEnd }) {
+// Render a single drawn element.
+// Exportado também pro TacticalCanvas renderizar o preview ao vivo do draft.
+export function DrawnElement({ element, fieldWidth, fieldHeight, isSelected, onClick, draggable, onDragEnd, onTextEdit, opacity = 1 }) {
   const px = (pct) => toPixel(pct, fieldWidth);
   const py = (pct) => toPixel(pct, fieldHeight);
 
@@ -13,6 +14,7 @@ function DrawnElement({ element, fieldWidth, fieldHeight, isSelected, onClick, d
   } : {};
 
   const commonGroupProps = {
+    opacity,
     onClick: () => onClick?.(element.id),
     onTap: () => onClick?.(element.id),
   };
@@ -62,13 +64,12 @@ function DrawnElement({ element, fieldWidth, fieldHeight, isSelected, onClick, d
           )}
           <Shape
             sceneFunc={(ctx, shape) => {
+              // NÃO mutar shape/ctx aqui: stroke/strokeWidth/dash já vêm dos
+              // props do <Shape>. (Um `ctx.setAttr = undefined` deixado aqui
+              // quebrava o strokeShape e derrubava o draw do canvas inteiro.)
               ctx.beginPath();
               ctx.moveTo(pts[0], pts[1]);
               ctx.quadraticCurveTo(pts[2], pts[3], pts[4], pts[5]);
-              ctx.setAttr = undefined;
-              shape.stroke(element.color || 'white');
-              shape.strokeWidth(element.strokeWidth || 2.5);
-              shape.dash(element.dash || []);
               ctx.strokeShape(shape);
               // Draw arrowhead
               const angle = Math.atan2(pts[5] - pts[3], pts[4] - pts[2]);
@@ -112,15 +113,22 @@ function DrawnElement({ element, fieldWidth, fieldHeight, isSelected, onClick, d
     }
 
     case 'zone_rect': {
+      // O Group nasce em (0,0) com o Rect posicionado dentro — após o drag,
+      // node.x()/y() é o DESLOCAMENTO em px. Converte pra % e zera o node
+      // (a posição passa a vir do estado).
       return (
         <Group
           {...commonGroupProps}
           draggable={draggable}
           onDragEnd={(e) => {
+            const node = e.target;
             if (onDragEnd) {
-              const node = e.target;
-              onDragEnd(element.id, node.x(), node.y());
+              onDragEnd(element.id, {
+                x: element.x + (node.x() / fieldWidth) * 100,
+                y: element.y + (node.y() / fieldHeight) * 100,
+              });
             }
+            node.position({ x: 0, y: 0 });
           }}
         >
           <Rect
@@ -157,6 +165,8 @@ function DrawnElement({ element, fieldWidth, fieldHeight, isSelected, onClick, d
     }
 
     case 'text': {
+      // O Group nasce em px(element.x/y) — após o drag, node.x()/y() é a
+      // posição ABSOLUTA em px. Converte pra % e persiste.
       return (
         <Group
           x={px(element.x)}
@@ -165,9 +175,14 @@ function DrawnElement({ element, fieldWidth, fieldHeight, isSelected, onClick, d
           onDragEnd={(e) => {
             if (onDragEnd) {
               const node = e.target;
-              onDragEnd(element.id, node.x(), node.y());
+              onDragEnd(element.id, {
+                x: (node.x() / fieldWidth) * 100,
+                y: (node.y() / fieldHeight) * 100,
+              });
             }
           }}
+          onDblClick={() => onTextEdit?.(element)}
+          onDblTap={() => onTextEdit?.(element)}
           {...commonGroupProps}
         >
           {isSelected && (
@@ -205,6 +220,7 @@ export default function DrawingLayer({
   fieldHeight,
   selectedDrawingId,
   onSelectDrawing,
+  onTextEdit,
   draggable = true,
   onDragEnd,
 }) {
@@ -218,6 +234,7 @@ export default function DrawingLayer({
           fieldHeight={fieldHeight}
           isSelected={selectedDrawingId === d.id}
           onClick={onSelectDrawing}
+          onTextEdit={onTextEdit}
           draggable={draggable}
           onDragEnd={onDragEnd}
         />

@@ -26,6 +26,11 @@ export const authService = {
     return { user: data.user, token: data.token };
   },
 
+  async appleLogin(identityToken, name = null) {
+    const data = await api.post('/auth/apple', { identityToken, name });
+    return { user: data.user, token: data.token };
+  },
+
   async forgotPassword(email) {
     return await api.post('/auth/forgot', { email });
   },

@@ -12,7 +12,7 @@ async function canCreateClub(user) {
   }
   if (!user.workspaceId) return { allowed: false, limit: 0, current: 0 };
 
-  const sub = await billing.getSubscriptionForWorkspace(user.workspaceId);
+  const sub = await billing.getEffectiveSubscription({ userId: user.id, workspaceId: user.workspaceId });
   const planLimit = sub?.features?.max_clubs;
   if (planLimit === undefined || planLimit === -1) return { allowed: true, limit: planLimit ?? -1 };
 
@@ -91,12 +91,23 @@ const VALID_MODALITIES = ['football_11', 'football_7', 'futsal'];
 // POST /api/clubs
 router.post('/', async (req, res) => {
   try {
-    const { name, description, modality } = req.body;
+    const { name, description, modality, primary_color, secondary_color } = req.body;
     if (!name) {
       return res.status(400).json({ error: 'Club name is required' });
     }
     if (modality && !VALID_MODALITIES.includes(modality)) {
       return res.status(400).json({ error: 'Modalidade inválida' });
+    }
+    // Cores em formato HEX #RRGGBB ou #RRGGBBAA, vazio/null = sem cor
+    const HEX_RE = /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/;
+    const validColor = (v) => v === '' || v === null || v === undefined ? null : (HEX_RE.test(v) ? v : undefined);
+    const pc = validColor(primary_color);
+    const sc = validColor(secondary_color);
+    if (pc === undefined) {
+      return res.status(400).json({ error: 'primary_color em formato inválido (esperado #RRGGBB)' });
+    }
+    if (sc === undefined) {
+      return res.status(400).json({ error: 'secondary_color em formato inválido (esperado #RRGGBB)' });
     }
 
     if (!req.user.workspaceId) {
@@ -106,16 +117,15 @@ router.post('/', async (req, res) => {
       return res.status(403).json({ error: 'Sem permissão de escrita nesta workspace' });
     }
 
-    // Gate por plano: Pro = 1; Clube = 3 (+ extra_club_slots avulsos); admin/lifetime = ilimitado.
+    // Gate por plano: Pro/Clube = 1 clube incluso; clube extra = add-on (+R$20/mês
+    // via extra_club_slots); admin/lifetime = ilimitado.
     const gate = await canCreateClub(req.user);
     if (!gate.allowed) {
-      const upgradeHint = gate.planLimit === 1
-        ? 'Faça upgrade pro plano Clube (até 3 clubes incluídos) pra criar mais.'
-        : 'Você atingiu o teto do seu plano. Entre em contato pra liberar slots adicionais.';
       return res.status(402).json({
-        error: `Seu plano permite ${gate.limit} clube${gate.limit === 1 ? '' : 's'} (já em uso: ${gate.current}). ${upgradeHint}`,
-        code: 'PLAN_REQUIRED',
+        error: `Seu plano permite ${gate.limit} clube${gate.limit === 1 ? '' : 's'} (já em uso: ${gate.current}). Adicione um clube extra por R$20/mês.`,
+        code: 'ADDON_REQUIRED',
         required_feature: 'max_clubs',
+        addon: 'extra_club',
         current: gate.current,
         limit: gate.limit,
         plan_limit: gate.planLimit,
@@ -124,10 +134,10 @@ router.post('/', async (req, res) => {
     }
 
     const result = await query(
-      `INSERT INTO clubs (name, description, workspace_id, modality)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO clubs (name, description, workspace_id, modality, primary_color, secondary_color)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
-      [name, description || null, req.user.workspaceId, modality || 'football_11']
+      [name, description || null, req.user.workspaceId, modality || 'football_11', pc, sc]
     );
     const club = result.rows[0];
 

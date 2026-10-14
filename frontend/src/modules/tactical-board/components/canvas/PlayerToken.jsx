@@ -11,6 +11,7 @@ export default function PlayerToken({
   draggable = true,
   onDragEnd,
   onClick,
+  onDblClick,
 }) {
   const radius = 16;
 
@@ -22,6 +23,8 @@ export default function PlayerToken({
         onDragEnd={onDragEnd}
         onClick={onClick}
         onTap={onClick}
+        onDblClick={onDblClick}
+        onDblTap={onDblClick}
       >
         {/* Selection ring */}
         {isSelected && (
@@ -98,6 +101,8 @@ export default function PlayerToken({
       onDragEnd={onDragEnd}
       onClick={onClick}
       onTap={onClick}
+      onDblClick={onDblClick}
+      onDblTap={onDblClick}
     >
       {/* Selection ring */}
       {isSelected && (

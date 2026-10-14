@@ -1,4 +1,5 @@
 const express = require('express');
+const { getPlanFeatures } = require('../utils/planFeatures');
 const fs = require('fs');
 const path = require('path');
 const { query } = require('../config/database');
@@ -127,6 +128,22 @@ router.post('/', async (req, res) => {
     }
     if (!req.user.assertCanAccessCategory(category_id)) {
       return res.status(403).json({ error: 'Sem acesso a essa categoria' });
+    }
+
+    // Limite de atletas do plano (Free: 30; pagos: -1 = ilimitado). Conta a
+    // workspace inteira. Mensagem neutra (app nativo / Apple 3.1.3(f)).
+    const feats = await getPlanFeatures(req.user);
+    const maxAthletes = feats && !feats.__unlimited ? Number(feats.max_athletes) : -1;
+    if (Number.isFinite(maxAthletes) && maxAthletes >= 0) {
+      const cnt = await query('SELECT COUNT(*)::int AS n FROM athletes WHERE workspace_id = $1', [wsId]);
+      if (cnt.rows[0].n >= maxAthletes) {
+        return res.status(402).json({
+          error: `Seu plano permite até ${maxAthletes} atletas.`,
+          code: 'PLAN_REQUIRED',
+          required_feature: 'max_athletes',
+          limit: maxAthletes,
+        });
+      }
     }
 
     const result = await query(

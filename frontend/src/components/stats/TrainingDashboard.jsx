@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Activity, Clock, Calendar, ChevronRight, Trophy, PieChart, BarChart3 } from 'lucide-react';
+import { useIsMobile } from '../../hooks/useIsMobile';
 
 // Paleta consistente das 4 dimensões em todo o dashboard
 export const DIM_COLORS = {
@@ -595,6 +596,7 @@ const ACTIVITY_VARIANTS = {
 };
 
 export function ActivityPieChart({ titles, mode, colors, topN = 8 }) {
+  const isMobile = useIsMobile();
   // Modo "Por sessão" não faz sentido pra atividades-template (uma atividade pode
   // ser usada várias vezes na mesma sessão ou em sessões diferentes).
   if (mode === 'sessions') {
@@ -643,7 +645,7 @@ export function ActivityPieChart({ titles, mode, colors, topN = 8 }) {
   const total = data.reduce((s, d) => s + valueOf(d), 0);
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr', gap: '1rem', alignItems: 'center' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '180px 1fr', gap: '1rem', alignItems: 'center', justifyItems: isMobile ? 'center' : 'stretch' }}>
       <DonutChart data={data} mode={effectiveMode} size={180} colors={colors} />
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', maxHeight: 240, overflowY: 'auto', paddingRight: '0.25rem' }}>
         {data.map((d) => {
@@ -666,6 +668,7 @@ export function ActivityPieChart({ titles, mode, colors, topN = 8 }) {
 }
 
 export function TrendStackedBars({ trend, mode, colors, height = 160 }) {
+  const isMobile = useIsMobile();
   if (!trend?.length) return null;
   const valueOf = (b) => mode === 'minutes' ? b.minutes : b.total;
   const max = Math.max(...trend.map(valueOf), 1);
@@ -687,7 +690,7 @@ export function TrendStackedBars({ trend, mode, colors, height = 160 }) {
   const statValueStyle = { fontSize: '1rem', fontWeight: 700, color: colors.text, marginTop: '0.1rem' };
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 130px', gap: '0.75rem', alignItems: 'start' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 130px', gap: '0.75rem', alignItems: 'start' }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: '0.5rem', height, padding: '0.5rem 0' }}>
           {trend.map((b, i) => {
@@ -750,6 +753,7 @@ export function TrendStackedBars({ trend, mode, colors, height = 160 }) {
 // Dashboard completo de Treino
 // ─────────────────────────────────────────────────────────────────
 export function TrainingDashboard({ stats, colors }) {
+  const isMobile = useIsMobile();
   const [mode, setMode] = useState('sessions'); // 'sessions' (default) | 'count' | 'minutes'
   const [selectedDim, setSelectedDim] = useState(null);
   // View dos drills do pilar Tático: pizza ou barras
@@ -825,10 +829,14 @@ export function TrainingDashboard({ stats, colors }) {
         </div>
         <div style={{
           display: 'grid',
-          gridTemplateColumns: (activeDim === 'tatico' && mode !== 'minutes')
-            ? 'minmax(220px, 280px) 1fr 1fr'
-            : 'minmax(260px, 360px) 1fr',
-          gap: '1.25rem',
+          // No mobile empilha em 1 coluna — os grids de 2/3 colunas fixas
+          // vazavam pra fora da tela e encavalavam os donuts.
+          gridTemplateColumns: isMobile
+            ? '1fr'
+            : (activeDim === 'tatico' && mode !== 'minutes')
+              ? 'minmax(220px, 280px) 1fr 1fr'
+              : 'minmax(260px, 360px) 1fr',
+          gap: isMobile ? '1.5rem' : '1.25rem',
           alignItems: 'start',
         }}>
           <div>
@@ -850,7 +858,7 @@ export function TrainingDashboard({ stats, colors }) {
               />
             </div>
           </div>
-          <div style={{ minWidth: 0, paddingLeft: '0.5rem', borderLeft: `1px solid ${colors.border}` }}>
+          <div style={{ minWidth: 0, ...(isMobile ? { paddingTop: '0.75rem', borderTop: `1px solid ${colors.border}` } : { paddingLeft: '0.5rem', borderLeft: `1px solid ${colors.border}` }) }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
               <div style={{ fontSize: '0.75rem', color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600 }}>
                 {activeDim === 'tatico' ? 'Momentos do Jogo' : 'Conteúdos'}
@@ -880,7 +888,7 @@ export function TrainingDashboard({ stats, colors }) {
               }
               if (taticView === 'donut') {
                 return (
-                  <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr', gap: '0.75rem', alignItems: 'center' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '180px 1fr', gap: '0.75rem', alignItems: 'center', justifyItems: isMobile ? 'center' : 'stretch' }}>
                     <DonutChart
                       data={taticContents}
                       mode={mode}
@@ -970,7 +978,7 @@ export function TrainingDashboard({ stats, colors }) {
             )}
           </div>
           {activeDim === 'tatico' && mode !== 'minutes' && (
-            <div style={{ minWidth: 0, paddingLeft: '0.5rem', borderLeft: `1px solid ${colors.border}` }}>
+            <div style={{ minWidth: 0, ...(isMobile ? { paddingTop: '0.75rem', borderTop: `1px solid ${colors.border}` } : { paddingLeft: '0.5rem', borderLeft: `1px solid ${colors.border}` }) }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
                 <div style={{ fontSize: '0.75rem', color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600 }}>
                   Submomentos
@@ -1008,7 +1016,7 @@ export function TrainingDashboard({ stats, colors }) {
       </div>
 
       {/* Top Atividades + Tendência lado a lado (altura independente) */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '0.75rem', alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(260px, 100%), 1fr))', gap: '0.75rem', alignItems: 'start' }}>
         <div style={cardStyle}>
           <div style={sectionTitleStyle}>
             <span>Top Atividades</span>
