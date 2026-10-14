@@ -81,8 +81,19 @@ app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+// Uploads sensíveis (fotos de atleta, anexos de treino) saem da API com link
+// assinado de curta duração; o gate confere a assinatura (src/utils/signedUpload.js).
+const { signJsonResponses, uploadsGate, isSensitive } = require('./src/utils/signedUpload');
+app.use(signJsonResponses);
+
 const uploadDir = path.resolve(process.env.UPLOAD_DIR || '../uploads');
-app.use('/uploads', express.static(uploadDir));
+app.use('/uploads', uploadsGate);
+app.use('/uploads', express.static(uploadDir, {
+  setHeaders: (res, filePath) => {
+    const rel = '/uploads/' + path.relative(uploadDir, filePath).split(path.sep).join('/');
+    if (isSensitive(rel)) res.setHeader('Cache-Control', 'private, max-age=3600');
+  },
+}));
 
 // IMPORTANTE: rotas com prefix específico DEVEM vir antes de qualquer mount em '/api'
 // (contentsRoutes usa app.use('/api', ...) e tem authMiddleware global no router —

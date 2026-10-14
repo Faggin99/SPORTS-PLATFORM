@@ -5,6 +5,7 @@ const path = require('path');
 const { query } = require('../config/database');
 const authMiddleware = require('../middleware/auth');
 const { uploadAthletePhoto } = require('../middleware/upload');
+const { stripUploadSig } = require('../utils/signedUpload');
 
 const router = express.Router();
 
@@ -153,7 +154,7 @@ router.post('/', async (req, res) => {
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
        RETURNING *`,
       [name, position || null, jersey_number || null, status || 'active', observation || null,
-       group || null, photo_url || null, club_id, category_id || null, wsId,
+       group || null, stripUploadSig(photo_url) || null, club_id, category_id || null, wsId,
        birthdate || null, Number.isFinite(+height_cm) && +height_cm > 0 ? +height_cm : null,
        normalizeFoot(preferred_foot), previous_club?.trim() || null]
     );
@@ -188,7 +189,7 @@ router.put('/:id', async (req, res) => {
        WHERE id = $14 AND workspace_id = ANY($15)
        RETURNING *`,
       [name, position || null, jersey_number || null, status || 'active', observation || null,
-       group || null, photo_url || null, club_id, category_id || null,
+       group || null, stripUploadSig(photo_url) || null, club_id, category_id || null,
        birthdate || null, Number.isFinite(+height_cm) && +height_cm > 0 ? +height_cm : null,
        normalizeFoot(preferred_foot), previous_club?.trim() || null,
        req.params.id, req.user.workspaceIds || []]

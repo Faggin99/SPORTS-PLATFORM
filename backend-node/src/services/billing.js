@@ -821,6 +821,23 @@ function rcResolveUserId(event) {
   return candidates.find((c) => typeof c === 'string' && uuidRe.test(c)) || null;
 }
 
+// Compras de SANDBOX (TestFlight, revisão da Apple, testes) não podem liberar
+// plano no banco de produção: por padrão só são registradas em billing_events.
+// Exceções (desligadas por padrão):
+//   REVENUECAT_ACEITAR_SANDBOX=1        → aceita qualquer sandbox (staging/testes)
+//   REVENUECAT_SANDBOX_EMAILS=a@x,b@y   → aceita sandbox só dessas contas (ex.: conta
+//                                         de revisão da Apple durante a submissão)
+function rcIsSandbox(event) {
+  return String(event?.environment || '').toUpperCase() === 'SANDBOX';
+}
+
+function rcSandboxAllowed(email) {
+  if (process.env.REVENUECAT_ACEITAR_SANDBOX === '1') return true;
+  const lista = String(process.env.REVENUECAT_SANDBOX_EMAILS || '')
+    .split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
+  return !!email && lista.includes(String(email).toLowerCase());
+}
+
 async function applyRevenueCatEvent(event) {
   const type = event?.type;
   const RELEVANT = ['INITIAL_PURCHASE', 'RENEWAL', 'UNCANCELLATION', 'PRODUCT_CHANGE', 'CANCELLATION', 'EXPIRATION', 'BILLING_ISSUE'];
@@ -828,8 +845,9 @@ async function applyRevenueCatEvent(event) {
 
   const userId = rcResolveUserId(event);
   if (!userId) return { handled: false, reason: 'no_uuid_user_id' };
-  const userRes = await query('SELECT id FROM users WHERE id = $1', [userId]);
+  const userRes = await query('SELECT id, email FROM users WHERE id = $1', [userId]);
   if (userRes.rows.length === 0) return { handled: false, reason: 'user_not_found' };
+  const sandboxIgnorado = rcIsSandbox(event) && !rcSandboxAllowed(userRes.rows[0].email);
 
   const provider = String(event.store || '').toUpperCase() === 'PLAY_STORE' ? 'google' : 'apple';
   const ref = String(event.original_transaction_id || event.transaction_id || event.id || '');
@@ -840,8 +858,10 @@ async function applyRevenueCatEvent(event) {
 
   await query(
     'INSERT INTO billing_events (type, mp_resource_id, raw) VALUES ($1, $2, $3)',
-    [`revenuecat.${type.toLowerCase()}`, ref || null, JSON.stringify({ userId, productId, planId, environment: event.environment, expiration_at_ms: expMs })]
+    [`revenuecat.${type.toLowerCase()}`, ref || null, JSON.stringify({ userId, productId, planId, environment: event.environment, expiration_at_ms: expMs, ...(sandboxIgnorado ? { ignored: 'sandbox' } : {}) })]
   ).catch(() => {});
+
+  if (sandboxIgnorado) return { handled: false, reason: 'sandbox_ignored' };
 
   const existing = (await query(
     `SELECT id FROM subscriptions
@@ -908,6 +928,7 @@ async function applyRevenueCatEvent(event) {
 
 module.exports = {
   applyRevenueCatEvent,
+  _rcSandboxAllowed: rcSandboxAllowed,
   FREE_PLAN_ID,
   isSubscriptionUsable,
   getEffectiveSubscription,
