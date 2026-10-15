@@ -85,13 +85,9 @@ router.post('/register', registerLimiter, [
     );
     const workspaceId = wsRes.rows[0].id;
 
-    // Cria assinatura linkada à workspace:
-    // - admin: nada (acesso ilimitado via role)
-    // - lifetime list: assinatura vitalícia
-    // - demais: trial de 15 dias no plano Pro (padrão). O Clube só é liberado
-    //   via pagamento (checkout) ou concessão manual pelo admin (change-plan).
-    // Assinatura inicial: Free permanente por padrão (SIGNUP_TRIAL_DAYS>0 → trial do Pro).
-      const initialSub = await billing.createInitialSubscription({ userId: user.id, workspaceId, email, role });
+    // Assinatura inicial (F1, sem plano grátis): admin → nada; LIFETIME_EMAILS → vitalícia;
+    // demais → nenhuma (conta em só leitura até assinar; o front leva para os planos).
+    const initialSub = await billing.createInitialSubscription({ userId: user.id, workspaceId, email, role });
 
     const token = generateToken(user);
 
@@ -506,7 +502,7 @@ router.post('/google', loginLimiter, async (req, res) => {
       );
       const workspaceId = wsRes.rows[0].id;
 
-      // Assinatura inicial: Free permanente por padrão (SIGNUP_TRIAL_DAYS>0 → trial do Pro).
+      // Assinatura inicial (F1): sem plano grátis — ver billing.createInitialSubscription.
       const initialSub = await billing.createInitialSubscription({ userId: user.id, workspaceId, email, role });
 
       // Email de boas-vindas — o cadastro via Google não disparava (só o
@@ -591,7 +587,7 @@ router.post('/apple', loginLimiter, async (req, res) => {
       );
       const workspaceId = wsRes.rows[0].id;
 
-      // Assinatura inicial: Free permanente por padrão (SIGNUP_TRIAL_DAYS>0 → trial do Pro).
+      // Assinatura inicial (F1): sem plano grátis — ver billing.createInitialSubscription.
       const initialSub = await billing.createInitialSubscription({ userId: user.id, workspaceId, email, role });
 
       const appUrl = process.env.APP_BASE_URL || 'https://app.tactiplan.faggin.com.br';

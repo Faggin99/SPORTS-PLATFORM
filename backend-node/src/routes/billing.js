@@ -4,6 +4,9 @@ const { query } = require('../config/database');
 const authMiddleware = require('../middleware/auth');
 const billing = require('../services/billing');
 const { sendPaymentApprovedEmail, sendPaymentFailedEmail } = require('../services/mailer');
+const { nomePlano } = require('../config/planos');
+const { validarDocumento } = require('../utils/documento');
+const authCache = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -60,7 +63,7 @@ async function notifyPaymentEvent(payload) {
     let planName = planId || 'TactiPlan';
     if (planId) {
       const pr = await query('SELECT name FROM plans WHERE id = $1', [planId]);
-      if (pr.rows[0]?.name) planName = pr.rows[0].name;
+      planName = nomePlano(planId, pr.rows[0]?.name || planName);
     }
 
     const subRes = await query(
@@ -160,8 +163,12 @@ function verifyMpSignature(req) {
 // GET /api/billing/plans — público, lista planos ativos
 router.get('/plans', async (req, res) => {
   try {
-    const r = await query('SELECT id, name, description, price_cents, currency, interval, features FROM plans WHERE is_active = true ORDER BY price_cents ASC');
-    res.json(r.rows);
+    // Sem o Free (fim do plano grátis, F1). Nome de exibição vem de shared/planos.json.
+    const r = await query(
+      `SELECT id, name, description, price_cents, currency, interval, features
+         FROM plans WHERE is_active = true AND id <> 'free' ORDER BY price_cents ASC`
+    );
+    res.json(r.rows.map((p) => ({ ...p, name: nomePlano(p.id, p.name) })));
   } catch (err) {
     console.error('Plans error:', err);
     res.status(500).json({ error: 'Failed to load plans' });
@@ -176,6 +183,16 @@ router.get('/subscription', authMiddleware, async (req, res) => {
       userId: req.user.id,
       workspaceId: req.user.workspaceId || null,
     });
+    // Dados já informados na assinatura (pra pré-preencher o formulário do checkout).
+    if (sub && req.user.workspaceId && req.user.isWorkspaceOwner(req.user.workspaceId)) {
+      try {
+        const w = (await query(
+          'SELECT name, responsavel_nome, responsavel_documento, responsavel_tipo FROM workspaces WHERE id = $1',
+          [req.user.workspaceId]
+        )).rows[0];
+        if (w) sub.conta = { nome: w.name, responsavel_nome: w.responsavel_nome, responsavel_documento: w.responsavel_documento, responsavel_tipo: w.responsavel_tipo };
+      } catch (_) { /* migration 048 pendente: segue sem os dados */ }
+    }
     res.json(sub || null);
   } catch (err) {
     console.error('Subscription error:', err);
@@ -188,16 +205,43 @@ router.post('/checkout', authMiddleware, async (req, res) => {
   try {
     const { plan_id } = req.body || {};
     if (!plan_id) return res.status(400).json({ error: 'plan_id required' });
-    if (plan_id === 'free') return res.status(400).json({ error: 'O plano Free não precisa de checkout.' });
+    if (['free', 'lifetime'].includes(plan_id)) return res.status(400).json({ error: 'Plano inválido.' });
     if (!req.user.workspaceId) return res.status(400).json({ error: 'Nenhuma workspace ativa' });
     if (!req.user.can('billing:manage') || !req.user.isWorkspaceOwner(req.user.workspaceId)) {
       return res.status(403).json({ error: 'Apenas o dono pode gerenciar assinatura' });
     }
+
+    // Dados da assinatura (F1): nome da conta (time/clube/escolinha) + responsável com CPF/CNPJ.
+    const contaNome = String(req.body?.conta_nome || '').trim();
+    const respNome = String(req.body?.responsavel_nome || '').trim();
+    const doc = validarDocumento(req.body?.responsavel_documento);
+    if (contaNome.length < 2 || contaNome.length > 120) {
+      return res.status(400).json({ error: 'Informe o nome do time, clube ou escolinha.', field: 'conta_nome' });
+    }
+    if (respNome.length < 3 || respNome.length > 160) {
+      return res.status(400).json({ error: 'Informe o nome do responsável.', field: 'responsavel_nome' });
+    }
+    if (!doc.ok) {
+      return res.status(400).json({
+        error: doc.tipo ? `${doc.tipo.toUpperCase()} inválido. Confira os números.` : 'Informe um CPF (11 dígitos) ou CNPJ (14 dígitos).',
+        field: 'responsavel_documento',
+      });
+    }
+    await query(
+      `UPDATE workspaces
+          SET name = $2, responsavel_nome = $3, responsavel_documento = $4, responsavel_tipo = $5,
+              responsavel_em = NOW(), updated_at = NOW()
+        WHERE id = $1`,
+      [req.user.workspaceId, contaNome, respNome, doc.digitos, doc.tipo]
+    );
+    authCache.invalidateAccessibleCache?.(req.user.id);
+
     const result = await billing.createCheckout({
       userId: req.user.id,
       workspaceId: req.user.workspaceId,
       planId: plan_id,
       payerEmail: req.user.email,
+      metadata: { conta_nome: contaNome, responsavel_nome: respNome, responsavel_tipo: doc.tipo, responsavel_documento: doc.digitos },
     });
     res.json(result);
   } catch (err) {

@@ -11,47 +11,27 @@ router.get('/', async (req, res) => {
   const accessible = req.user.accessibleWorkspaces || [];
   if (accessible.length === 0) return res.json({ data: [], active: null });
 
-  // Busca a sub ativa de cada workspace acessível em uma só query
-  const ids = accessible.map(w => w.workspace_id);
-  const subsRes = await query(
-    `SELECT DISTINCT ON (workspace_id) workspace_id, plan_id, status, trial_ends_at, current_period_end
-       FROM subscriptions
-      WHERE workspace_id = ANY($1)
-        AND status IN ('trialing','active','past_due','paused')
-      ORDER BY workspace_id, (plan_id = 'lifetime') DESC, created_at DESC`,
-    [ids]
-  );
-  const subByWs = Object.fromEntries(subsRes.rows.map(r => [r.workspace_id, r]));
-  const now = Date.now();
-
-  res.json({
-    data: accessible.map(w => {
-      const sub = subByWs[w.workspace_id] || null;
-      let usable = false;
-      if (!sub) usable = false;
-      else if (sub.plan_id === 'lifetime') usable = true;
-      else if (sub.status === 'trialing') {
-        usable = !sub.trial_ends_at || new Date(sub.trial_ends_at).getTime() >= now;
-      } else if (sub.status === 'active') {
-        usable = !sub.current_period_end || new Date(sub.current_period_end).getTime() >= now;
-      } else {
-        usable = false;
-      }
-      return {
-        id: w.workspace_id,
-        name: w.name,
-        owner_id: w.owner_id,
-        role: w.role,
-        is_owner: w.is_owner,
-        category_ids: w.category_ids || null,
-        permissions: w.permissions || null,
-        subscription_status: sub?.status || 'none',
-        plan_id: sub?.plan_id || null,
-        usable, // workspace tem subscription utilizável (trial/active válido ou lifetime)
-      };
-    }),
-    active: req.user.workspaceId || null,
-  });
+  // Assinatura efetiva de cada workspace (cortesia/admin/paga/só leitura).
+  const billing = require('../services/billing');
+  const data = [];
+  for (const w of accessible) {
+    let sub = null;
+    try { sub = await billing.getEffectiveSubscription({ userId: req.user.id, workspaceId: w.workspace_id }); } catch (_) { /* segue */ }
+    data.push({
+      id: w.workspace_id,
+      name: w.name,
+      owner_id: w.owner_id,
+      role: w.role,
+      is_owner: w.is_owner,
+      category_ids: w.category_ids || null,
+      permissions: w.permissions || null,
+      subscription_status: sub?.status || 'none',
+      plan_id: sub?.plan_id || null,
+      read_only: !!sub?.read_only,
+      usable: !!sub && !sub.read_only, // workspace com acesso de escrita (paga, cortesia ou admin)
+    });
+  }
+  res.json({ data, active: req.user.workspaceId || null });
 });
 
 // POST /api/workspaces — cria nova workspace (segunda assinatura/conta)
@@ -66,13 +46,7 @@ router.post('/', async (req, res) => {
     );
     const workspace = wsRes.rows[0];
 
-    // Trial Pro de 30d pra nova workspace (mesma política do cadastro).
-    const trialEnd = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000);
-    await query(
-      `INSERT INTO subscriptions (user_id, workspace_id, plan_id, status, trial_ends_at, current_period_start, current_period_end)
-       VALUES ($1, $2, 'pro', 'trialing', $3, now(), $3)`,
-      [req.user.id, workspace.id, trialEnd]
-    );
+    // F1: sem trial nem plano grátis — a conta nova nasce em só leitura até ser assinada.
 
     authMiddleware.invalidateAccessibleCache?.(req.user.id);
 
