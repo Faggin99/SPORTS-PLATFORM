@@ -191,6 +191,29 @@ router.post('/users/:id/grant-lifetime', async (req, res) => {
 });
 
 /**
+ * POST /api/admin/users/:id/cortesia
+ * Body: { ativo: boolean, motivo?: string }
+ * Cortesia PERMANENTE (F1): tudo liberado, sem assinatura, nunca expira.
+ * Vale para a workspace do usuário e para quem ele convidar.
+ */
+router.post('/users/:id/cortesia', async (req, res) => {
+  try {
+    const ativo = req.body?.ativo !== false;
+    const motivo = ativo ? String(req.body?.motivo || 'cortesia (admin)').slice(0, 200) : null;
+    const r = await query(
+      `UPDATE users SET cortesia_permanente = $2, cortesia_motivo = $3 WHERE id = $1
+       RETURNING id, email, cortesia_permanente, cortesia_motivo`,
+      [req.params.id, ativo, motivo]
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Usuário não encontrado' });
+    res.json({ ok: true, user: r.rows[0] });
+  } catch (err) {
+    console.error('cortesia error', err);
+    res.status(500).json({ error: 'Failed to set cortesia' });
+  }
+});
+
+/**
  * POST /api/admin/users/:id/extend-trial
  * Body: { days: number }
  * Adiciona N dias na subscription mais recente que esteja em trial.
