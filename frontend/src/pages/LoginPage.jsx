@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { Mail, Lock } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
@@ -16,6 +16,10 @@ export function LoginPage() {
   const { login } = useAuth();
   const { colors } = useTheme();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  // ?redirect=/billing (site → "Já tem conta? Entre e assine") ou /accept-invite/<token>.
+  const r = params.get('redirect') || '';
+  const destino = r.startsWith('/') && !r.startsWith('//') ? r : '/home';
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -24,7 +28,7 @@ export function LoginPage() {
 
     try {
       await login(email, password);
-      navigate('/home');
+      navigate(destino);
     } catch (err) {
       setError(err.message || 'Falha ao fazer login');
     } finally {
@@ -92,10 +96,10 @@ export function LoginPage() {
         {import.meta.env.VITE_GOOGLE_CLIENT_ID && (
           <>
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '0.5rem' }}>
-              <GoogleSignInButton />
+              <GoogleSignInButton redirectTo={destino} />
             </div>
             <div style={{ marginBottom: '0.5rem' }}>
-              <AppleSignInButton />
+              <AppleSignInButton redirectTo={destino} />
             </div>
             {/* Consentimento explícito: entrar com Google pode CRIAR conta nova,
                 então o aceite dos termos precisa estar visível aqui também

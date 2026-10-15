@@ -33,6 +33,12 @@ import PlantelPage from './modules/training-management/pages/PlantelPage';
 import { TacticalBoardPage } from './modules/tactical-board';
 import { PlanGate } from './components/common/PlanGate';
 
+// Já logado chegando em /login?redirect=/billing (link do site): vai direto ao destino.
+function RedirectLogado() {
+  const r = new URLSearchParams((window.location.hash.split('?')[1]) || '').get('redirect') || '';
+  return <Navigate to={r.startsWith('/') && !r.startsWith('//') ? r : '/home'} replace />;
+}
+
 function ProtectedRoute({ children }) {
   const { isAuthenticated, loading, user } = useAuth();
 
@@ -105,7 +111,7 @@ function AppRoutes() {
     <Routes>
       <Route
         path="/login"
-        element={isAuthenticated ? <Navigate to="/home" /> : <LoginPage />}
+        element={isAuthenticated ? <RedirectLogado /> : <LoginPage />}
       />
       <Route path="/register" element={isAuthenticated ? <Navigate to="/home" /> : <RegisterPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
