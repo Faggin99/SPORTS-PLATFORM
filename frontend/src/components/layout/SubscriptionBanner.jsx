@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useSubscription } from '../../hooks/useSubscription';
 import { isNative } from '../../lib/platform';
+import { SITE_PLANOS_URL } from '../../config/planos';
 
 export function SubscriptionBanner() {
   const { colors } = useTheme();
@@ -16,29 +17,26 @@ export function SubscriptionBanner() {
   if (dismissed) return null;
 
   const native = isNative();
-  const isFree = sub.plan_id === 'free' || sub.is_free;
-  // Free "de nascença": sem banner. Free por trial/assinatura que caducou:
-  // avisa UMA vez (dismiss persistido) que a conta continua funcionando.
-  if (isFree) {
-    if (!sub.lapsed) return null;
-    const key = `tp_lapsed_banner_${sub.lapsed.plan_id}_${sub.lapsed.trial_ends_at || sub.lapsed.current_period_end || ''}`;
-    if (localStorage.getItem(key)) return null;
-    const wasTrial = sub.lapsed.status === 'trialing';
-    const msg = wasTrial
-      ? 'Seu período de avaliação terminou — você continua no plano Free, com seus dados salvos.'
-      : 'Sua assinatura terminou — você continua no plano Free, com seus dados salvos.';
+  // F1: sem plano Free. Conta sem assinatura ativa = SÓ LEITURA (o servidor
+  // recusa criar/editar). Web: botão Assinar/Renovar → página de planos do site.
+  // App nativo: texto neutro, sem botão nem link de compra.
+  if (sub.read_only) {
+    const dono = sub.is_owner !== false;
+    const renovar = !!sub.lapsed;
+    let msg;
+    if (!dono) msg = 'A conta desta equipe está sem assinatura ativa: modo só leitura. Fale com o responsável pela equipe.';
+    else if (native) msg = 'Sua conta está em modo só leitura (sem assinatura ativa). Fale com o responsável pela equipe.';
+    else if (renovar) msg = 'Sua assinatura terminou. A conta está em modo só leitura: seus dados estão salvos, mas criar e editar volta ao renovar.';
+    else msg = 'Conta em modo só leitura. Assine um plano para criar e editar treinos, plantel, jogos e jogadas.';
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0.625rem 1.25rem', backgroundColor: '#2563eb15', borderBottom: '1px solid #3b82f640', color: colors.text, fontSize: '0.875rem' }}>
-        <Clock size={16} color="#3b82f6" />
+      <div role="status" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0.625rem 1.25rem', backgroundColor: '#f59e0b15', borderBottom: '1px solid #f59e0b40', color: colors.text, fontSize: '0.875rem' }}>
+        <AlertTriangle size={16} color="#f59e0b" style={{ flexShrink: 0 }} />
         <span style={{ flex: 1 }}>{msg}</span>
-        {!native && (
-          <button onClick={() => navigate('/billing')} style={{ padding: '0.375rem 0.875rem', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 600, fontSize: '0.8125rem', cursor: 'pointer' }}>
-            Ver planos
-          </button>
+        {!native && dono && (
+          <a href={SITE_PLANOS_URL} style={{ padding: '0.375rem 0.875rem', background: '#f59e0b', color: '#fff', borderRadius: 6, fontWeight: 600, fontSize: '0.8125rem', textDecoration: 'none', whiteSpace: 'nowrap' }}>
+            {renovar ? 'Renovar' : 'Assinar'}
+          </a>
         )}
-        <button onClick={() => { localStorage.setItem(key, '1'); setDismissed(true); }} aria-label="Fechar" style={{ background: 'transparent', border: 'none', color: colors.textSecondary, cursor: 'pointer', display: 'inline-flex', padding: 4 }}>
-          <X size={16} />
-        </button>
       </div>
     );
   }

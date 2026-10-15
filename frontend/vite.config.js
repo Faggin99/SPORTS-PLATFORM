@@ -5,6 +5,8 @@ import { VitePWA } from 'vite-plugin-pwa'
 // https://vite.dev/config/
 export default defineConfig({
   base: '/', // App served from root of app subdomain
+  // shared/planos.json (nome dos planos) fica fora da pasta do front.
+  server: { fs: { allow: ['..'] } },
   plugins: [
     react(),
     VitePWA({
