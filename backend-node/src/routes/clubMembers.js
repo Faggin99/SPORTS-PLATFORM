@@ -4,14 +4,24 @@ const { query } = require('../config/database');
 const authMiddleware = require('../middleware/auth');
 const mailer = require('../services/mailer');
 const billing = require('../services/billing');
-const { isAdmin, isLifetime } = require('../config/specialUsers');
+const { NOME_ENTRADA, NOME_CLUBE, isPlanoEntrada } = require('../config/planos');
 
-// Confirma que o owner pode usar multi-coach (multi_user no plano da workspace).
-async function ownerCanInvite(user, workspaceId) {
-  if (user.role === 'admin') return true;
-  if (isAdmin?.(user.email) || isLifetime?.(user.email)) return true;
-  const sub = await billing.getSubscriptionForWorkspace(workspaceId);
-  return !!(sub?.features?.multi_user);
+// Limite de CONVIDADOS (além do dono) da workspace, pelo plano efetivo:
+// entrada = 1, Clube = 5 (max_coaches), cortesia/admin = ilimitado (-1),
+// só leitura = 0. Ver billing.limiteConvidados.
+async function workspaceMemberLimit(userId, workspaceId) {
+  const sub = await billing.getEffectiveSubscription({ userId, workspaceId });
+  return { sub, limit: billing.limiteConvidados(sub) };
+}
+
+function memberLimitMessage(sub, limit) {
+  const plural = limit === 1 ? 'convidado' : 'convidados';
+  if (isPlanoEntrada(sub?.plan_id)) {
+    return `O plano ${NOME_ENTRADA} inclui o responsável + ${limit} ${plural}. ` +
+      `Para convidar outra pessoa, remova um membro ou convite pendente, ou mude para o plano ${NOME_CLUBE}.`;
+  }
+  return `O seu plano inclui o responsável + ${limit} ${plural}. ` +
+    'Para convidar outra pessoa, remova um membro ou convite pendente.';
 }
 
 // Conta membros ativos da workspace (excluindo owner). Pra gate max_coaches.
@@ -146,27 +156,28 @@ router.post('/clubs/:clubId/invite', authMiddleware, async (req, res) => {
     const wsRow = await query('SELECT name FROM workspaces WHERE id = $1', [wsId]);
     const workspaceName = wsRow.rows[0]?.name || 'TactiPlan';
 
-    if (!(await ownerCanInvite(req.user, wsId))) {
+    // Limite de membros do plano (aplicado no servidor; conta aceitos + pendentes).
+    const { sub, limit } = await workspaceMemberLimit(req.user.id, wsId);
+    if (limit === 0) {
       return res.status(402).json({
-        error: 'Convite de treinadores está disponível apenas no plano Clube. Faça upgrade pra liberar.',
-        code: 'PLAN_REQUIRED',
-        required_feature: 'multi_user',
+        error: sub?.read_only
+          ? 'Esta conta está em modo só leitura (sem assinatura ativa). Não é possível convidar membros.'
+          : 'O plano atual não permite convidar membros.',
+        code: sub?.read_only ? 'READ_ONLY' : 'PLAN_REQUIRED',
+        required_feature: 'equipe',
       });
     }
-
-    // Gate max_coaches (5 por workspace, contando aceitos + pendentes)
-    const sub = await billing.getSubscriptionForWorkspace(wsId);
-    const limit = sub?.features?.max_coaches;
-    if (typeof limit === 'number' && limit > 0 && limit < 999) {
+    if (limit > 0) {
       const active = await countActiveMembers(wsId);
       const pending = await countPendingInvites(wsId);
       if (active + pending >= limit) {
         return res.status(402).json({
-          error: `Você atingiu o limite de ${limit} membros do plano. Add-on de membros extras será disponibilizado em breve.`,
-          code: 'PLAN_REQUIRED',
-          required_feature: 'max_coaches',
+          error: memberLimitMessage(sub, limit),
+          code: 'MEMBER_LIMIT',
+          required_feature: 'max_convidados',
           current: active + pending,
           limit,
+          plan_id: sub?.plan_id || null,
         });
       }
     }
@@ -389,6 +400,16 @@ router.post('/invites/:token/accept', authMiddleware, async (req, res) => {
     );
     if (already.rows.length > 0) {
       return res.status(409).json({ error: 'Você já é membro' });
+    }
+
+    // Limite do plano também no aceite (o plano pode ter mudado depois do convite).
+    const { sub, limit } = await workspaceMemberLimit(req.user.id, invite.workspace_id);
+    if (limit === 0 || (limit > 0 && (await countActiveMembers(invite.workspace_id)) >= limit)) {
+      return res.status(402).json({
+        error: 'Esta equipe já atingiu o limite de membros do plano. Fale com o responsável pela conta.',
+        code: sub?.read_only ? 'READ_ONLY' : 'MEMBER_LIMIT',
+        limit,
+      });
     }
 
     const updated = await query(
