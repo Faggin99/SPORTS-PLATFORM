@@ -157,6 +157,15 @@ async function main() {
           [a.user_id, a.motivo]
         );
       } else if (a.tipo === 'lifetime') {
+        // Só cabe 1 assinatura "ativa" por usuário (uq_subscriptions_active_per_user):
+        // encerra as não-vitalícias que ainda ocupam a vaga (ex.: trial vencido) antes de dar o vitalício.
+        await client.query(
+          `UPDATE subscriptions
+              SET status = 'expired', canceled_at = COALESCE(canceled_at, NOW()), updated_at = NOW(),
+                  metadata = COALESCE(metadata, '{}'::jsonb) || '{"encerrado_por":"virada-f1","motivo":"substituida por lifetime"}'::jsonb
+            WHERE user_id = $1 AND plan_id <> 'lifetime' AND status IN ('trialing','active','past_due')`,
+          [a.user_id]
+        );
         await client.query(
           `INSERT INTO subscriptions (user_id, workspace_id, plan_id, status, current_period_start, current_period_end, metadata)
            VALUES ($1, (SELECT id FROM workspaces WHERE owner_id = $1 ORDER BY created_at LIMIT 1),
