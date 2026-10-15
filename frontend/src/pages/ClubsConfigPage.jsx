@@ -12,6 +12,7 @@ import { Input } from '../components/common/Input';
 import { Select } from '../components/common/Select';
 import { Button } from '../components/common/Button';
 import { MODALITIES, MODALITY_LABELS } from '../lib/sportConfig';
+import { NOME_ENTRADA, NOME_CLUBE } from '../config/planos';
 
 export function ClubsConfigPage() {
   const { colors } = useTheme();
@@ -112,7 +113,7 @@ export function ClubsConfigPage() {
       )}
 
       <p style={{ marginTop: '1rem', fontSize: '0.75rem', color: colors.textSecondary, textAlign: 'center' }}>
-        Pro: 1 clube · Clube: 3 clubes inclusos. Precisa de mais? Entre em contato pra liberar slots adicionais.
+        {NOME_ENTRADA} e {NOME_CLUBE}: 1 clube incluso. Clubes extras podem ser adicionados na Assinatura (plano mensal).
       </p>
 
       <ClubFormModal

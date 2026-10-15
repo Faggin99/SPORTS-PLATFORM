@@ -25,7 +25,7 @@ export function ExportMenu({
   // indicador parecia que o clique não funcionou.
   const [busy, setBusy] = useState(false);
   const ref = useRef(null);
-  // Exportações (PDF/Excel) são dos planos pagos — o Free vê um aviso neutro.
+  // Exportações (PDF/Excel) dependem de assinatura ativa — só leitura vê um aviso neutro.
   const guardFeature = useFeatureGuard();
 
   const run = async (fn) => {

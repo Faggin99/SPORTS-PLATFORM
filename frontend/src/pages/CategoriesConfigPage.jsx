@@ -10,6 +10,7 @@ import { Modal } from '../components/common/Modal';
 import { Input } from '../components/common/Input';
 import { Textarea } from '../components/common/Textarea';
 import { Button } from '../components/common/Button';
+import { NOME_ENTRADA, NOME_CLUBE } from '../config/planos';
 
 const SUGGESTED_AGE_GROUPS = ['Sub-6','Sub-7','Sub-8','Sub-9','Sub-10','Sub-11','Sub-12','Sub-13','Sub-14','Sub-15','Sub-17','Sub-20','Profissional','Master'];
 
@@ -26,7 +27,7 @@ export function CategoriesConfigPage() {
   const [showForm, setShowForm] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
 
-  // Pro: pode editar a categoria existente, mas não criar nova além da default.
+  // Plano de entrada: pode editar a categoria existente, mas não criar nova além da default.
   const canCreateMore = plan.multi_user || categories.length === 0;
   const showPaywall = !plan.multi_user && categories.length >= 1;
 
@@ -136,8 +137,8 @@ export function CategoriesConfigPage() {
         }}>
           <Crown size={18} color="#f59e0b" style={{ flexShrink: 0, marginTop: 2 }} />
           <div style={{ flex: 1, fontSize: '0.85rem', color: colors.text }}>
-            <strong>Múltiplas categorias por clube</strong> são exclusivas do plano <strong>Clube</strong>.
-            No plano Pro você usa uma única categoria por clube — perfeito pra quem trabalha com um time só.
+            <strong>Várias categorias por clube</strong> são do plano <strong>{NOME_CLUBE}</strong>.
+            No plano {NOME_ENTRADA} a comissão trabalha com uma categoria por clube.
             <div style={{ marginTop: '0.5rem' }}>
               <button
                 onClick={() => navigate('/billing')}
