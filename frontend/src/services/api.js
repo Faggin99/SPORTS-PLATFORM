@@ -97,8 +97,12 @@ class ApiClient {
           }
         }
 
-        // Só redireciona automaticamente quando NÃO é gate de feature.
-        if (err.code !== 'PLAN_REQUIRED' && !window.location.hash.startsWith('#/billing')) {
+        err.read_only = !!body.read_only;
+        err.limit = body.limit;
+        // Só redireciona automaticamente quando NÃO é gate de feature, só leitura
+        // (a tela continua visível, com o banner) nem limite de membros.
+        const semRedirecionar = ['PLAN_REQUIRED', 'READ_ONLY', 'MEMBER_LIMIT'];
+        if (!semRedirecionar.includes(err.code) && !window.location.hash.startsWith('#/billing')) {
           window.location.hash = '#/billing?reason=' + encodeURIComponent(err.code);
         }
         throw err;
