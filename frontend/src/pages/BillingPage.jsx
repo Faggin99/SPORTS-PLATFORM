@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { CheckCircle2, AlertTriangle, Crown, CreditCard, Infinity, ShieldCheck, XCircle } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { Button } from '../components/common/Button';
@@ -8,6 +8,9 @@ import { notify } from '../lib/notify';
 import { openExternalUrl, isNative, getPlatform } from '../lib/platform';
 import { useAuth } from '../contexts/AuthContext';
 import { iapAvailable, getPurchases, configurePurchases } from '../lib/purchases';
+import { NOME_ENTRADA, NOME_CLUBE, MAX_CONVIDADOS_ENTRADA, MAX_CONVIDADOS_CLUBE, PUBLICO, isPlanoEntrada, nomePlano } from '../config/planos';
+import { validarDocumento, mascararDocumento } from '../lib/documento';
+import { refreshSubscription } from '../hooks/useSubscription';
 
 function formatPrice(cents, currency = 'BRL') {
   if (!cents) return 'Grátis';
@@ -33,43 +36,58 @@ function statusBadge(status, colors) {
 
 export function BillingPage() {
   const { colors } = useTheme();
-  const navigate = useNavigate();
   const [sub, setSub] = useState(null);
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
   const [checkoutLoading, setCheckoutLoading] = useState(null);
+  const [planoEscolhido, setPlanoEscolhido] = useState(null); // abre o formulário "Dados da assinatura"
+  const [params] = useSearchParams();
+  const novo = params.get('novo') === '1';
 
   useEffect(() => {
     Promise.all([
       api.get('/billing/subscription').catch(() => null),
       api.get('/billing/plans').catch(() => []),
-    ]).then(([s, p]) => { setSub(s); setPlans(p || []); setLoading(false); });
+    ]).then(([s, p]) => {
+      setSub(s); setPlans(p || []); setLoading(false);
+      // Vindo do site/cadastro com ?plano=pro|clube&ciclo=mensal|anual → já abre o formulário.
+      const plano = params.get('plano');
+      if (plano && !isNative()) {
+        const anual = params.get('ciclo') === 'anual';
+        const id = `${plano === 'clube' ? 'clube' : 'pro'}${anual ? '_annual' : ''}`;
+        if ((p || []).some((x) => x.id === id)) setPlanoEscolhido(id);
+      }
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function startCheckout(planId) {
+    if (isNative()) return;
+    setPlanoEscolhido(planId);
+  }
+
+  async function confirmarCheckout(planId, dados) {
     // Compliance lojas (Apple 3.1.1 / Google): não vendemos assinatura digital
     // DENTRO do app. As CTAs de compra ficam escondidas no nativo; este guard
     // é só cinto de segurança caso algo chame o checkout.
     if (isNative()) return;
-    // Se o usuário está testando o Clube e quer assinar Pro, alerta o que perde.
-    const isTryingClube = sub?.plan_id === 'clube' || sub?.plan_id === 'clube_annual';
-    const isPickingPro = planId === 'pro' || planId === 'pro_annual';
-    if (isTryingClube && isPickingPro) {
+    // Quem está no Clube e escolhe o plano de entrada: avisa o que perde.
+    const noClube = !sub?.read_only && (sub?.plan_id === 'clube' || sub?.plan_id === 'clube_annual');
+    if (noClube && isPlanoEntrada(planId)) {
       const ok = await notify.confirm(
-        'Atenção: você está testando o plano Clube.\n\n' +
-        'Ao assinar o Pro, você perderá:\n' +
-        '• Convites para outros treinadores (multi-coach)\n' +
-        '• Múltiplas categorias por clube (sub-15, sub-17…)\n' +
-        '• Permissões por papel (treinador / auxiliar)\n\n' +
-        'Recomendado: assine o Clube pra manter tudo que você testou.\n\n' +
-        'Tem certeza que quer assinar o Pro mesmo assim?',
-        { confirmText: 'Assinar Pro', cancelText: 'Voltar' }
+        `Atenção: sua conta está no plano ${NOME_CLUBE}.\n\n` +
+        `No plano ${NOME_ENTRADA} você fica com:\n` +
+        `• o responsável + ${MAX_CONVIDADOS_ENTRADA} convidado (hoje até ${MAX_CONVIDADOS_CLUBE})\n` +
+        '• 1 categoria por clube\n\n' +
+        'Membros já aceitos continuam, mas novos convites respeitam o limite.\n\n' +
+        `Assinar o ${NOME_ENTRADA} mesmo assim?`,
+        { confirmText: `Assinar ${NOME_ENTRADA}`, cancelText: 'Voltar' }
       );
       if (!ok) return;
     }
     setCheckoutLoading(planId);
     try {
-      const data = await api.post('/billing/checkout', { plan_id: planId });
+      const data = await api.post('/billing/checkout', { plan_id: planId, ...dados });
       // Em nativo (iOS/Android) abrir no browser embutido evita rejeição
       // da Apple pela Guideline 3.1.1 (payments) — o pagamento acontece
       // fora do app e volta pro app via deep link no sucesso.
@@ -105,10 +123,25 @@ export function BillingPage() {
 
   return (
     <div style={{ padding: '1.5rem 2rem', maxWidth: 960, margin: '0 auto', width: '100%' }}>
-      <h1 style={{ fontSize: '1.5rem', fontWeight: 700, color: colors.text, margin: 0 }}>Assinatura</h1>
+      <h1 style={{ fontSize: '1.5rem', fontWeight: 700, color: colors.text, margin: 0 }}>
+        {novo ? 'Escolha o plano da sua equipe' : 'Assinatura'}
+      </h1>
       <p style={{ fontSize: '0.875rem', color: colors.textSecondary, marginTop: 4, marginBottom: 24 }}>
-        Gerencie seu plano e pagamentos.
+        {novo
+          ? `Conta criada. O TactiPlan é feito para ${PUBLICO}: escolha o plano e conclua o pagamento para começar.`
+          : 'Gerencie o plano e os pagamentos da conta.'}
       </p>
+
+      {planoEscolhido && !native && (
+        <DadosAssinatura
+          colors={colors}
+          plano={plans.find((p) => p.id === planoEscolhido)}
+          conta={sub?.conta}
+          loading={checkoutLoading === planoEscolhido}
+          onCancelar={() => setPlanoEscolhido(null)}
+          onConfirmar={(dados) => confirmarCheckout(planoEscolhido, dados)}
+        />
+      )}
 
       <CurrentSubscription sub={sub} colors={colors} onCancel={cancelSubscription} native={native} />
 
@@ -121,7 +154,7 @@ export function BillingPage() {
           && p.price_cents > 0
         );
         if (paidPlans.length === 0) return null;
-        const isTrialExpiringOrExpired = sub?.status === 'trialing';
+        const isTrialExpiringOrExpired = sub?.status === 'trialing' || !!sub?.read_only;
         // Ordena: Pro mensal, Clube mensal, Pro anual, Clube anual
         const order = ['pro', 'clube', 'pro_annual', 'clube_annual'];
         const sorted = [...paidPlans].sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
@@ -139,7 +172,7 @@ export function BillingPage() {
                   onSelect={() => startCheckout(p.id)}
                   loading={checkoutLoading === p.id}
                   highlight={p.id === 'clube_annual'}
-                  isCurrent={p.id === sub?.plan_id && sub?.status === 'active'}
+                  isCurrent={p.id === sub?.plan_id && sub?.status === 'active' && !sub?.read_only}
                 />
               ))}
             </div>
@@ -147,7 +180,6 @@ export function BillingPage() {
         );
       })()}
 
-      {!native && <AdvancedActions colors={colors} />}
     </div>
   );
 }
@@ -157,7 +189,7 @@ export function BillingPage() {
 // assinatura da App Store → gerenciar/restaurar. Demais casos (Android,
 // binário antigo, chave ausente, assinatura do site) → aviso neutro.
 function NativeBillingSection({ sub, colors, onSub }) {
-  const isFree = sub?.plan_id === 'free' || !!sub?.is_free;
+  const isFree = !!sub?.read_only; // F1: sem Free — "sem assinatura ativa"
   if (getPlatform() === 'ios' && iapAvailable()) {
     if (isFree) return <IapPlansSection colors={colors} onSub={onSub} />;
     if (sub?.provider === 'apple') return <AppleManageSection colors={colors} onSub={onSub} />;
@@ -167,17 +199,17 @@ function NativeBillingSection({ sub, colors, onSub }) {
 
 // Ordem e rótulos dos produtos da loja (mesmo mapa do backend).
 const IAP_PRODUCTS = [
-  { id: 'com.faggin.tactiplan.pro.monthly',   name: 'Pro Mensal',   per: '/mês', desc: 'Quadro tático + exportações' },
-  { id: 'com.faggin.tactiplan.clube.monthly', name: 'Clube Mensal', per: '/mês', desc: 'Tudo do Pro + equipe e categorias' },
-  { id: 'com.faggin.tactiplan.pro.yearly',    name: 'Pro Anual',    per: '/ano', desc: '2 meses grátis vs. mensal' },
-  { id: 'com.faggin.tactiplan.clube.yearly',  name: 'Clube Anual',  per: '/ano', desc: '2 meses grátis vs. mensal' },
+  { id: 'com.faggin.tactiplan.pro.monthly',   name: nomePlano('pro'),          per: '/mês', desc: `Responsável + ${MAX_CONVIDADOS_ENTRADA} convidado` },
+  { id: 'com.faggin.tactiplan.clube.monthly', name: nomePlano('clube'),        per: '/mês', desc: 'Comissão completa e categorias' },
+  { id: 'com.faggin.tactiplan.pro.yearly',    name: nomePlano('pro_annual'),   per: '/ano', desc: '2 meses grátis vs. mensal' },
+  { id: 'com.faggin.tactiplan.clube.yearly',  name: nomePlano('clube_annual'), per: '/ano', desc: '2 meses grátis vs. mensal' },
 ];
 
 async function pollSubscriptionChange(onSub, tries = 10) {
   for (let i = 0; i < tries; i++) {
     await new Promise((r) => setTimeout(r, 2000));
     const s = await api.get('/billing/subscription').catch(() => null);
-    if (s && s.plan_id !== 'free' && !s.is_free) { onSub(s); return true; }
+    if (s && !s.read_only) { onSub(s); refreshSubscription(); return true; }
   }
   return false;
 }
@@ -331,13 +363,12 @@ function AppleManageSection({ colors, onSub }) {
 function NativeManageNotice({ colors, isFree }) {
   const isIos = getPlatform() === 'ios';
   if (isFree) {
-    // Free no app: texto neutro, sem instrução de compra (Apple 3.1.3(f)).
+    // Sem assinatura no app: texto neutro, sem botão/link de compra.
     return (
       <div style={{ marginTop: 24, padding: 16, backgroundColor: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 12 }}>
-        <div style={{ fontSize: '0.9rem', fontWeight: 600, color: colors.text, marginBottom: 6 }}>Planos</div>
+        <div style={{ fontSize: '0.9rem', fontWeight: 600, color: colors.text, marginBottom: 6 }}>Conta inativa</div>
         <p style={{ fontSize: '0.85rem', color: colors.textSecondary, margin: 0, lineHeight: 1.55 }}>
-          Você está no plano Free. Os recursos dos planos Pro e Clube (quadro tático e exportações)
-          são liberados automaticamente no app quando a assinatura da conta estiver ativa.
+          Sua conta está em modo só leitura. Fale com o responsável pela equipe.
         </p>
       </div>
     );
@@ -361,56 +392,6 @@ function NativeManageNotice({ colors, isFree }) {
         </p>
       )}
     </div>
-  );
-}
-
-// Bloco "Avançado" no rodapé da página de Assinatura — abriga ações raras que
-// não devem viver no header. Hoje: iniciar uma nova ASSINATURA separada
-// (workspace nova com billing próprio). Diferente de criar outro clube.
-function AdvancedActions({ colors }) {
-  const navigate = useNavigate();
-  return (
-    <details style={{
-      marginTop: 48,
-      padding: '0.85rem 1rem',
-      backgroundColor: colors.surface,
-      border: `1px solid ${colors.border}`,
-      borderRadius: 10,
-    }}>
-      <summary style={{
-        fontSize: '0.85rem', fontWeight: 600, color: colors.textSecondary,
-        cursor: 'pointer', listStyle: 'none', userSelect: 'none',
-      }}>
-        Opções avançadas
-      </summary>
-      <div style={{ marginTop: '0.85rem', fontSize: '0.82rem', color: colors.textSecondary, lineHeight: 1.5 }}>
-        <p style={{ margin: '0 0 0.6rem' }}>
-          <strong style={{ color: colors.text }}>Adicionar outro clube?</strong> Vá em <em>Minha Equipe → Clubes</em>.
-          O plano Clube já vem com 3 clubes inclusos na mesma assinatura.
-        </p>
-        <p style={{ margin: '0 0 0.85rem' }}>
-          Se você precisa de uma <strong style={{ color: colors.text }}>assinatura totalmente separada</strong> (caso raro:
-          consultor com clientes diferentes, billings independentes), pode criar uma nova conta abaixo.
-          Isso resulta em <strong>cobrança extra</strong> e dados isolados.
-        </p>
-        <button
-          onClick={() => navigate('/select-workspace')}
-          style={{
-            display: 'inline-flex', alignItems: 'center', gap: 6,
-            padding: '0.45rem 0.85rem',
-            background: 'transparent',
-            border: `1px solid ${colors.border}`,
-            color: colors.text,
-            borderRadius: 6,
-            fontSize: '0.8rem',
-            fontWeight: 500,
-            cursor: 'pointer',
-          }}
-        >
-          Iniciar nova assinatura separada
-        </button>
-      </div>
-    </details>
   );
 }
 
@@ -439,31 +420,27 @@ function CurrentSubscription({ sub, colors, onCancel, native }) {
 
   if (sub.plan_id === 'lifetime') {
     return (
-      <Card colors={colors} icon={<Infinity size={20} color="#22c55e" />} title="Plano Vitalício" subtitle="Acesso completo sem cobrança." />
+      <Card colors={colors} icon={<Infinity size={20} color="#22c55e" />}
+        title={sub.is_cortesia ? 'Cortesia' : 'Plano Vitalício'}
+        subtitle="Acesso completo, sem cobrança e sem data de término." />
     );
   }
 
-  // Plano Free (linha real ou fallback de trial/assinatura que caducou).
-  if (sub.plan_id === 'free' || sub.is_free) {
+  // Sem assinatura ativa (F1: não existe mais plano grátis) → só leitura.
+  if (sub.read_only) {
     const lapsed = sub.lapsed;
-    const maxAth = sub.features?.max_athletes;
     return (
-      <div style={{ padding: 20, backgroundColor: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 12 }}>
+      <div style={{ padding: 20, backgroundColor: colors.surface, border: '1px solid #f59e0b55', borderRadius: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-          <Crown size={20} color="#94a3b8" />
-          <strong style={{ color: colors.text, fontSize: '1.05rem' }}>Plano Free</strong>
-          {statusBadge('active', colors)}
+          <AlertTriangle size={20} color="#f59e0b" />
+          <strong style={{ color: colors.text, fontSize: '1.05rem' }}>Sem assinatura ativa — modo só leitura</strong>
         </div>
         <p style={{ fontSize: '0.875rem', color: colors.textSecondary, margin: 0, lineHeight: 1.55 }}>
-          Planejamento de treinos, jogos, plantel{maxAth > 0 ? ` (até ${maxAth} atletas)` : ''} e estatísticas — grátis, pra sempre.
-          {lapsed?.status === 'trialing' && ' Seu período de avaliação terminou e a conta voltou pro Free — nada foi apagado.'}
-          {lapsed && lapsed.status !== 'trialing' && ' Sua assinatura anterior terminou e a conta voltou pro Free — nada foi apagado.'}
+          {lapsed
+            ? `A assinatura ${lapsed.plan_name || ''} terminou. Seus dados estão salvos e podem ser consultados; criar e editar volta ao renovar.`
+            : 'Seus dados podem ser consultados, mas criar e editar depende de uma assinatura ativa.'}
+          {native ? ' Fale com o responsável pela equipe.' : ' Escolha um plano abaixo.'}
         </p>
-        {!native && (
-          <p style={{ fontSize: '0.85rem', color: colors.textSecondary, margin: '10px 0 0' }}>
-            Quadro tático e exportações em PDF/vídeo estão nos planos Pro e Clube, abaixo.
-          </p>
-        )}
       </div>
     );
   }
@@ -483,7 +460,7 @@ function CurrentSubscription({ sub, colors, onCancel, native }) {
           </div>
           {sub.price_cents != null && (
             <div style={{ color: colors.textSecondary, fontSize: '0.875rem' }}>
-              {formatPrice(sub.price_cents)}/mês
+              {formatPrice(sub.price_cents)}{sub.interval === 'yearly' ? '/ano' : '/mês'}
             </div>
           )}
         </div>
@@ -516,7 +493,7 @@ function CurrentSubscription({ sub, colors, onCancel, native }) {
         <div style={{ marginTop: 16, padding: 12, backgroundColor: '#f59e0b15', borderRadius: 8, border: '1px solid #f59e0b40', fontSize: '0.8125rem', color: colors.text }}>
           <strong>Você está no período de avaliação</strong> — {native
             ? `restam ${trialDays} dia${trialDays === 1 ? '' : 's'} de acesso completo.`
-            : `após ${trialDays} dia${trialDays === 1 ? '' : 's'} é necessário escolher um plano (Pro ou Clube) pra continuar.`}
+            : `após ${trialDays} dia${trialDays === 1 ? '' : 's'} é necessário escolher um plano (${NOME_ENTRADA} ou ${NOME_CLUBE}) pra continuar editando.`}
         </div>
       )}
 
@@ -744,10 +721,81 @@ function PlanItem({ plan, colors, onSelect, loading, highlight, isCurrent }) {
           Sem fidelidade · cancele quando quiser
         </div>
       )}
+      <div style={{ fontSize: '0.78rem', color: colors.textSecondary, marginTop: 8, lineHeight: 1.45 }}>
+        {isPlanoEntrada(plan.id)
+          ? `Responsável + ${MAX_CONVIDADOS_ENTRADA} convidado · 1 clube · 1 categoria · quadro tático e exportações`
+          : `Responsável + ${MAX_CONVIDADOS_CLUBE} convidados · até 5 categorias · comissão técnica completa`}
+      </div>
       <div style={{ height: 12 }} />
       <Button size="sm" fullWidth onClick={onSelect} disabled={loading || isCurrent} icon={<CreditCard size={14} />}>
         {isCurrent ? 'Você está aqui' : (loading ? 'Abrindo…' : 'Assinar')}
       </Button>
     </div>
+  );
+}
+
+// Dados da assinatura (F1): nome da conta (time/clube/escolinha) + responsável
+// com CPF ou CNPJ validado por dígito verificador. O servidor valida de novo.
+function DadosAssinatura({ colors, plano, conta, loading, onCancelar, onConfirmar }) {
+  const { user } = useAuth();
+  const [contaNome, setContaNome] = useState(conta?.nome || '');
+  const [respNome, setRespNome] = useState(conta?.responsavel_nome || user?.name || '');
+  const [doc, setDoc] = useState(conta?.responsavel_documento ? mascararDocumento(conta.responsavel_documento) : '');
+  const [erro, setErro] = useState('');
+  if (!plano) return null;
+
+  const docInfo = validarDocumento(doc);
+  const docErro = doc && docInfo.digitos.length >= 11 && !docInfo.ok
+    ? `${docInfo.tipo ? docInfo.tipo.toUpperCase() : 'Documento'} inválido — confira os números.`
+    : '';
+
+  function enviar(e) {
+    e.preventDefault();
+    setErro('');
+    if (contaNome.trim().length < 2) return setErro('Informe o nome do time, clube ou escolinha.');
+    if (respNome.trim().length < 3) return setErro('Informe o nome do responsável.');
+    if (!docInfo.ok) return setErro('Informe um CPF ou CNPJ válido do responsável.');
+    onConfirmar({ conta_nome: contaNome.trim(), responsavel_nome: respNome.trim(), responsavel_documento: docInfo.digitos });
+  }
+
+  const campo = { width: '100%', padding: '0.6rem 0.75rem', borderRadius: 8, border: `1px solid ${colors.border}`, backgroundColor: colors.background, color: colors.text, fontSize: '0.9rem', boxSizing: 'border-box' };
+  const rotulo = { display: 'block', fontSize: '0.8rem', fontWeight: 600, color: colors.text, marginBottom: 4 };
+  const preco = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(plano.price_cents / 100);
+
+  return (
+    <form onSubmit={enviar} style={{ marginBottom: 24, padding: 20, backgroundColor: colors.surface, border: `1px solid ${colors.primary}`, borderRadius: 12, boxShadow: `0 0 0 4px ${colors.primary}1A` }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, flexWrap: 'wrap', marginBottom: 4 }}>
+        <strong style={{ color: colors.text, fontSize: '1.05rem' }}>Dados da assinatura</strong>
+        <span style={{ color: colors.textSecondary, fontSize: '0.85rem' }}>
+          {plano.name} · {preco}{plano.interval === 'yearly' ? '/ano' : '/mês'}
+        </span>
+      </div>
+      <p style={{ fontSize: '0.82rem', color: colors.textSecondary, margin: '0 0 16px', lineHeight: 1.5 }}>
+        A assinatura é da conta da equipe. Depois destes dados você segue para o pagamento no Mercado Pago.
+      </p>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
+        <label>
+          <span style={rotulo}>Nome do time, clube ou escolinha</span>
+          <input style={campo} value={contaNome} onChange={(e) => setContaNome(e.target.value)} maxLength={120} placeholder="Ex.: Sub-15 Atlético Exemplo" required />
+        </label>
+        <label>
+          <span style={rotulo}>Responsável (nome completo)</span>
+          <input style={campo} value={respNome} onChange={(e) => setRespNome(e.target.value)} maxLength={160} required />
+        </label>
+        <label>
+          <span style={rotulo}>CPF ou CNPJ do responsável</span>
+          <input style={{ ...campo, borderColor: docErro ? '#ef4444' : colors.border }} value={doc} inputMode="numeric"
+            onChange={(e) => setDoc(mascararDocumento(e.target.value))} placeholder="000.000.000-00" required aria-invalid={!!docErro} />
+          {docErro && <span style={{ display: 'block', color: '#ef4444', fontSize: '0.75rem', marginTop: 4 }}>{docErro}</span>}
+        </label>
+      </div>
+      {erro && <div style={{ marginTop: 12, color: '#ef4444', fontSize: '0.85rem' }}>{erro}</div>}
+      <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16, flexWrap: 'wrap' }}>
+        <Button type="button" variant="secondary" size="sm" onClick={onCancelar} disabled={loading}>Voltar</Button>
+        <Button type="submit" size="sm" disabled={loading} icon={<CreditCard size={14} />}>
+          {loading ? 'Abrindo o pagamento…' : 'Ir para o pagamento'}
+        </Button>
+      </div>
+    </form>
   );
 }

@@ -259,7 +259,7 @@ function AppRoutes() {
         path="/tactical-board"
         element={
           <ProtectedRoute>
-            {/* Quadro Tático é exclusivo dos planos pagos (Free vê aviso neutro) */}
+            {/* Quadro Tático: planos pagos; só leitura vê as jogadas salvas sem editar */}
             <PlanGate feature="quadro_tatico">
               <TacticalBoardPage />
             </PlanGate>

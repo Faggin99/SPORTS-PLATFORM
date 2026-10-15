@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ShieldCheck, Users, Clock, CreditCard, Star, LogOut, Search, ExternalLink, X, Plus, Calendar } from 'lucide-react';
+import { nomePlano } from '../../config/planos';
 
 const DARK = {
   bg: '#0f172a',
@@ -469,21 +470,21 @@ function UserDetailSheet({ userId, onClose, onAction }) {
                     Trocar plano da assinatura atual
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-                    <button onClick={() => changePlan('pro', 'Pro Mensal')} disabled={actionLoading} style={{
+                    <button onClick={() => changePlan('pro', nomePlano('pro'))} disabled={actionLoading} style={{
                       padding: '0.55rem 0.5rem', backgroundColor: '#3b82f6',
                       color: '#fff', border: 'none', borderRadius: '0.375rem',
                       fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer',
                       opacity: actionLoading ? 0.5 : 1,
                     }}>
-                      → Pro Mensal
+                      → {nomePlano('pro')}
                     </button>
-                    <button onClick={() => changePlan('pro_annual', 'Pro Anual')} disabled={actionLoading} style={{
+                    <button onClick={() => changePlan('pro_annual', nomePlano('pro_annual'))} disabled={actionLoading} style={{
                       padding: '0.55rem 0.5rem', backgroundColor: '#3b82f6',
                       color: '#fff', border: 'none', borderRadius: '0.375rem',
                       fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer',
                       opacity: actionLoading ? 0.5 : 1,
                     }}>
-                      → Pro Anual
+                      → {nomePlano('pro_annual')}
                     </button>
                     <button onClick={() => changePlan('clube', 'Clube Mensal')} disabled={actionLoading} style={{
                       padding: '0.55rem 0.5rem', backgroundColor: '#22c55e',

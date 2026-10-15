@@ -6,6 +6,7 @@ import { useClub } from '../contexts/ClubContext';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { usePlanFeatures } from '../hooks/usePlanFeatures';
 import { PhotoCropModal } from '../components/settings/PhotoCropModal';
+import { NOME_ENTRADA, NOME_CLUBE } from '../config/planos';
 
 export function ClubConfigPage() {
   const { colors } = useTheme();
@@ -396,7 +397,7 @@ export function ClubConfigPage() {
         }}>
           <Crown size={18} color="#f59e0b" style={{ flexShrink: 0, marginTop: 2 }} />
           <div style={{ flex: 1, fontSize: '0.85rem', color: colors.text }}>
-            <strong>Plano Pro permite 1 clube.</strong> Pra gerenciar mais de um clube (escolinha, projeto social, segundo time), faça upgrade pro plano Clube — múltiplos clubes, várias categorias por clube e equipe técnica compartilhando o trabalho.
+            <strong>O plano {NOME_ENTRADA} inclui 1 clube.</strong> Para gerenciar mais de um clube (escolinha, projeto social, segundo time), assine o plano {NOME_CLUBE} — várias categorias por clube, comissão técnica completa e clubes extras como adicional.
             <div style={{ marginTop: '0.5rem' }}>
               <button
                 onClick={() => navigate('/billing')}

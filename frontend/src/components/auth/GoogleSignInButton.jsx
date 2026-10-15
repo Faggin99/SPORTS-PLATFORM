@@ -53,6 +53,7 @@ export function GoogleSignInButton({
   disabled = false,
   disabledMessage = 'Aceite os Termos de Uso e a Política de Privacidade para continuar.',
   onDisabledClick,
+  redirectTo = '/home',
 }) {
   const { isDark } = useTheme();
   const [error, setError] = useState('');
@@ -69,7 +70,7 @@ export function GoogleSignInButton({
       localStorage.setItem('auth_token', token);
       localStorage.setItem('user', JSON.stringify(user));
       onSuccessProp?.({ token, user });
-      window.location.href = '/#/home';
+      window.location.href = '/#' + redirectTo;
       window.location.reload();
     } catch (err) {
       console.error('[GoogleSignIn] backend error', err);

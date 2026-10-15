@@ -36,7 +36,7 @@ const SECTIONS = [
   { header: 'Minha equipe', items: [
     { to: '/plantel', icon: Users, label: 'Plantel de Atletas', permission: 'athletes:view' },
     { to: '/settings/competitions', icon: Trophy, label: 'Campeonatos', permission: 'training:edit' },
-    { to: '/settings/team', icon: User, label: 'Staff', gated: 'multi_user', permission: 'members:manage' },
+    { to: '/settings/team', icon: User, label: 'Staff', gated: 'equipe', permission: 'members:manage' },
     { to: '/settings/categories', icon: LayoutGrid, label: 'Categorias', gated: 'multi_user', permission: 'categories:manage' },
     { to: '/settings/clubs', icon: Building2, label: 'Clubes' },
   ] },

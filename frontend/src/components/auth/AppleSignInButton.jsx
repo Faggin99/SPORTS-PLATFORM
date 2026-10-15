@@ -5,7 +5,7 @@ import { nativeAppleSignIn, appleSignInAvailable } from '../../lib/nativeAppleAu
 // Botão "Continuar com a Apple" — só renderiza no app iOS nativo (a App Store
 // EXIGE oferecer Sign in with Apple quando há login Google). Segue as HIG da
 // Apple: botão preto, logo , cantos arredondados, altura >= 44pt.
-export function AppleSignInButton({ label = 'Continuar com a Apple' }) {
+export function AppleSignInButton({ label = 'Continuar com a Apple', redirectTo = '/home' }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -19,7 +19,7 @@ export function AppleSignInButton({ label = 'Continuar com a Apple' }) {
       const { token, user } = await authService.appleLogin(identityToken, name);
       localStorage.setItem('auth_token', token);
       localStorage.setItem('user', JSON.stringify(user));
-      window.location.href = '/#/home';
+      window.location.href = '/#' + redirectTo;
       window.location.reload();
     } catch (err) {
       // Cancelamento do usuário não é erro visível

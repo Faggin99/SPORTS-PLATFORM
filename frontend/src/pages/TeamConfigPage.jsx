@@ -11,6 +11,9 @@ import { Modal } from '../components/common/Modal';
 import { Button } from '../components/common/Button';
 import { MemberEditPanel } from './MemberEditPanel';
 import { ROLE_LABELS, ROLE_DEFAULTS, effectivePermissions, PERMISSION_LABELS } from '../lib/memberPermissions';
+import { notify } from '../lib/notify';
+import { isNative } from '../lib/platform';
+import { NOME_CLUBE } from '../config/planos';
 
 const ROLE_ICONS = { owner: Crown, manager: Shield, head_coach: Shield, assistant_coach: Shield, specialist: Shield, viewer: Eye };
 
@@ -21,7 +24,8 @@ export function TeamConfigPage() {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
   const plan = usePlanFeatures();
-  const canInvite = plan.multi_user;
+  const canInvite = plan.equipe;
+  const limite = plan.maxConvidados; // -1 = ilimitado
 
   const [data, setData] = useState({ owner: null, members: [], is_owner: false });
   const [categories, setCategories] = useState([]);
@@ -52,7 +56,15 @@ export function TeamConfigPage() {
 
   function startInvite() {
     if (!canInvite) {
-      navigate('/billing?reason=multi_user');
+      notify.info(plan.readOnly
+        ? 'Conta em modo só leitura: convidar membros depende de uma assinatura ativa.'
+        : 'O plano atual não permite convidar membros.');
+      return;
+    }
+    const usados = (data.members || []).length; // aceitos + pendentes
+    if (limite >= 0 && usados >= limite) {
+      notify.info(`O plano ${plan.planName || ''} inclui o responsável + ${limite} ${limite === 1 ? 'convidado' : 'convidados'}. ` +
+        `Remova um membro ou convite pendente${limite < 5 ? ` ou mude para o plano ${NOME_CLUBE}` : ''} para convidar outra pessoa.`);
       return;
     }
     setIsInviting(true);
@@ -71,13 +83,12 @@ export function TeamConfigPage() {
       }
       await load();
     } catch (err) {
-      if (err?.code === 'PLAN_REQUIRED' || err?.statusCode === 402) {
-        if (window.confirm('Essa ação requer o plano Clube. Ver planos?')) {
-          window.location.hash = '#/billing';
-        }
+      // 402: limite de membros (MEMBER_LIMIT), só leitura (READ_ONLY) ou plano.
+      if (err?.statusCode === 402) {
+        notify.error(err.message || 'Não foi possível convidar com o plano atual.');
         return;
       }
-      alert('Erro: ' + (err?.message || ''));
+      notify.error('Erro: ' + (err?.message || ''));
     }
   }
 
@@ -87,7 +98,7 @@ export function TeamConfigPage() {
       setConfirmRemove(null);
       await load();
     } catch (err) {
-      alert('Erro: ' + (err?.message || ''));
+      notify.error('Erro: ' + (err?.message || ''));
     }
   }
 
@@ -111,11 +122,16 @@ export function TeamConfigPage() {
           <p style={{ color: colors.textSecondary, fontSize: '0.875rem', marginTop: '0.25rem' }}>
             Clube: <strong>{selectedClub.name}</strong>. Convide treinadores, auxiliares e especialistas com permissões personalizadas.
           </p>
+          {data.is_owner && canInvite && limite >= 0 && (
+            <p style={{ color: colors.textSecondary, fontSize: '0.8rem', marginTop: '0.25rem' }}>
+              Plano {plan.planName || ''}: responsável + {limite} {limite === 1 ? 'convidado' : 'convidados'} ({(data.members || []).length} em uso, contando convites pendentes).
+            </p>
+          )}
         </div>
         {data.is_owner && (
           <button
             onClick={startInvite}
-            title={!canInvite ? 'Disponível no plano Clube' : undefined}
+            title={!canInvite ? 'Depende de uma assinatura ativa' : undefined}
             style={{
               display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
               padding: '0.5rem 1rem',
@@ -125,7 +141,7 @@ export function TeamConfigPage() {
             }}
           >
             {canInvite ? <UserPlus size={18} /> : <Lock size={16} />}
-            {canInvite ? 'Convidar membro' : 'Convidar (plano Clube)'}
+            {canInvite ? 'Convidar membro' : 'Convidar membro'}
           </button>
         )}
       </div>
@@ -138,16 +154,16 @@ export function TeamConfigPage() {
         }}>
           <Crown size={18} color="#f59e0b" style={{ flexShrink: 0, marginTop: 2 }} />
           <div style={{ flex: 1, fontSize: '0.85rem', color: colors.text }}>
-            <strong>Trabalhar em equipe</strong> é exclusivo do plano <strong>Clube</strong>. No Pro, apenas você acessa.
-            <div style={{ marginTop: '0.5rem' }}>
+            <strong>Conta em modo só leitura.</strong> Convidar membros depende de uma assinatura ativa.
+            {!isNative() && <div style={{ marginTop: '0.5rem' }}>
               <button onClick={() => navigate('/billing')} style={{
                 padding: '0.4rem 0.875rem', backgroundColor: '#f59e0b',
                 color: '#fff', border: 'none', borderRadius: '0.375rem',
                 fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer',
               }}>
-                Fazer upgrade pro Clube
+                Ver assinatura
               </button>
-            </div>
+            </div>}
           </div>
         </div>
       )}

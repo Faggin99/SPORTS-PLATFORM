@@ -125,7 +125,7 @@ export function SelectWorkspacePage() {
         }
       >
         <p style={{ color: colors.textSecondary, fontSize: '0.875rem', marginTop: 0 }}>
-          Cada conta nova começa no <strong>plano Free</strong>, grátis pra sempre. Você pode trocar entre suas contas a qualquer momento.
+          Cada conta tem a sua própria assinatura: a conta nova fica em modo só leitura até ser assinada. Você pode trocar entre suas contas a qualquer momento.
         </p>
         <Input
           label="Nome da conta"

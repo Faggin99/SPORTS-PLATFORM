@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Mail, Lock, User, Phone } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { Input } from '../components/common/Input';
@@ -10,8 +10,14 @@ import { AppleSignInButton } from '../components/auth/AppleSignInButton';
 
 export function RegisterPage() {
   const { colors } = useTheme();
-  const navigate = useNavigate();
-  const [form, setForm] = useState({ name: '', email: '', password: '', confirm: '', phone: '' });
+  const [params] = useSearchParams();
+  const [form, setForm] = useState({ name: '', email: params.get('email') || '', password: '', confirm: '', phone: '' });
+  // F1: não há cadastro grátis. Depois de criar a conta a pessoa vai direto escolher
+  // o plano e pagar — exceto quando veio de um convite (?redirect=/accept-invite/...).
+  const redirect = params.get('redirect');
+  const destino = (redirect && redirect.startsWith('/'))
+    ? redirect
+    : `/billing?novo=1${params.get('plano') ? `&plano=${encodeURIComponent(params.get('plano'))}` : ''}${params.get('ciclo') ? `&ciclo=${encodeURIComponent(params.get('ciclo'))}` : ''}`;
   const [accept, setAccept] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -44,8 +50,8 @@ export function RegisterPage() {
       });
       localStorage.setItem('auth_token', token);
       localStorage.setItem('user', JSON.stringify(user));
-      navigate('/home');
-      // força re-init do contexto de auth
+      // força re-init do contexto de auth já no destino
+      window.location.hash = '#' + destino;
       window.location.reload();
     } catch (err) {
       setError(err.message || 'Erro ao criar conta');
@@ -79,7 +85,7 @@ export function RegisterPage() {
         </div>
         <h1 style={{ fontSize: '1.5rem', fontWeight: 700, color: colors.text, textAlign: 'center', marginBottom: 4 }}>Criar conta</h1>
         <p style={{ fontSize: '0.875rem', color: colors.textSecondary, textAlign: 'center', marginBottom: '1.5rem' }}>
-          Comece a planejar seus treinos em minutos.
+          Para comissões técnicas, clubes e escolinhas. Depois do cadastro você escolhe o plano.
         </p>
 
         {/* Aceite dos termos — obrigatório antes de qualquer fluxo de cadastro (Google ou email).
@@ -118,13 +124,14 @@ export function RegisterPage() {
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1rem' }}>
               <GoogleSignInButton
                 label="signup_with"
+                redirectTo={destino}
                 disabled={!accept}
                 disabledMessage="Aceite os Termos e a Política de Privacidade acima antes de continuar com Google."
                 onDisabledClick={flashAcceptRequirement}
               />
             </div>
             <div style={{ marginBottom: '1rem' }}>
-              <AppleSignInButton label="Cadastrar com a Apple" />
+              <AppleSignInButton label="Cadastrar com a Apple" redirectTo={destino} />
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: '1rem', color: colors.textSecondary, fontSize: '0.75rem' }}>
               <div style={{ flex: 1, height: 1, backgroundColor: colors.border }} />

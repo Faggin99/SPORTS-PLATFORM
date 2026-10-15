@@ -5,22 +5,23 @@ import { usePlanFeatures } from '../../hooks/usePlanFeatures';
 import { isNative } from '../../lib/platform';
 import { notify } from '../../lib/notify';
 import { Button } from './Button';
+import { NOME_ENTRADA, NOME_CLUBE } from '../../config/planos';
 
-// Recursos dos planos pagos. No app NATIVO o texto é 100% neutro — a Apple
-// (3.1.3(f)) só aceita o plano Free se o app não fizer chamada pra compra
-// fora dele. Na web a gente pode apontar pros planos.
+// Recursos dos planos pagos. No app NATIVO o texto é 100% neutro (sem chamada
+// pra compra). Na web a gente pode apontar pros planos.
 export const FEATURE_META = {
   quadro_tatico: { title: 'Quadro Tático', desc: 'Monte jogadas, anime quadro a quadro e exporte em vídeo.' },
   pdf_export:    { title: 'Exportações',   desc: 'Relatórios em PDF e planilhas pra apresentar e arquivar.' },
   max_athletes:  { title: 'Mais atletas',  desc: 'Plantel sem limite de atletas.' },
-  multi_user:    { title: 'Equipe',        desc: 'Comissão técnica e categorias no mesmo clube.' },
+  multi_user:    { title: 'Categorias',    desc: 'Várias categorias e comissão técnica completa no mesmo clube.' },
+  equipe:        { title: 'Convidar membros', desc: 'Convide quem trabalha com você na comissão técnica.' },
 };
 
 export function featureLockedMessage(feature) {
   const title = FEATURE_META[feature]?.title || 'Este recurso';
   return isNative()
     ? `${title} não está incluído no seu plano atual.`
-    : `${title} está disponível nos planos Pro e Clube.`;
+    : `${title} está disponível nos planos ${NOME_ENTRADA} e ${NOME_CLUBE}.`;
 }
 
 // Hook pra gatear ações pontuais (botões de exportar etc.): retorna uma função
@@ -62,7 +63,7 @@ export function PlanGate({ feature, children }) {
         <p style={{ color: colors.textSecondary, margin: '0 0 20px', lineHeight: 1.55, fontSize: '0.95rem' }}>
           {native
             ? `${meta.title || 'Este recurso'} não está incluído no seu plano atual.`
-            : `${meta.desc ? meta.desc + ' ' : ''}Disponível nos planos Pro e Clube.`}
+            : `${meta.desc ? meta.desc + ' ' : ''}Disponível com uma assinatura ativa.`}
         </p>
         <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
           <Button variant="secondary" onClick={() => navigate('/home')}>Voltar ao início</Button>
