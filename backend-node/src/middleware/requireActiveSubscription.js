@@ -3,31 +3,47 @@ const { query } = require('../config/database');
 const { jwtSecret } = require('../config/auth');
 const billing = require('../services/billing');
 
-// Com o plano FREE permanente ninguém fica trancado pra fora: quem não tem
-// assinatura válida usa o app com as features do Free. Este middleware:
+// F1 (15/10/2026): não existe mais plano Free. Este middleware global:
 //   (1) valida o acesso à workspace pedida (X-Workspace-Id);
-//   (2) bloqueia rotas PREMIUM quando o plano efetivo não tem a feature
-//       (402 + code PLAN_REQUIRED). Limites numéricos (atletas, clubes,
-//       categorias) são checados nas próprias rotas de criação.
+//   (2) MODO SÓ LEITURA: conta sem assinatura paga (nem cortesia/admin) pode LER
+//       tudo, mas qualquer escrita (POST/PUT/PATCH/DELETE) volta 402 READ_ONLY;
+//   (3) bloqueia rotas PREMIUM quando o plano efetivo não tem a feature
+//       (402 PLAN_REQUIRED). Limites numéricos ficam nas rotas de criação.
+// Mensagens NEUTRAS (sem "assine"/URL): o app nativo mostra esse texto.
 const ALWAYS_ALLOWED_PREFIXES = [
   '/api/auth/',
   '/api/admin/',        // área admin tem auth+permissão própria
-  '/api/billing/',
+  '/api/billing/',      // assinar/renovar precisa funcionar em conta só leitura
+  '/api/conta/',        // login único Faggin
   '/api/workspaces',
   '/api/health',
-  '/api/invites/',
+  '/api/invites/',      // aceitar convite para uma equipe que paga
   '/uploads/',
 ];
 
+// Escritas permitidas mesmo em só leitura (não criam conteúdo do usuário).
+const READ_ONLY_WRITE_EXEMPT = [
+  /^\/api\/microcycles\/ensure\/?$/,             // get-or-create da semana ao abrir o planejamento
+  /^\/api\/announcements\/[^/]+\/dismiss\/?$/,   // fechar aviso do admin
+];
+
+const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+const READ_ONLY_MESSAGE =
+  'Esta conta está em modo só leitura (sem assinatura ativa). Os dados podem ser consultados, mas não é possível criar nem editar.';
+
 // Rotas exclusivas dos planos pagos → feature exigida no plano.
-// Mensagens NEUTRAS (sem "assine"/URL): o app nativo exibe esse texto e a
-// Apple só aceita o Free se não houver chamada pra compra fora do app.
 const PREMIUM_ROUTES = [
   { prefix: '/api/plays', feature: 'quadro_tatico', message: 'O Quadro Tático não está incluído no seu plano atual.' },
 ];
 
 function isAlwaysAllowed(path) {
   return ALWAYS_ALLOWED_PREFIXES.some((p) => path === p.replace(/\/$/, '') || path.startsWith(p));
+}
+
+function isWriteRequest(req) {
+  if (!WRITE_METHODS.has(String(req.method || '').toUpperCase())) return false;
+  return !READ_ONLY_WRITE_EXEMPT.some((re) => re.test(req.path));
 }
 
 function matchPremium(path) {
@@ -44,13 +60,28 @@ function extractUserId(req) {
   }
 }
 
+// Mesma regra do authMiddleware quando não vem X-Workspace-Id: a primeira
+// workspace própria; senão a primeira onde é membro aceito.
+async function defaultWorkspaceId(userId) {
+  const r = await query(
+    `SELECT id FROM (
+        SELECT w.id, 0 AS ord, w.created_at FROM workspaces w WHERE w.owner_id = $1
+        UNION ALL
+        SELECT m.workspace_id, 1 AS ord, m.accepted_at FROM workspace_members m
+         WHERE m.user_id = $1 AND m.accepted_at IS NOT NULL
+     ) t ORDER BY ord, created_at LIMIT 1`,
+    [userId]
+  );
+  return r.rows[0]?.id || null;
+}
+
 async function requireActiveSubscription(req, res, next) {
   try {
     if (!req.path.startsWith('/api')) return next();
     if (isAlwaysAllowed(req.path)) return next();
 
     const userId = extractUserId(req);
-    if (!userId) return next();
+    if (!userId) return next(); // sem token: a rota responde 401
 
     const userRes = await query('SELECT role FROM users WHERE id = $1', [userId]);
     if (userRes.rows[0]?.role === 'admin') return next();
@@ -72,18 +103,31 @@ async function requireActiveSubscription(req, res, next) {
       }
     }
 
+    const write = isWriteRequest(req);
     const premium = matchPremium(req.path);
-    if (!premium) return next(); // rota comum: Free passa
+    if (!write && !premium) return next(); // leitura comum: sempre passa
 
-    const sub = await billing.getEffectiveSubscription({ userId, workspaceId: requestedWs });
+    const workspaceId = requestedWs || await defaultWorkspaceId(userId);
+    const sub = await billing.getEffectiveSubscription({ userId, workspaceId });
     req.effectiveSubscription = sub;
+
+    if (write && sub?.read_only) {
+      return res.status(402).json({
+        error: READ_ONLY_MESSAGE,
+        code: 'READ_ONLY',
+        read_only: true,
+        plan_id: sub.plan_id,
+      });
+    }
+
+    if (!premium) return next();
     if (sub?.is_admin || sub?.plan_id === 'lifetime' || sub?.features?.[premium.feature]) return next();
 
     return res.status(402).json({
       error: premium.message,
       code: 'PLAN_REQUIRED',
       required_feature: premium.feature,
-      plan_id: sub?.plan_id || 'free',
+      plan_id: sub?.plan_id || null,
     });
   } catch (err) {
     console.error('requireActiveSubscription error:', err);
@@ -91,4 +135,6 @@ async function requireActiveSubscription(req, res, next) {
   }
 }
 
+requireActiveSubscription.READ_ONLY_MESSAGE = READ_ONLY_MESSAGE;
+requireActiveSubscription._isWriteRequest = isWriteRequest;
 module.exports = requireActiveSubscription;

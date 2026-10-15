@@ -4,7 +4,8 @@
 
 const { query } = require('../config/database');
 const { ADDON_PRICES, ADDON_MAX, computeRecurringAmountCents } = require('../config/addons');
-const { isLifetime } = require('../config/specialUsers');
+const { isAdmin, isLifetime } = require('../config/specialUsers');
+const { nomePlano, isPlanoEntrada, config: planosCfg } = require('../config/planos');
 
 let mpClient = null;
 let PreApproval = null;
@@ -151,7 +152,7 @@ async function getActiveSubscription(userId) {
      WHERE s.user_id = $1
        AND (s.status IN ('trialing','active','past_due','paused')
             OR (s.cancel_at_period_end = TRUE AND s.current_period_end > NOW()))
-     ORDER BY (s.plan_id = 'lifetime') DESC, s.created_at DESC LIMIT 1`,
+     ORDER BY (s.plan_id = 'lifetime') DESC, (s.plan_id = 'free') ASC, s.created_at DESC LIMIT 1`,
     [userId]
   );
   const sub = r.rows[0];
@@ -192,7 +193,7 @@ async function getSubscriptionForWorkspace(workspaceId) {
      WHERE s.workspace_id = $1
        AND (s.status IN ('trialing','active','past_due','paused')
             OR (s.cancel_at_period_end = TRUE AND s.current_period_end > NOW()))
-     ORDER BY (s.plan_id = 'lifetime') DESC, s.created_at DESC LIMIT 1`,
+     ORDER BY (s.plan_id = 'lifetime') DESC, (s.plan_id = 'free') ASC, s.created_at DESC LIMIT 1`,
     [workspaceId]
   );
   const sub = r.rows[0];
@@ -247,7 +248,7 @@ async function startTrial(userId, planId = 'pro', days = 30) {
 
 // Cria preapproval (assinatura recorrente) no Mercado Pago.
 // Retorna { init_point } — URL pra redirecionar o usuário.
-async function createCheckout({ userId, planId, payerEmail, workspaceId = null }) {
+async function createCheckout({ userId, planId, payerEmail, workspaceId = null, metadata = null }) {
   if (!isEnabled()) {
     const err = new Error('Payment provider not configured');
     err.statusCode = 501;
@@ -282,7 +283,7 @@ async function createCheckout({ userId, planId, payerEmail, workspaceId = null }
   const baseUrl = process.env.APP_BASE_URL || 'https://app.tactiplan.faggin.com.br';
   const result = await paPlan.create({
     body: {
-      reason: `${plan.name} — TactiPlan`,
+      reason: `${nomePlano(plan.id, plan.name)} — TactiPlan`,
       external_reference: `${userId}|${planId}`,
       auto_recurring: {
         frequency: plan.interval === 'yearly' ? 12 : 1,
@@ -296,10 +297,10 @@ async function createCheckout({ userId, planId, payerEmail, workspaceId = null }
 
   // Sub nasce 'pending' guardando o id do PLANO (o preapproval real vem depois).
   const ins = await query(
-    `INSERT INTO subscriptions (user_id, workspace_id, plan_id, status, mp_preapproval_plan_id, mp_status)
-     VALUES ($1, $2, $3, 'pending', $4, $5)
+    `INSERT INTO subscriptions (user_id, workspace_id, plan_id, status, mp_preapproval_plan_id, mp_status, metadata)
+     VALUES ($1, $2, $3, 'pending', $4, $5, COALESCE($6::jsonb, '{}'::jsonb))
      RETURNING id`,
-    [userId, workspaceId, planId, result.id, result.status]
+    [userId, workspaceId, planId, result.id, result.status, metadata ? JSON.stringify(metadata) : null]
   );
 
   await logBillingEvent({
@@ -648,7 +649,7 @@ async function setAddons(userId, workspaceId, { extraClubs, extraCategories }) {
 
   const features = sub.features || {};
   if (sub.plan_id === 'free') {
-    const err = new Error('Add-ons estão disponíveis nos planos Pro e Clube.');
+    const err = new Error('Add-ons estão disponíveis apenas em assinaturas pagas.');
     err.statusCode = 402; throw err;
   }
   const isClube = features.multi_user === true;
@@ -711,19 +712,38 @@ async function setAddons(userId, workspaceId, { extraClubs, extraCategories }) {
 }
 
 // -----------------------------------------------------------------------------
-// Plano Free permanente + "assinatura efetiva"
+// F1 (15/10/2026): FIM DO PLANO FREE + modo SÓ LEITURA
 //
-// Ninguém fica mais trancado pra fora: se a assinatura/trial caducou (ou nunca
-// existiu), o acesso cai no plano FREE (features limitadas — sem quadro tático,
-// sem exportações, 30 atletas). Exigência da Apple (3.1.3(f)): o app precisa
-// ser utilizável sem pagar e sem chamada pra compra dentro dele.
+// Acesso de uma workspace (decidido pelo DONO dela, não por quem pede):
+//   1. admin (role/ADMIN_EMAILS)                    → ilimitado ("Admin")
+//   2. cortesia permanente (users.cortesia_permanente ou LIFETIME_EMAILS)
+//                                                   → ilimitado, nunca expira
+//   3. assinatura paga usável (MP, Apple, trial vigente, lifetime) → o plano dela
+//   4. qualquer outro caso (sem assinatura, Free antigo, vencida)
+//                                                   → SÓ LEITURA (plan_id 'inactive')
+// O middleware requireActiveSubscription recusa escrita com 402 READ_ONLY.
 // -----------------------------------------------------------------------------
 const FREE_PLAN_ID = 'free';
+const INACTIVE_PLAN_ID = 'inactive';
+
+const UNLIMITED_FEATURES = Object.freeze({
+  max_clubs: -1, max_athletes: -1, max_categories: -1, multi_user: true, max_coaches: 999,
+  equipe: true, max_convidados: -1, quadro_tatico: true, pdf_export: true,
+  stats_completas: true, monthly_theme: true,
+});
+
+// Só leitura: vê tudo (inclusive o quadro tático salvo), não cria nem edita
+// (o servidor bloqueia a escrita). Exportações e convites ficam desligados.
+const READ_ONLY_FEATURES = Object.freeze({
+  read_only: true, max_clubs: 1, max_categories: 1, max_athletes: -1, multi_user: false,
+  equipe: false, max_convidados: 0, quadro_tatico: true, pdf_export: false, stats_completas: true,
+});
 
 // Uma sub "usável" é a que ainda dá direito às features do SEU plano.
 function isSubscriptionUsable(sub) {
   if (!sub) return false;
   if (sub.is_admin || sub.plan_id === 'admin' || sub.plan_id === 'lifetime') return true;
+  if (sub.plan_id === FREE_PLAN_ID) return false; // o Free acabou
   const now = Date.now();
   if (sub.status === 'trialing') {
     return !sub.trial_ends_at || new Date(sub.trial_ends_at).getTime() >= now;
@@ -734,42 +754,109 @@ function isSubscriptionUsable(sub) {
   return isSubscriptionActive(sub);
 }
 
-// Sub efetiva da dupla (user, workspace): a real se usável; senão um objeto
-// Free sintético, carregando em `lapsed` a sub que caducou (pra UI explicar).
-async function getEffectiveSubscription({ userId, workspaceId = null }) {
-  let sub = null;
-  if (workspaceId) sub = await getSubscriptionForWorkspace(workspaceId);
-  if (!sub) sub = await getActiveSubscription(userId);
-  if (sub && isSubscriptionUsable(sub)) {
-    sub.is_free = sub.plan_id === FREE_PLAN_ID;
-    return sub;
+async function getWorkspaceOwnerId(workspaceId) {
+  if (!workspaceId) return null;
+  const r = await query('SELECT owner_id FROM workspaces WHERE id = $1', [workspaceId]);
+  return r.rows[0]?.owner_id || null;
+}
+
+// Admin ou cortesia do usuário (normalmente o DONO da workspace).
+// → { tipo: 'admin' } | { tipo: 'cortesia', motivo } | null
+async function getCortesia(userId) {
+  if (!userId) return null;
+  let u = null;
+  try {
+    u = (await query(
+      'SELECT email, role, cortesia_permanente, cortesia_motivo FROM users WHERE id = $1',
+      [userId]
+    )).rows[0];
+  } catch (_) {
+    // Migration 048 ainda não aplicada (coluna inexistente): segue sem a flag.
+    u = (await query('SELECT email, role FROM users WHERE id = $1', [userId])).rows[0];
   }
-  const free = await getPlan(FREE_PLAN_ID);
+  if (!u) return null;
+  if (u.role === 'admin' || isAdmin?.(u.email)) return { tipo: 'admin' };
+  if (u.cortesia_permanente === true) return { tipo: 'cortesia', motivo: u.cortesia_motivo || 'cortesia' };
+  if (isLifetime?.(u.email)) return { tipo: 'cortesia', motivo: 'LIFETIME_EMAILS' };
+  return null;
+}
+
+function adminSub() {
   return {
-    plan_id: FREE_PLAN_ID,
-    plan_name: free?.name || 'Free',
-    status: 'active',
-    price_cents: 0,
-    interval: 'monthly',
-    features: free?.features || { max_clubs: 1, max_categories: 1, max_athletes: 30 },
-    is_free: true,
-    is_fallback: true,
-    user_id: userId,
-    workspace_id: workspaceId || null,
-    lapsed: sub ? {
-      plan_id: sub.plan_id,
-      plan_name: sub.plan_name,
-      status: sub.status,
-      trial_ends_at: sub.trial_ends_at,
-      current_period_end: sub.current_period_end,
-      cancel_at_period_end: sub.cancel_at_period_end,
-    } : null,
+    plan_id: 'admin', plan_name: 'Admin', status: 'active', is_admin: true,
+    is_free: false, read_only: false,
+    features: { ...UNLIMITED_FEATURES, admin: true },
   };
 }
 
-// Assinatura inicial no cadastro (email/Google/Apple):
-//   admin → nada; lista lifetime → vitalícia; SIGNUP_TRIAL_DAYS>0 → trial do
-//   Pro; padrão → Free permanente.
+// Sub efetiva da dupla (user, workspace).
+async function getEffectiveSubscription({ userId, workspaceId = null }) {
+  const ownerId = (workspaceId && await getWorkspaceOwnerId(workspaceId)) || userId;
+
+  const cortesia = await getCortesia(ownerId);
+  if (cortesia?.tipo === 'admin') return adminSub();
+  if (cortesia) {
+    return {
+      plan_id: 'lifetime', plan_name: 'Cortesia', status: 'active',
+      is_cortesia: true, cortesia_motivo: cortesia.motivo,
+      is_free: false, read_only: false,
+      user_id: ownerId, workspace_id: workspaceId || null,
+      features: { ...UNLIMITED_FEATURES, lifetime: true },
+    };
+  }
+
+  let sub = null;
+  if (workspaceId) sub = await getSubscriptionForWorkspace(workspaceId);
+  if (!sub) sub = await getActiveSubscription(ownerId);
+  if (sub && isSubscriptionUsable(sub)) {
+    if (sub.is_admin) return adminSub();
+    sub.plan_name = nomePlano(sub.plan_id, sub.plan_name);
+    sub.is_free = false;
+    sub.read_only = false;
+    return sub;
+  }
+
+  const lapsed = (sub && sub.plan_id !== FREE_PLAN_ID) ? {
+    plan_id: sub.plan_id,
+    plan_name: nomePlano(sub.plan_id, sub.plan_name),
+    status: sub.status,
+    trial_ends_at: sub.trial_ends_at,
+    current_period_end: sub.current_period_end,
+    cancel_at_period_end: sub.cancel_at_period_end,
+  } : null;
+  return {
+    plan_id: INACTIVE_PLAN_ID,
+    plan_name: 'Sem assinatura ativa',
+    status: 'inactive',
+    price_cents: 0,
+    interval: null,
+    features: { ...READ_ONLY_FEATURES },
+    read_only: true,
+    is_free: false,
+    is_fallback: true,
+    is_owner: ownerId === userId,
+    user_id: userId,
+    workspace_id: workspaceId || null,
+    lapsed,
+  };
+}
+
+// Quantos CONVIDADOS (além do dono) a sub permite. -1 = ilimitado, 0 = nenhum.
+function limiteConvidados(sub) {
+  if (!sub) return 0;
+  if (sub.is_admin || sub.plan_id === 'admin' || sub.plan_id === 'lifetime') return -1;
+  if (sub.read_only) return 0;
+  const f = sub.features || {};
+  if (typeof f.max_convidados === 'number') return f.max_convidados;
+  // Antes da migration 048: entrada pelo arquivo de planos; Clube por max_coaches.
+  if (isPlanoEntrada(sub.plan_id)) return planosCfg.entrada.max_convidados;
+  if (f.multi_user) return typeof f.max_coaches === 'number' ? f.max_coaches : planosCfg.clube.max_convidados;
+  return 0;
+}
+
+// Assinatura inicial no cadastro (email/Google/Apple). Sem plano grátis:
+//   admin → nada; LIFETIME_EMAILS → vitalícia; SIGNUP_TRIAL_DAYS>0 → avaliação
+//   do plano de entrada; padrão → NADA (conta fica em só leitura até assinar).
 async function createInitialSubscription({ userId, workspaceId, email, role }) {
   if (role === 'admin') return { kind: 'admin', trialDays: 0 };
   if (isLifetime?.(email)) {
@@ -790,12 +877,7 @@ async function createInitialSubscription({ userId, workspaceId, email, role }) {
     );
     return { kind: 'trial', trialDays };
   }
-  await query(
-    `INSERT INTO subscriptions (user_id, workspace_id, plan_id, status, current_period_start)
-     VALUES ($1, $2, $3, 'active', now())`,
-    [userId, workspaceId, FREE_PLAN_ID]
-  );
-  return { kind: 'free', trialDays: 0 };
+  return { kind: 'none', trialDays: 0 };
 }
 
 // -----------------------------------------------------------------------------
@@ -885,7 +967,7 @@ async function applyRevenueCatEvent(event) {
       );
       return { handled: true, action: 'updated', plan: planId };
     }
-    // Cancela as outras ativas (inclusive Free e Mercado Pago — evita cobrança dupla)
+    // Cancela as outras ativas (inclusive Free antigo e Mercado Pago — evita cobrança dupla)
     await _hardCancelActiveSubsForUser(userId, `iap_${type.toLowerCase()}`);
     const ws = (await query('SELECT id FROM workspaces WHERE owner_id = $1 ORDER BY created_at ASC LIMIT 1', [userId])).rows[0]?.id || null;
     await query(
@@ -917,7 +999,7 @@ async function applyRevenueCatEvent(event) {
        WHERE id = $1`,
       [existing.id, periodEnd]
     );
-    return { handled: true, action: 'expired' }; // usuário cai no Free automaticamente
+    return { handled: true, action: 'expired' }; // conta passa a só leitura automaticamente
   }
   if (type === 'BILLING_ISSUE') {
     await query(`UPDATE subscriptions SET status = 'past_due', updated_at = now() WHERE id = $1`, [existing.id]);
@@ -930,7 +1012,11 @@ module.exports = {
   applyRevenueCatEvent,
   _rcSandboxAllowed: rcSandboxAllowed,
   FREE_PLAN_ID,
+  INACTIVE_PLAN_ID,
   isSubscriptionUsable,
+  getCortesia,
+  getWorkspaceOwnerId,
+  limiteConvidados,
   getEffectiveSubscription,
   createInitialSubscription,
   isEnabled,
