@@ -71,23 +71,20 @@ Resumo: /api/auth/*, /api/clubs/*, /api/athletes/*, /api/microcycles/*,
   via UPDATE faz o futuro sync incremental ignorar. (Hoje só dedup; sync cron diário não
   implementado — sai num sprint futuro se a feature decolar.)
 
-## Billing (Assinaturas)
-- Planos ativos (tabela `plans`): `free` (R$ 0, migration 046), `pro`/`pro_annual`, `clube`/`clube_annual`, `lifetime`
-- **Plano Free permanente** (ago/2026, exigência Apple 3.1.3(f)): planejamento, jogos, estatísticas,
-  1 clube, 1 categoria, `max_athletes=30`; SEM `quadro_tatico`, SEM `pdf_export`, SEM `multi_user`.
-  Flags no JSON `plans.features` — ajustar lá, sem deploy.
-- **Assinatura efetiva**: `billing.getEffectiveSubscription()` — se a sub real caducou (trial vencido,
-  cancelada, expirada) o usuário cai no Free (objeto sintético com `is_fallback` + `lapsed`). Ninguém fica
-  mais trancado pra fora; `requireActiveSubscription` só bloqueia rotas PREMIUM (`/api/plays` → 402
-  `PLAN_REQUIRED`). Limites numéricos ficam nas rotas de criação (athletes/clubs/categories).
-- Novos cadastros entram direto no Free (`billing.createInitialSubscription`). Env `SIGNUP_TRIAL_DAYS`
-  (default 0) liga de volta um trial do Pro que cai no Free ao terminar.
-- Frontend: `usePlanFeatures().has('quadro_tatico'|'pdf_export')`, `<PlanGate feature>` (rota do tático),
-  `useFeatureGuard()` (exportações). No app NATIVO as mensagens são neutras (sem "assine"/URL).
-- Usuarios admin (role='admin') tem acesso ilimitado sem assinatura
-- Lista de emails admin/vitalicio em backend-node/src/config/specialUsers.js
-- Integracao Mercado Pago (Preapproval / Assinaturas recorrentes)
-- Webhook em POST /api/billing/webhook valida assinatura HMAC SHA-256
+## Billing (Assinaturas) — F1 (15/10/2026): SEM plano Free
+- Planos vendidos: `pro`/`pro_annual` (nome de exibição "Comissão", dono + 1 convidado) e `clube`/`clube_annual`
+  (dono + 5 convidados, até 5 categorias). Nomes em `shared/planos.json` (fonte única back+front); ids internos não mudam.
+- `billing.getEffectiveSubscription({userId, workspaceId})` decide pelo DONO da workspace: admin → cortesia
+  (`users.cortesia_permanente` ou `LIFETIME_EMAILS`) → assinatura paga usável → senão SÓ LEITURA
+  (`plan_id='inactive'`, `read_only=true`). O plano `free` não dá mais acesso.
+- `requireActiveSubscription`: escrita em conta só leitura → 402 `READ_ONLY` (exceções: auth, conta, billing, admin,
+  invites, workspaces, `microcycles/ensure`, dismiss de aviso). `/api/plays` segue com 402 `PLAN_REQUIRED` por feature.
+- Convites: limite por `billing.limiteConvidados` (402 `MEMBER_LIMIT`), no convite e no aceite.
+- Checkout exige `conta_nome`, `responsavel_nome`, `responsavel_documento` (CPF/CNPJ com DV) → `workspaces.responsavel_*`.
+- Cadastro não cria assinatura (env `SIGNUP_TRIAL_DAYS>0` ainda liga avaliação do plano de entrada).
+- Admin: `POST /api/admin/users/:id/cortesia {ativo, motivo}`. Virada: `backend-node/scripts/virada-f1.js` (dry-run padrão).
+- Integracao Mercado Pago (Preapproval / Assinaturas recorrentes); webhook `POST /api/billing/webhook` (HMAC SHA-256).
+  IAP iOS via RevenueCat (`/api/billing/revenuecat/webhook`, SANDBOX ignorado salvo env).
 
 ## Status atual da migracao
 Frontend totalmente migrado para a API Node.js. Sem referencias ativas ao Supabase.
