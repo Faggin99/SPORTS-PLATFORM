@@ -54,7 +54,7 @@ test('Free antigo ativo não dá mais escrita', async () => {
   assert.strictEqual(res.body.code, 'READ_ONLY');
 });
 
-test('assinatura paga ativa (Comissão = id pro) escreve normalmente', async () => {
+test('assinatura paga ativa (Essencial = id pro) escreve normalmente', async () => {
   cenario({ subs: [{ plan_id: 'free', status: 'active' }, { plan_id: 'pro', status: 'active', current_period_end: new Date(Date.now() + 30 * dia).toISOString() }] });
   assert.strictEqual((await escrever()).status, 200);
 });

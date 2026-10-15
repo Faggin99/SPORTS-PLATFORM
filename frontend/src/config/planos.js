@@ -1,5 +1,5 @@
 // Nomes de exibição dos planos — fonte única em shared/planos.json (também usada pelo backend).
-// Para trocar o nome "Comissão": edite shared/planos.json, rode o build e reinicie o sports-api.
+// Para trocar o nome "Essencial": edite shared/planos.json, rode o build e reinicie o sports-api.
 import planos from '../../../shared/planos.json';
 
 export const NOME_ENTRADA = planos.entrada.nome;
@@ -16,7 +16,7 @@ export function isPlanoEntrada(planId) {
   return ENTRADA_IDS.includes(String(planId || ''));
 }
 
-// "Comissão Mensal", "Clube Anual"… (ids internos pro/clube não mudam).
+// "Essencial Mensal", "Clube Anual"… (ids internos pro/clube não mudam).
 export function nomePlano(planId, fallback = '') {
   const id = String(planId || '');
   const anual = id.endsWith('_annual');

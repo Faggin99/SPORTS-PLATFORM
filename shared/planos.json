@@ -1,9 +1,9 @@
 {
-  "_leia": "Fonte ÚNICA dos nomes de exibição dos planos (backend + web). Trocar o nome aqui, rodar o build do front e reiniciar o sports-api. A landing (/var/www/sites/tactiplan-lp-nova) é estática: trocar lá também (grep 'Comissão'). Os ids internos (pro/pro_annual/clube/clube_annual) NÃO mudam: MP, RevenueCat e webhooks dependem deles.",
+  "_leia": "Fonte ÚNICA dos nomes de exibição dos planos (backend + web). Trocar o nome aqui, rodar o build do front e reiniciar o sports-api. A landing (/var/www/sites/tactiplan-lp-nova) é estática: trocar lá também (grep 'Essencial'). Os ids internos (pro/pro_annual/clube/clube_annual) NÃO mudam: MP, RevenueCat e webhooks dependem deles.",
   "entrada": {
     "ids": ["pro", "pro_annual"],
-    "nome": "Comissão",
-    "resumo": "Para a comissão técnica de um time: o responsável + 1 convidado",
+    "nome": "Essencial",
+    "resumo": "Para um time: 1 clube, 1 categoria e 1 convite de acesso",
     "max_convidados": 1
   },
   "clube": {

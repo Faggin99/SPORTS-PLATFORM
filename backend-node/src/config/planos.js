@@ -4,7 +4,7 @@
 const path = require('path');
 
 const PADRAO = {
-  entrada: { ids: ['pro', 'pro_annual'], nome: 'Comissão', max_convidados: 1 },
+  entrada: { ids: ['pro', 'pro_annual'], nome: 'Essencial', max_convidados: 1 },
   clube: { ids: ['clube', 'clube_annual'], nome: 'Clube', max_convidados: 5 },
   site_planos_url: 'https://tactiplan.faggin.com.br/#planos',
 };
@@ -19,7 +19,7 @@ try {
 const NOME_ENTRADA = cfg.entrada.nome;
 const NOME_CLUBE = cfg.clube.nome;
 
-// Nome de exibição de um plano a partir do id ("Comissão Mensal", "Clube Anual"...).
+// Nome de exibição de um plano a partir do id ("Essencial Mensal", "Clube Anual"...).
 // Planos fora do mapa (lifetime, free, admin) mantêm o nome do banco.
 function nomePlano(planId, nomeDoBanco = null) {
   const id = String(planId || '');

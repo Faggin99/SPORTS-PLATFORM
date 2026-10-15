@@ -135,7 +135,7 @@ test('sem cortesia nem assinatura: só leitura, com nome de exibição na assina
   assert.strictEqual(sub.lapsed.plan_name, `${NOME_ENTRADA} Mensal`);
 });
 
-test('assinatura paga expõe o nome de exibição (Comissão Mensal/Anual)', async () => {
+test('assinatura paga expõe o nome de exibição (Essencial Mensal/Anual)', async () => {
   cenario({ plan: 'pro_annual' });
   const sub = await billing.getEffectiveSubscription({ userId: DONO, workspaceId: WS });
   assert.strictEqual(sub.plan_name, `${NOME_ENTRADA} Anual`);
